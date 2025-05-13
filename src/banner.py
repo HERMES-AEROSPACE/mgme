@@ -9,7 +9,7 @@ def print_banner():
     ╚═╝     ╚═╝ ╚═════╝ ╚═╝     ╚═╝╚══════╝
     """
     print("\n" + banner)  # Add extra newline at start
-    print("\tMaximum Entropy Group Method")  # Indent with tab
+    print("\tMulti-Group Maximum Entropy: Translational Non-Equilibrium")  # Indent with tab
     print("\t" + "=" * 40)  # Indent the separator
     print()  # Add blank line at end
     print('Author: Anthony Chang')
