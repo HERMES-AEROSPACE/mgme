@@ -36,26 +36,44 @@ def run_simulation():
     mu = calculate_group_moments(f0, cx, cy, cz, cx_vec, cy_vec, cz_vec)
 
     # Initialize parameter lists
-    Ak_list = np.zeros((COLLISION_PARAMS['n_t'] + 1, GROUP_PARAMS['num_groups']))
-    bk_list = np.zeros((COLLISION_PARAMS['n_t'] + 1, GROUP_PARAMS['num_groups']))
-    wk_list = np.zeros((COLLISION_PARAMS['n_t'] + 1, GROUP_PARAMS['num_groups']))
+    Ak_list = np.zeros((COLLISION_PARAMS['n_t'] + 1, GROUP_PARAMS['num_groups_cx'], GROUP_PARAMS['num_groups_cy'], GROUP_PARAMS['num_groups_cz']))
+    bk_list = np.zeros((COLLISION_PARAMS['n_t'] + 1, GROUP_PARAMS['num_groups_cx'], GROUP_PARAMS['num_groups_cy'], GROUP_PARAMS['num_groups_cz']))
+    wxk_list = np.zeros((COLLISION_PARAMS['n_t'] + 1, GROUP_PARAMS['num_groups_cx'], GROUP_PARAMS['num_groups_cy'], GROUP_PARAMS['num_groups_cz']))
+    wyk_list = np.zeros((COLLISION_PARAMS['n_t'] + 1, GROUP_PARAMS['num_groups_cx'], GROUP_PARAMS['num_groups_cy'], GROUP_PARAMS['num_groups_cz']))
+    wzk_list = np.zeros((COLLISION_PARAMS['n_t'] + 1, GROUP_PARAMS['num_groups_cx'], GROUP_PARAMS['num_groups_cy'], GROUP_PARAMS['num_groups_cz']))
 
     # Create table for moments
     table = create_table(beta_list, w_list)
 
-    b_guess = np.zeros(GROUP_PARAMS['num_groups'])
-    w_guess = np.zeros(GROUP_PARAMS['num_groups'])
-    for i in range(0, GROUP_PARAMS['num_groups']):
-        if np.abs(mu[i][1]) < 1e-8:
-            b_guess[i] = 1.0
-            w_guess[i] = 0.0
-        else:
-            b_guess[i], w_guess[i] = solve_equation(mu[i, 1] / mu[i, 0], mu[i, 2] / mu[i, 0], beta_list, w_list, table[i, 0], table[i, 1])
+    b_guess = np.zeros((GROUP_PARAMS['num_groups_cx'], GROUP_PARAMS['num_groups_cy'], GROUP_PARAMS['num_groups_cz']))
+    wx_guess = np.zeros((GROUP_PARAMS['num_groups_cx'], GROUP_PARAMS['num_groups_cy'], GROUP_PARAMS['num_groups_cz']))
+    wy_guess = np.zeros((GROUP_PARAMS['num_groups_cx'], GROUP_PARAMS['num_groups_cy'], GROUP_PARAMS['num_groups_cz']))
+    wz_guess = np.zeros((GROUP_PARAMS['num_groups_cx'], GROUP_PARAMS['num_groups_cy'], GROUP_PARAMS['num_groups_cz']))
 
-    A, b, w = invert(mu, b_guess, w_guess)
+    for i in range(0, GROUP_PARAMS['num_groups_cx']):
+        for j in range(0, GROUP_PARAMS['num_groups_cy']):
+            for k in range(0, GROUP_PARAMS['num_groups_cz']):
+                if np.abs(mu[i, j, k, 1]) < 1e-8:
+                    b_guess[i, j, k] = 1.0
+                    wx_guess[i, j, k] = 0.0
+                if np.abs(mu[i, j, k, 2]) < 1e-8:
+                    b_guess[i, j, k] = 1.0
+                    wy_guess[i, j, k] = 0.0
+                if np.abs(mu[i, j, k, 3]) < 1e-8:
+                    b_guess[i, j, k] = 1.0
+                    wz_guess[i, j, k] = 0.0
+                else:
+                    b_guess[i, j, k], wx_guess[i, j, k] = solve_equation(mu[i, j, k, 1] / mu[i, j, k, 0], mu[i, j, k, 4] / mu[i, j, k, 0], beta_list, w_list, table[i, j, k, 0], table[i, j, k, 3])
+                    b_guess[i, j, k], wy_guess[i, j, k] = solve_equation(mu[i, j, k, 2] / mu[i, j, k, 0], mu[i, j, k, 4] / mu[i, j, k, 0], beta_list, w_list, table[i, j, k, 1], table[i, j, k, 3])
+                    b_guess[i, j, k], wz_guess[i, j, k] = solve_equation(mu[i, j, k, 3] / mu[i, j, k, 0], mu[i, j, k, 4] / mu[i, j, k, 0], beta_list, w_list, table[i, j, k, 2], table[i, j, k, 3])
+
+    A, b, wx, wy, wz = invert(mu, b_guess, wx_guess, wy_guess, wz_guess)
     Ak_list[0] = A
     bk_list[0] = b
-    wk_list[0] = w
+    wxk_list[0] = wx
+    wyk_list[0] = wy
+    wzk_list[0] = wz
+    print(Ak_list[0], bk_list[0], wxk_list[0], wyk_list[0], wzk_list[0])
 
     # Save initial state
     # save_simulation_data(0, Ak_list, bk_list, wk_list)

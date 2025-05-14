@@ -4,7 +4,7 @@ from scipy import optimize
 from .config import GROUP_PARAMS, LOOKUP_TABLE
 
 
-def moments(beta, w, ci, cf):
+def moments(beta, w, ci_cx, cf_cx, ci_cy, cf_cy, ci_cz, cf_cz):
     """
     Calculate moments for given beta and w parameters.
     
@@ -17,25 +17,47 @@ def moments(beta, w, ci, cf):
     Returns:
         Tuple of (I1x + w*I0x)/I0x and (I2x + I0x*w**2 + 2*w*I1x + I0x/beta)/I0x
     """
-    I0x = np.sqrt(np.pi/(4 * beta)) * (special.erf(np.sqrt(beta) * (cf - w)) - special.erf(np.sqrt(beta) * (ci - w)))
-    I1x = (np.exp(-beta * (ci - w)**2) - np.exp(-beta * (cf - w)**2))/(2 * beta)
-    I2x = -np.sqrt(np.pi)/(2 * np.sqrt(beta)) * \
-        ((np.exp(-beta * (cf - w)**2) * (cf - w))/np.sqrt(np.pi * beta) - (np.exp(-beta * (ci - w)**2) * (ci - w))/np.sqrt(np.pi * beta)) + \
-            np.sqrt(np.pi)/(4 * np.sqrt(beta**3)) * (special.erf(np.sqrt(beta) * (cf - w)) - special.erf(np.sqrt(beta) * (ci - w)))
+    I0x = np.sqrt(np.pi / (4 * beta)) * (special.erf(np.sqrt(beta) * (cf_cx - w)) - special.erf(np.sqrt(beta) * (ci_cx - w)))
+    I0y = np.sqrt(np.pi / (4 * beta)) * (special.erf(np.sqrt(beta) * (cf_cy - w)) - special.erf(np.sqrt(beta) * (ci_cy - w)))
+    I0z = np.sqrt(np.pi / (4 * beta)) * (special.erf(np.sqrt(beta) * (cf_cz - w)) - special.erf(np.sqrt(beta) * (ci_cz - w)))
+
+    I1x = (np.exp(-beta * (ci_cx - w)**2) - np.exp(-beta * (cf_cx - w)**2)) / (2 * beta)
+    I1y = (np.exp(-beta * (ci_cy - w)**2) - np.exp(-beta * (cf_cy - w)**2)) / (2 * beta)
+    I1z = (np.exp(-beta * (ci_cz - w)**2) - np.exp(-beta * (cf_cz - w)**2)) / (2 * beta)
+
+    I2x = -np.sqrt(np.pi) / (2 * np.sqrt(beta)) * \
+        ((np.exp(-beta * (cf_cx - w)**2) * (cf_cx - w))/np.sqrt(np.pi * beta) - (np.exp(-beta * (ci_cx - w)**2) * (ci_cx - w))/np.sqrt(np.pi * beta)) + \
+            np.sqrt(np.pi)/(4 * np.sqrt(beta**3)) * (special.erf(np.sqrt(beta) * (cf_cx - w)) - special.erf(np.sqrt(beta) * (ci_cx - w)))
+    I2y = -np.sqrt(np.pi) / (2 * np.sqrt(beta)) * \
+        ((np.exp(-beta * (cf_cy - w)**2) * (cf_cy - w))/np.sqrt(np.pi * beta) - (np.exp(-beta * (ci_cy - w)**2) * (ci_cy - w))/np.sqrt(np.pi * beta)) + \
+            np.sqrt(np.pi)/(4 * np.sqrt(beta**3)) * (special.erf(np.sqrt(beta) * (cf_cy - w)) - special.erf(np.sqrt(beta) * (ci_cy - w)))
+    I2z = -np.sqrt(np.pi) / (2 * np.sqrt(beta)) * \
+        ((np.exp(-beta * (cf_cz - w)**2) * (cf_cz - w))/np.sqrt(np.pi * beta) - (np.exp(-beta * (ci_cz - w)**2) * (ci_cz - w))/np.sqrt(np.pi * beta)) + \
+            np.sqrt(np.pi)/(4 * np.sqrt(beta**3)) * (special.erf(np.sqrt(beta) * (cf_cz - w)) - special.erf(np.sqrt(beta) * (ci_cz - w)))
     
     if I0x.size != 1:
         for i, row in enumerate(I0x):
             row = np.where(row > 1e-12, row, np.nan)
             I0x[i, :] = row
+    
+    if I0y.size != 1:
+        for i, row in enumerate(I0y):
+            row = np.where(row > 1e-12, row, np.nan)
+            I0y[i, :] = row
 
-    return [(I1x + w*I0x)/I0x, (I2x + I0x*w**2 + 2*w*I1x + I0x/beta)/I0x]
+    if I0z.size != 1:
+        for i, row in enumerate(I0z):
+            row = np.where(row > 1e-12, row, np.nan)
+            I0z[i, :] = row
 
-def moment_eq(x, u, e, ci, cf):
+    return [(I1x + w*I0x) / I0x, (I1y + w*I0y) / I0y, (I1z + w*I0z) / I0z, (I2x**2 + 2 * w * I1x + w**2 * I0x) / I0x + (I2y**2 + 2 * w * I1y + w**2 * I0y) / I0y + (I2z**2 + 2 * w * I1z + w**2 * I0z) / I0z]
+
+def moment_eq(x, ux, uy, uz, e, ci_cx, cf_cx, ci_cy, cf_cy, ci_cz, cf_cz):
     """
     Moment equation for solving distribution parameters.
     
     Args:
-        x: Array containing [beta, w]
+        x: Array containing [beta, wx, wy, wz]
         u: Target velocity
         e: Target energy
         ci: Lower bound
@@ -44,13 +66,25 @@ def moment_eq(x, u, e, ci, cf):
     Returns:
         Array of moment equations
     """
-    I0x = np.sqrt(np.pi/(4 * x[0])) * (special.erf(np.sqrt(x[0]) * (cf - x[1])) - special.erf(np.sqrt(x[0]) * (ci - x[1])))
-    I1x = (np.exp(-x[0] * (ci - x[1])**2) - np.exp(-x[0] * (cf - x[1])**2))/(2 * x[0])
-    I2x = -np.sqrt(np.pi)/(2 * np.sqrt(x[0])) * \
-        ((np.exp(-x[0] * (cf - x[1])**2) * (cf - x[1]))/np.sqrt(np.pi * x[0]) - (np.exp(-x[0] * (ci - x[1])**2) * (ci - x[1]))/np.sqrt(np.pi * x[0])) + \
-            np.sqrt(np.pi)/(4 * np.sqrt(x[0]**3)) * (special.erf(np.sqrt(x[0]) * (cf - x[1])) - special.erf(np.sqrt(x[0]) * (ci - x[1])))
+    I0x = np.sqrt(np.pi / (4 * x[0])) * (special.erf(np.sqrt(x[0]) * (cf_cx - x[1])) - special.erf(np.sqrt(x[0]) * (ci_cx - x[1])))
+    I0y = np.sqrt(np.pi / (4 * x[0])) * (special.erf(np.sqrt(x[0]) * (cf_cy - x[2])) - special.erf(np.sqrt(x[0]) * (ci_cy - x[2])))
+    I0z = np.sqrt(np.pi / (4 * x[0])) * (special.erf(np.sqrt(x[0]) * (cf_cz - x[3])) - special.erf(np.sqrt(x[0]) * (ci_cz - x[3])))
 
-    return [(I1x + x[1] * I0x) / I0x - u, (I2x + I0x * x[1]**2 + 2 * x[1] * I1x + I0x / x[0]) / I0x - e]
+    I1x = (np.exp(-x[0] * (ci_cx - x[1])**2) - np.exp(-x[0] * (cf_cx - x[1])**2)) / (2 * x[0])
+    I1y = (np.exp(-x[0] * (ci_cy - x[2])**2) - np.exp(-x[0] * (cf_cy - x[2])**2)) / (2 * x[0])
+    I1z = (np.exp(-x[0] * (ci_cz - x[3])**2) - np.exp(-x[0] * (cf_cz - x[3])**2)) / (2 * x[0])
+
+    I2x = -np.sqrt(np.pi) / (2 * np.sqrt(x[0])) * \
+        ((np.exp(-x[0] * (cf_cx - x[1])**2) * (cf_cx - x[1]))/np.sqrt(np.pi * x[0]) - (np.exp(-x[0] * (ci_cx - x[1])**2) * (ci_cx - x[1])) / np.sqrt(np.pi * x[0])) + \
+            np.sqrt(np.pi)/(4 * np.sqrt(x[0]**3)) * (special.erf(np.sqrt(x[0]) * (cf_cx - x[1])) - special.erf(np.sqrt(x[0]) * (ci_cx - x[1])))
+    I2y = -np.sqrt(np.pi) / (2 * np.sqrt(x[0])) * \
+        ((np.exp(-x[0] * (cf_cy - x[2])**2) * (cf_cy - x[2]))/np.sqrt(np.pi * x[0]) - (np.exp(-x[0] * (ci_cy - x[2])**2) * (ci_cy - x[2])) / np.sqrt(np.pi * x[0])) + \
+            np.sqrt(np.pi)/(4 * np.sqrt(x[0]**3)) * (special.erf(np.sqrt(x[0]) * (cf_cy - x[2])) - special.erf(np.sqrt(x[0]) * (ci_cy - x[2])))
+    I2z = -np.sqrt(np.pi) / (2 * np.sqrt(x[0])) * \
+        ((np.exp(-x[0] * (cf_cz - x[3])**2) * (cf_cz - x[3]))/np.sqrt(np.pi * x[0]) - (np.exp(-x[0] * (ci_cz - x[3])**2) * (ci_cz - x[3])) / np.sqrt(np.pi * x[0])) + \
+            np.sqrt(np.pi)/(4 * np.sqrt(x[0]**3)) * (special.erf(np.sqrt(x[0]) * (cf_cz - x[3])) - special.erf(np.sqrt(x[0]) * (ci_cz - x[3])))
+
+    return [(I1x + x[1] * I0x) / I0x - ux, (I1y + x[2] * I0y) / I0y - uy, (I1z + x[3] * I0z) / I0z - uz, (I2x**2 + 2 * x[1] * I1x + x[1]**2 * I0x) / I0x + (I2y**2 + 2 * x[2] * I1y + x[2]**2 * I0y) / I0y + (I2z**2 + 2 * x[3] * I1z + x[3]**2 * I0z) / I0z - e]
 
 def calc_moment(f, cx, cy, cz, cx_vec, cy_vec, cz_vec):
     """
@@ -62,9 +96,9 @@ def calc_moment(f, cx, cy, cz, cx_vec, cy_vec, cz_vec):
         cx_vec, cy_vec, cz_vec: Velocity grid vectors
     
     Returns:
-        Array of moments [density, momentum, energy]
+        Array of moments [density, x-momentum, y-momentum, z-momentum, energy]
     """
-    mu = np.zeros(3)
+    mu = np.zeros(5)
 
     # Density moment
     mu[0] = np.trapz(np.trapz(np.trapz(f, cz_vec, axis=2), cy_vec, axis=1), cx_vec, axis=0)
@@ -73,10 +107,16 @@ def calc_moment(f, cx, cy, cz, cx_vec, cy_vec, cz_vec):
     uk = cx * f
     mu[1] = np.trapz(np.trapz(np.trapz(uk, cz_vec, axis=2), cy_vec, axis=1), cx_vec, axis=0)
 
+    uk = cy * f
+    mu[2] = np.trapz(np.trapz(np.trapz(uk, cz_vec, axis=2), cy_vec, axis=1), cx_vec, axis=0)
+
+    uk = cz * f
+    mu[3] = np.trapz(np.trapz(np.trapz(uk, cz_vec, axis=2), cy_vec, axis=1), cx_vec, axis=0)
+
     # Energy moment
     c2 = cx**2 + cy**2 + cz**2
     ek = c2 * f
-    mu[2] = np.trapz(np.trapz(np.trapz(ek, cz_vec, axis=2), cy_vec, axis=1), cx_vec, axis=0)
+    mu[4] = np.trapz(np.trapz(np.trapz(ek, cz_vec, axis=2), cy_vec, axis=1), cx_vec, axis=0)
 
     return mu 
 
@@ -216,33 +256,61 @@ def solve_equation(uk, ek, beta_list, w_list, uk_tab, ek_tab):
     return (bk[0], wk[0]) 
 
 def calculate_group_moments(f0, cx, cy, cz, cx_vec, cy_vec, cz_vec):
-    mu = np.zeros((GROUP_PARAMS['num_groups'], 3))
+    mu = np.zeros((GROUP_PARAMS['num_groups_cx'], GROUP_PARAMS['num_groups_cy'], GROUP_PARAMS['num_groups_cz'], 5))
 
-    for i in range(GROUP_PARAMS['num_groups']):
-        lb = GROUP_PARAMS['group_bounds'][i, 0]
-        ub = GROUP_PARAMS['group_bounds'][i, 1]
-        mu[i] = calc_moment(f0[lb:ub], cx[lb:ub], cy[lb:ub], cz[lb:ub], cx_vec[lb:ub], cy_vec, cz_vec)
+    for i in range(GROUP_PARAMS['num_groups_cx']):
+        for j in range(GROUP_PARAMS['num_groups_cy']):
+            for k in range(GROUP_PARAMS['num_groups_cz']):
+                lb_cx = GROUP_PARAMS['group_bounds_cx'][i, 0]
+                ub_cx = GROUP_PARAMS['group_bounds_cx'][i, 1]
+                lb_cy = GROUP_PARAMS['group_bounds_cy'][j, 0]
+                ub_cy = GROUP_PARAMS['group_bounds_cy'][j, 1]
+                lb_cz = GROUP_PARAMS['group_bounds_cz'][k, 0]
+                ub_cz = GROUP_PARAMS['group_bounds_cz'][k, 1]
+
+                mu[i, j, k] = calc_moment(f0[lb_cx:ub_cx, lb_cy:ub_cy, lb_cz:ub_cz], cx[lb_cx:ub_cx, lb_cy:ub_cy, lb_cz:ub_cz], \
+                                cy[lb_cx:ub_cx, lb_cy:ub_cy, lb_cz:ub_cz], cz[lb_cx:ub_cx, lb_cy:ub_cy, lb_cz:ub_cz], \
+                                        cx_vec[lb_cx:ub_cx], cy_vec[lb_cy:ub_cy], cz_vec[lb_cz:ub_cz])
 
     return mu
 
 def create_table(beta_list, w_list):
-    table = np.zeros((GROUP_PARAMS['num_groups'], 2, LOOKUP_TABLE['n_points'], LOOKUP_TABLE['n_points']))
+    table = np.zeros((GROUP_PARAMS['num_groups_cx'], GROUP_PARAMS['num_groups_cy'], GROUP_PARAMS['num_groups_cz'], 4, LOOKUP_TABLE['n_points'], LOOKUP_TABLE['n_points']))
     X, Y = np.meshgrid(beta_list, w_list, indexing='ij')
-    for n in range(GROUP_PARAMS['num_groups']):
-        uk_tab, ek_tab = np.array(moments(X, Y, GROUP_PARAMS['ci'][n], GROUP_PARAMS['cf'][n]))
-        table[n, 0] = uk_tab
-        table[n, 1] = ek_tab
+
+    for i in range(GROUP_PARAMS['num_groups_cx']):
+        for j in range(GROUP_PARAMS['num_groups_cy']):
+            for k in range(GROUP_PARAMS['num_groups_cz']):
+                uxk_tab, uyk_tab, uzk_tab, ek_tab = np.array(moments(X, Y, GROUP_PARAMS['ci_cx'][i], GROUP_PARAMS['cf_cx'][i], \
+                                                  GROUP_PARAMS['ci_cy'][j], GROUP_PARAMS['cf_cy'][j], GROUP_PARAMS['ci_cz'][k], GROUP_PARAMS['cf_cz'][k]))
+                table[i, j, k, 0] = uxk_tab
+                table[i, j, k, 1] = uyk_tab
+                table[i, j, k, 2] = uzk_tab
+                table[i, j, k, 3] = ek_tab
 
     return table
 
-def invert(mu, b_guess, w_guess):
-    A = np.zeros(GROUP_PARAMS['num_groups'])
-    b = np.zeros(GROUP_PARAMS['num_groups'])
-    w = np.zeros(GROUP_PARAMS['num_groups'])    
+def invert(mu, b_guess, wx_guess, wy_guess, wz_guess):
+    A = np.zeros((GROUP_PARAMS['num_groups_cx'], GROUP_PARAMS['num_groups_cy'], GROUP_PARAMS['num_groups_cz']))
+    b = np.zeros((GROUP_PARAMS['num_groups_cx'], GROUP_PARAMS['num_groups_cy'], GROUP_PARAMS['num_groups_cz']))
+    wx = np.zeros((GROUP_PARAMS['num_groups_cx'], GROUP_PARAMS['num_groups_cy'], GROUP_PARAMS['num_groups_cz']))
+    wy = np.zeros((GROUP_PARAMS['num_groups_cx'], GROUP_PARAMS['num_groups_cy'], GROUP_PARAMS['num_groups_cz']))
+    wz = np.zeros((GROUP_PARAMS['num_groups_cx'], GROUP_PARAMS['num_groups_cy'], GROUP_PARAMS['num_groups_cz']))
 
-    for i in range(0, GROUP_PARAMS['num_groups']):  
-        b[i], w[i] = optimize.fsolve(moment_eq, [b_guess[i], w_guess[i]], args=(mu[i, 1] / mu[i, 0], mu[i, 2] / mu[i, 0], GROUP_PARAMS['ci'][i], GROUP_PARAMS['cf'][i]))
-        I0x = np.sqrt(np.pi/(4 * b[i])) * (special.erf(np.sqrt(b[i]) * (GROUP_PARAMS['cf'][i] - w[i])) - special.erf(np.sqrt(b[i]) * (GROUP_PARAMS['ci'][i] - w[i])))
-        A[i] = mu[i, 0] / (np.pi / b[i] * I0x)
+    for i in range(0, GROUP_PARAMS['num_groups_cx']):
+        for j in range(0, GROUP_PARAMS['num_groups_cy']):
+            for k in range(0, GROUP_PARAMS['num_groups_cz']):
+                b[i, j, k], wx[i, j, k], wy[i, j, k], wz[i, j, k] = optimize.fsolve(moment_eq, \
+                                                                                    [b_guess[i, j, k], wx_guess[i, j, k], wy_guess[i, j, k], wz_guess[i, j, k]], \
+                                                                                        args=(mu[i, j, k, 1] / mu[i, j, k, 0], mu[i, j, k, 2] / mu[i, j, k, 0], \
+                                                                                              mu[i, j, k, 3] / mu[i, j, k, 0], mu[i, j, k, 4] / mu[i, j, k, 0], \
+                                                                                                GROUP_PARAMS['ci_cx'][i], GROUP_PARAMS['cf_cx'][i], \
+                                                                                                    GROUP_PARAMS['ci_cy'][j], GROUP_PARAMS['cf_cy'][j], \
+                                                                                                        GROUP_PARAMS['ci_cz'][k], GROUP_PARAMS['cf_cz'][k]))
 
-    return A, b, w
+                I0x = np.sqrt(np.pi / (4 * b[i, j, k])) * (special.erf(np.sqrt(b[i, j, k]) * (GROUP_PARAMS['cf_cx'][i] - wx[i, j, k])) - special.erf(np.sqrt(b[i, j, k]) * (GROUP_PARAMS['ci_cx'][i] - wx[i, j, k])))
+                I0y = np.sqrt(np.pi / (4 * b[i, j, k])) * (special.erf(np.sqrt(b[i, j, k]) * (GROUP_PARAMS['cf_cy'][j] - wy[i, j, k])) - special.erf(np.sqrt(b[i, j, k]) * (GROUP_PARAMS['ci_cy'][j] - wy[i, j, k])))
+                I0z = np.sqrt(np.pi / (4 * b[i, j, k])) * (special.erf(np.sqrt(b[i, j, k]) * (GROUP_PARAMS['cf_cz'][k] - wz[i, j, k])) - special.erf(np.sqrt(b[i, j, k]) * (GROUP_PARAMS['ci_cz'][k] - wz[i, j, k])))
+                A[i, j, k] = mu[i, j, k, 0] / (I0x * I0y * I0z)
+
+    return A, b, wx, wy, wz

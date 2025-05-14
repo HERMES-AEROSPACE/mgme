@@ -26,7 +26,7 @@ def save_simulation_data(t, Ak_list, bk_list, wk_list, save_dir='simulation_data
     # Save metadata
     metadata = {
         'time_step': t,
-        'num_groups': GROUP_PARAMS['num_groups'],
+        'num_groups_cx': GROUP_PARAMS['num_groups_cx'],
         'group_bounds': GROUP_PARAMS['group_bounds'],
         'ci': GROUP_PARAMS['ci'],
         'cf': GROUP_PARAMS['cf'],
