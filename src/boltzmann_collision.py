@@ -73,10 +73,9 @@ def run_simulation():
     wxk_list[0] = wx
     wyk_list[0] = wy
     wzk_list[0] = wz
-    print(Ak_list[0], bk_list[0], wxk_list[0], wyk_list[0], wzk_list[0])
 
     # Save initial state
-    # save_simulation_data(0, Ak_list, bk_list, wk_list)
+    save_simulation_data(0, Ak_list, bk_list, wxk_list, wyk_list, wzk_list)
 
     n_samples = SAMPLING_PARAMS['n_samples_dir']**3
     x_sample, y_sample, z_sample = generate_grid(SAMPLING_PARAMS['n_samples_dir'])
