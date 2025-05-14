@@ -67,19 +67,16 @@ def calc_moment(f, cx, cy, cz, cx_vec, cy_vec, cz_vec):
     mu = np.zeros(3)
 
     # Density moment
-    tmp1 = np.trapz(np.trapz(f, cz_vec, axis=2), cy_vec, axis=1)
-    mu[0] = np.trapz(tmp1, cx_vec, axis=0)
+    mu[0] = np.trapz(np.trapz(np.trapz(f, cz_vec, axis=2), cy_vec, axis=1), cx_vec, axis=0)
 
     # Momentum moment
     uk = cx * f
-    tmp2 = np.trapz(np.trapz(uk, cz_vec, axis=2), cy_vec, axis=1)
-    mu[1] = np.trapz(tmp2, cx_vec, axis=0)
+    mu[1] = np.trapz(np.trapz(np.trapz(uk, cz_vec, axis=2), cy_vec, axis=1), cx_vec, axis=0)
 
     # Energy moment
     c2 = cx**2 + cy**2 + cz**2
     ek = c2 * f
-    tmp3 = np.trapz(np.trapz(ek, cz_vec, axis=2), cy_vec, axis=1)
-    mu[2] = np.trapz(tmp3, cx_vec, axis=0)
+    mu[2] = np.trapz(np.trapz(np.trapz(ek, cz_vec, axis=2), cy_vec, axis=1), cx_vec, axis=0)
 
     return mu 
 
@@ -244,7 +241,7 @@ def invert(mu, b_guess, w_guess):
     w = np.zeros(GROUP_PARAMS['num_groups'])    
 
     for i in range(0, GROUP_PARAMS['num_groups']):  
-        b[i], w[i] = optimize.fsolve(moment_eq, [b_guess[i], w_guess[i]], args=(mu[i][1] / mu[i][0], mu[i][2] / mu[i][0], GROUP_PARAMS['ci'][i], GROUP_PARAMS['cf'][i]))
+        b[i], w[i] = optimize.fsolve(moment_eq, [b_guess[i], w_guess[i]], args=(mu[i, 1] / mu[i, 0], mu[i, 2] / mu[i, 0], GROUP_PARAMS['ci'][i], GROUP_PARAMS['cf'][i]))
         I0x = np.sqrt(np.pi/(4 * b[i])) * (special.erf(np.sqrt(b[i]) * (GROUP_PARAMS['cf'][i] - w[i])) - special.erf(np.sqrt(b[i]) * (GROUP_PARAMS['ci'][i] - w[i])))
         A[i] = mu[i, 0] / (np.pi / b[i] * I0x)
 
