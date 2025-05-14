@@ -62,9 +62,9 @@ def collide(x_sample, y_sample, z_sample, weights, num_group_sample, n_samples, 
         group_idx1 = np.argmax(np.logical_and(vx1p >= GROUP_PARAMS['ci'], vx1p <= GROUP_PARAMS['cf']))
         group_idx2 = np.argmax(np.logical_and(vx2p >= GROUP_PARAMS['ci'], vx2p <= GROUP_PARAMS['cf']))
         if vx1p > VELOCITY_SPACE['cx_range'][1]:
-            group_idx1 = 1
+            group_idx1 = GROUP_PARAMS['num_groups'] - 1
         if vx2p > VELOCITY_SPACE['cx_range'][1]:
-            group_idx2 = 1
+            group_idx2 = GROUP_PARAMS['num_groups'] - 1
         Gi = weights[depl_idx1] *  weights[depl_idx2] * num_group_sample[group_idx1] * num_group_sample[group_idx2] / n_coll
         group_n[group_idx1] += Gi
         group_p[group_idx1] += Gi * vx1p

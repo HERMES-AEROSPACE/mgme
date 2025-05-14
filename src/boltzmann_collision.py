@@ -50,7 +50,7 @@ def run_simulation():
             b_guess[i] = 1.0
             w_guess[i] = 0.0
         else:
-            b_guess[i], w_guess[i] = solve_equation(mu[i][1] / mu[i][0], mu[i][2] / mu[i][0], beta_list, w_list, table[i, 0], table[i, 1])
+            b_guess[i], w_guess[i] = solve_equation(mu[i, 1] / mu[i, 0], mu[i, 2] / mu[i, 0], beta_list, w_list, table[i, 0], table[i, 1])
 
     A, b, w = invert(mu, b_guess, w_guess)
     Ak_list[0] = A
@@ -58,7 +58,7 @@ def run_simulation():
     wk_list[0] = w
 
     # Save initial state
-    save_simulation_data(0, Ak_list, bk_list, wk_list)
+    # save_simulation_data(0, Ak_list, bk_list, wk_list)
 
     n_samples = SAMPLING_PARAMS['n_samples_dir']**3
     x_sample, y_sample, z_sample = generate_grid(SAMPLING_PARAMS['n_samples_dir'])
@@ -69,7 +69,6 @@ def run_simulation():
     for t in range(1, COLLISION_PARAMS['n_t'] + 1):
         if t % 10 == 0:
             print('Time step: ', t)
-            print('Density at group 1:', mu[0][0])
             # save_simulation_data(t, Ak_list, bk_list, wk_list)
 
         group_n, group_p, group_e = collide(x_sample, y_sample, z_sample, weights, num_group_sample, n_samples, COLLISION_PARAMS['n_coll'])
@@ -84,7 +83,7 @@ def run_simulation():
         bk_list[t] = b
         wk_list[t] = w
 
-        weights, num_group_sample = generate_regular_samples(n_samples, x_sample, y_sample, z_sample, Ak_list[t], bk_list[t], wk_list[t], mu)
+        weights, _ = generate_regular_samples(n_samples, x_sample, y_sample, z_sample, Ak_list[t], bk_list[t], wk_list[t], mu)
 
     # Save final state
     save_simulation_data(COLLISION_PARAMS['n_t'], Ak_list, bk_list, wk_list)

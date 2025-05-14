@@ -1,7 +1,7 @@
 import numpy as np
 import os
 from datetime import datetime
-
+from .config import GROUP_PARAMS, VELOCITY_SPACE, COLLISION_PARAMS, SAMPLING_PARAMS
 
 def save_simulation_data(t, Ak_list, bk_list, wk_list, save_dir='simulation_data'):
     """Save simulation data at time step t.
@@ -26,25 +26,19 @@ def save_simulation_data(t, Ak_list, bk_list, wk_list, save_dir='simulation_data
     # Save metadata
     metadata = {
         'time_step': t,
-        'timestamp': timestamp
+        'num_groups': GROUP_PARAMS['num_groups'],
+        'group_bounds': GROUP_PARAMS['group_bounds'],
+        'ci': GROUP_PARAMS['ci'],
+        'cf': GROUP_PARAMS['cf'],
+        'num_cx': VELOCITY_SPACE['num_cx'],
+        'num_cy': VELOCITY_SPACE['num_cy'],
+        'num_cz': VELOCITY_SPACE['num_cz'],
+        'cx_range': VELOCITY_SPACE['cx_range'],
+        'cy_range': VELOCITY_SPACE['cy_range'],
+        'cz_range': VELOCITY_SPACE['cz_range'],
+        'n_coll': COLLISION_PARAMS['n_coll'],
+        'dt': COLLISION_PARAMS['dt'],
+        'n_t': COLLISION_PARAMS['n_t'],
+        'n_samples_dir': SAMPLING_PARAMS['n_samples_dir']
     }
     np.save(f'{save_dir}/metadata_t{t}_{timestamp}.npy', metadata)
-
-def load_simulation_data(t, timestamp, save_dir='simulation_data'):
-    """Load simulation data for a specific time step and timestamp.
-    
-    Args:
-        t: Time step to load
-        timestamp: Timestamp of the saved data
-        save_dir: Directory containing the saved data
-        
-    Returns:
-        Dictionary containing the loaded data
-    """
-    data = {}
-    data['Ak'] = np.load(f'{save_dir}/Ak_t{t}_{timestamp}.npy')
-    data['bk'] = np.load(f'{save_dir}/bk_t{t}_{timestamp}.npy')
-    data['wk'] = np.load(f'{save_dir}/wk_t{t}_{timestamp}.npy')
-    data['metadata'] = np.load(f'{save_dir}/metadata_t{t}_{timestamp}.npy', allow_pickle=True).item()
-    
-    return data 

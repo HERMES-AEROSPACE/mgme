@@ -6,7 +6,7 @@ def f(x, y, z, A, b, w):
     return A * np.exp(-b * ((x - w)**2 + y**2 + z**2))
 
 def generate_grid(n_samples_dir):
-    sample_loc = np.linspace(VELOCITY_SPACE['cx_range'][0], VELOCITY_SPACE['cx_range'][1], n_samples_dir)
+    sample_loc = np.linspace(*VELOCITY_SPACE['cx_range'], n_samples_dir)
     [xgrid, ygrid, zgrid] = np.meshgrid(sample_loc, sample_loc, sample_loc, indexing='ij')
 
     x_sample = xgrid.flatten()
@@ -18,6 +18,7 @@ def generate_grid(n_samples_dir):
 def calc_sum_f_group(n_samples, x_sample, y_sample, z_sample, Ak, bk, wk):
     sum_f_group = np.zeros(GROUP_PARAMS['num_groups'])
     num_group_sample = np.zeros(GROUP_PARAMS['num_groups'])
+
     for i in range(0, n_samples):
         group_idx = np.argmax(np.logical_and(x_sample[i] >= GROUP_PARAMS['ci'], x_sample[i] <= GROUP_PARAMS['cf']))
         sum_f_group[group_idx] += f(x_sample[i], y_sample[i], z_sample[i], Ak[group_idx], bk[group_idx], wk[group_idx])
