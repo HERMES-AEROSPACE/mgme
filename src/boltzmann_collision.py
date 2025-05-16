@@ -34,6 +34,7 @@ def run_simulation():
 
     # Calculate group moments.
     mu = calculate_group_moments(f0, cx, cy, cz, cx_vec, cy_vec, cz_vec)
+    print(mu)
 
     # Initialize parameter lists
     Ak_list = np.zeros((COLLISION_PARAMS['n_t'] + 1, GROUP_PARAMS['num_groups_cx'], GROUP_PARAMS['num_groups_cy'], GROUP_PARAMS['num_groups_cz']))
@@ -56,15 +57,17 @@ def run_simulation():
                 if np.abs(mu[i, j, k, 1]) < 1e-8:
                     b_guess[i, j, k] = 1.0
                     wx_guess[i, j, k] = 0.0
+                else:
+                    b_guess[i, j, k], wx_guess[i, j, k] = solve_equation(mu[i, j, k, 1] / mu[i, j, k, 0], mu[i, j, k, 4] / mu[i, j, k, 0], beta_list, w_list, table[i, j, k, 0], table[i, j, k, 3])
                 if np.abs(mu[i, j, k, 2]) < 1e-8:
                     b_guess[i, j, k] = 1.0
                     wy_guess[i, j, k] = 0.0
+                else:
+                    b_guess[i, j, k], wy_guess[i, j, k] = solve_equation(mu[i, j, k, 2] / mu[i, j, k, 0], mu[i, j, k, 4] / mu[i, j, k, 0], beta_list, w_list, table[i, j, k, 1], table[i, j, k, 3])
                 if np.abs(mu[i, j, k, 3]) < 1e-8:
                     b_guess[i, j, k] = 1.0
                     wz_guess[i, j, k] = 0.0
                 else:
-                    b_guess[i, j, k], wx_guess[i, j, k] = solve_equation(mu[i, j, k, 1] / mu[i, j, k, 0], mu[i, j, k, 4] / mu[i, j, k, 0], beta_list, w_list, table[i, j, k, 0], table[i, j, k, 3])
-                    b_guess[i, j, k], wy_guess[i, j, k] = solve_equation(mu[i, j, k, 2] / mu[i, j, k, 0], mu[i, j, k, 4] / mu[i, j, k, 0], beta_list, w_list, table[i, j, k, 1], table[i, j, k, 3])
                     b_guess[i, j, k], wz_guess[i, j, k] = solve_equation(mu[i, j, k, 3] / mu[i, j, k, 0], mu[i, j, k, 4] / mu[i, j, k, 0], beta_list, w_list, table[i, j, k, 2], table[i, j, k, 3])
 
     A, b, wx, wy, wz = invert(mu, b_guess, wx_guess, wy_guess, wz_guess)

@@ -50,7 +50,7 @@ def moments(beta, w, ci_cx, cf_cx, ci_cy, cf_cy, ci_cz, cf_cz):
             row = np.where(row > 1e-12, row, np.nan)
             I0z[i, :] = row
 
-    return [(I1x + w*I0x) / I0x, (I1y + w*I0y) / I0y, (I1z + w*I0z) / I0z, (I2x**2 + 2 * w * I1x + w**2 * I0x) / I0x + (I2y**2 + 2 * w * I1y + w**2 * I0y) / I0y + (I2z**2 + 2 * w * I1z + w**2 * I0z) / I0z]
+    return [(I1x + w*I0x) / I0x, (I1y + w*I0y) / I0y, (I1z + w*I0z) / I0z, (I2x + 2 * w * I1x + w**2 * I0x) / I0x + (I2y + 2 * w * I1y + w**2 * I0y) / I0y + (I2z + 2 * w * I1z + w**2 * I0z) / I0z]
 
 def moment_eq(x, ux, uy, uz, e, ci_cx, cf_cx, ci_cy, cf_cy, ci_cz, cf_cz):
     """
@@ -84,7 +84,8 @@ def moment_eq(x, ux, uy, uz, e, ci_cx, cf_cx, ci_cy, cf_cy, ci_cz, cf_cz):
         ((np.exp(-x[0] * (cf_cz - x[3])**2) * (cf_cz - x[3]))/np.sqrt(np.pi * x[0]) - (np.exp(-x[0] * (ci_cz - x[3])**2) * (ci_cz - x[3])) / np.sqrt(np.pi * x[0])) + \
             np.sqrt(np.pi)/(4 * np.sqrt(x[0]**3)) * (special.erf(np.sqrt(x[0]) * (cf_cz - x[3])) - special.erf(np.sqrt(x[0]) * (ci_cz - x[3])))
 
-    return [(I1x + x[1] * I0x) / I0x - ux, (I1y + x[2] * I0y) / I0y - uy, (I1z + x[3] * I0z) / I0z - uz, (I2x**2 + 2 * x[1] * I1x + x[1]**2 * I0x) / I0x + (I2y**2 + 2 * x[2] * I1y + x[2]**2 * I0y) / I0y + (I2z**2 + 2 * x[3] * I1z + x[3]**2 * I0z) / I0z - e]
+    return [(I1x + x[1] * I0x) / I0x - ux, (I1y + x[2] * I0y) / I0y - uy, (I1z + x[3] * I0z) / I0z - uz, \
+            (I2x + 2 * x[1] * I1x + x[1]**2 * I0x) / (I0x) + (I2y + 2 * x[2] * I1y + x[2]**2 * I0y) / (I0y) + (I2z + 2 * x[3] * I1z + x[3]**2 * I0z) / (I0z) - e]
 
 def calc_moment(f, cx, cy, cz, cx_vec, cy_vec, cz_vec):
     """
@@ -301,7 +302,7 @@ def invert(mu, b_guess, wx_guess, wy_guess, wz_guess):
         for j in range(0, GROUP_PARAMS['num_groups_cy']):
             for k in range(0, GROUP_PARAMS['num_groups_cz']):
                 b[i, j, k], wx[i, j, k], wy[i, j, k], wz[i, j, k] = optimize.fsolve(moment_eq, \
-                                                                                    [1.0, 0.0, 0.0, 0.0], \
+                                                                                    [b_guess[i, j, k], wx_guess[i, j, k], wy_guess[i, j, k], wz_guess[i, j, k]], \
                                                                                         args=(mu[i, j, k, 1] / mu[i, j, k, 0], mu[i, j, k, 2] / mu[i, j, k, 0], \
                                                                                               mu[i, j, k, 3] / mu[i, j, k, 0], mu[i, j, k, 4] / mu[i, j, k, 0], \
                                                                                                 GROUP_PARAMS['ci_cx'][i], GROUP_PARAMS['cf_cx'][i], \

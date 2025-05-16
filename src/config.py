@@ -6,28 +6,28 @@ VELOCITY_SPACE = {
     'num_cx': 241,
     'num_cy': 241,
     'num_cz': 241,
-    'cx_range': (-3, 3),
-    'cy_range': (-3, 3),
-    'cz_range': (-3, 3)
+    'cx_range': (-4, 4),
+    'cy_range': (-4, 4),
+    'cz_range': (-4, 4)
 }
 
 # Group parameters
 GROUP_PARAMS = {
     'num_groups_cx': 2,
-    'num_groups_cy': 2,
-    'num_groups_cz': 2,
+    'num_groups_cy': 1,
+    'num_groups_cz': 1,
     # 'ci': np.array([-3.0, -1.0, -0.4, 0.0, 0.4, 1.0]),
     # 'cf': np.array([-1.0, -0.4, 0.0, 0.4, 1.0, 3.0]),
     # 'group_bounds': np.array([[0, 81], [80, 105], [104, 121], [120, 137], [136, 161], [160, 241]])
-    'ci_cx': np.array([-3.0, 0.0]),
-    'cf_cx': np.array([0.0, 3.0]),
+    'ci_cx': np.array([-4.0, 0.0]),
+    'cf_cx': np.array([0.0, 4.0]),
     'group_bounds_cx': np.array([[0, 121], [120, 241]]),
-    'ci_cy': np.array([-3.0, 0.0]),
-    'cf_cy': np.array([0.0, 3.0]),
-    'group_bounds_cy': np.array([[0, 121], [120, 241]]),
-    'ci_cz': np.array([-3.0, 0.0]),
-    'cf_cz': np.array([0.0, 3.0]),
-    'group_bounds_cz': np.array([[0, 121], [120, 241]])
+    'ci_cy': np.array([-4.0]),
+    'cf_cy': np.array([4.0]),
+    'group_bounds_cy': np.array([[0, 241]]),
+    'ci_cz': np.array([-4.0]),
+    'cf_cz': np.array([4.0]),
+    'group_bounds_cz': np.array([[0, 241]])
 }
 
 # Collision parameters
