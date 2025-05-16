@@ -46,6 +46,8 @@ def run_simulation():
     # Create table for moments
     table = create_table(beta_list, w_list)
 
+    print('Table created.\n')
+
     b_guess = np.zeros((GROUP_PARAMS['num_groups_cx'], GROUP_PARAMS['num_groups_cy'], GROUP_PARAMS['num_groups_cz']))
     wx_guess = np.zeros((GROUP_PARAMS['num_groups_cx'], GROUP_PARAMS['num_groups_cy'], GROUP_PARAMS['num_groups_cz']))
     wy_guess = np.zeros((GROUP_PARAMS['num_groups_cx'], GROUP_PARAMS['num_groups_cy'], GROUP_PARAMS['num_groups_cz']))
@@ -79,12 +81,13 @@ def run_simulation():
 
     # Save initial state
     # save_simulation_data(0, Ak_list, bk_list, wxk_list, wyk_list, wzk_list)
+    print('Inversion complete.\n')
 
     n_samples = SAMPLING_PARAMS['n_samples_x'] * SAMPLING_PARAMS['n_samples_y'] * SAMPLING_PARAMS['n_samples_z']
     x_sample, y_sample, z_sample = generate_grid(SAMPLING_PARAMS['n_samples_x'], SAMPLING_PARAMS['n_samples_y'], SAMPLING_PARAMS['n_samples_z'])
     weights, num_group_sample = generate_regular_samples(n_samples, x_sample, y_sample, z_sample, Ak_list[0], bk_list[0], wxk_list[0], wyk_list[0], wzk_list[0], mu)
 
-    print('Setup complete. Starting simulation...\n')
+    print('Weights generated. Starting simulation...\n')
 
     for t in range(1, COLLISION_PARAMS['n_t'] + 1):
         if t % 10 == 0:
