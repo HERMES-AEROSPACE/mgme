@@ -78,11 +78,11 @@ def run_simulation():
     wzk_list[0] = wz
 
     # Save initial state
-    save_simulation_data(0, Ak_list, bk_list, wxk_list, wyk_list, wzk_list)
+    # save_simulation_data(0, Ak_list, bk_list, wxk_list, wyk_list, wzk_list)
 
-    n_samples = SAMPLING_PARAMS['n_samples_dir']**3
-    x_sample, y_sample, z_sample = generate_grid(SAMPLING_PARAMS['n_samples_dir'])
-    weights, num_group_sample = generate_regular_samples(n_samples, x_sample, y_sample, z_sample, Ak_list[0], bk_list[0], wk_list[0], mu)
+    n_samples = SAMPLING_PARAMS['n_samples_x'] * SAMPLING_PARAMS['n_samples_y'] * SAMPLING_PARAMS['n_samples_z']
+    x_sample, y_sample, z_sample = generate_grid(SAMPLING_PARAMS['n_samples_x'], SAMPLING_PARAMS['n_samples_y'], SAMPLING_PARAMS['n_samples_z'])
+    weights, num_group_sample = generate_regular_samples(n_samples, x_sample, y_sample, z_sample, Ak_list[0], bk_list[0], wxk_list[0], wyk_list[0], wzk_list[0], mu)
 
     print('Setup complete. Starting simulation...\n')
 
@@ -91,22 +91,28 @@ def run_simulation():
             print('Time step: ', t)
             # save_simulation_data(t, Ak_list, bk_list, wk_list)
 
-        group_n, group_p, group_e = collide(x_sample, y_sample, z_sample, weights, num_group_sample, n_samples, COLLISION_PARAMS['n_coll'])
+        group_n, group_px, group_py, group_pz, group_e = collide(x_sample, y_sample, z_sample, weights, num_group_sample, n_samples, COLLISION_PARAMS['n_coll'])
 
-        for i in range(GROUP_PARAMS['num_groups']):
-            mu[i][0] += COLLISION_PARAMS['dt'] * group_n[i]
-            mu[i][1] += COLLISION_PARAMS['dt'] * group_p[i]
-            mu[i][2] += COLLISION_PARAMS['dt'] * group_e[i]
+        for i in range(GROUP_PARAMS['num_groups_cx']):
+            for j in range(GROUP_PARAMS['num_groups_cy']):
+                for k in range(GROUP_PARAMS['num_groups_cz']):
+                    mu[i, j, k, 0] += COLLISION_PARAMS['dt'] * group_n[i, j, k]
+                    mu[i, j, k, 1] += COLLISION_PARAMS['dt'] * group_px[i, j, k]
+                    mu[i, j, k, 2] += COLLISION_PARAMS['dt'] * group_py[i, j, k]
+                    mu[i, j, k, 3] += COLLISION_PARAMS['dt'] * group_pz[i, j, k]
+                    mu[i, j, k, 4] += COLLISION_PARAMS['dt'] * group_e[i, j, k]
 
-        A, b, w = invert(mu, bk_list[t - 1], wk_list[t - 1])
+        A, b, wx, wy, wz = invert(mu, bk_list[t - 1], wxk_list[t - 1], wyk_list[t - 1], wzk_list[t - 1])
         Ak_list[t] = A
         bk_list[t] = b
-        wk_list[t] = w
+        wxk_list[t] = wx
+        wyk_list[t] = wy
+        wzk_list[t] = wz
 
-        weights, _ = generate_regular_samples(n_samples, x_sample, y_sample, z_sample, Ak_list[t], bk_list[t], wk_list[t], mu)
+        weights, _ = generate_regular_samples(n_samples, x_sample, y_sample, z_sample, Ak_list[t], bk_list[t], wxk_list[t], wyk_list[t], wzk_list[t], mu)
 
     # Save final state
-    save_simulation_data(COLLISION_PARAMS['n_t'], Ak_list, bk_list, wk_list)
+    save_simulation_data(COLLISION_PARAMS['n_t'], Ak_list, bk_list, wxk_list, wyk_list, wzk_list)
 
 if __name__ == '__main__':
     run_simulation()

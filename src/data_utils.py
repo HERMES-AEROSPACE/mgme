@@ -49,6 +49,8 @@ def save_simulation_data(t, Ak_list, bk_list, wxk_list, wyk_list, wzk_list, save
         'n_coll': COLLISION_PARAMS['n_coll'],
         'dt': COLLISION_PARAMS['dt'],
         'n_t': COLLISION_PARAMS['n_t'],
-        'n_samples_dir': SAMPLING_PARAMS['n_samples_dir']
+        'n_samples_x': SAMPLING_PARAMS['n_samples_x'],
+        'n_samples_y': SAMPLING_PARAMS['n_samples_y'],
+        'n_samples_z': SAMPLING_PARAMS['n_samples_z']
     }
     np.save(f'{save_dir}/metadata_t{t}_{timestamp}.npy', metadata)
