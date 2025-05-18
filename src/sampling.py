@@ -95,22 +95,23 @@ def calculate_moments_from_weights(x_sample, y_sample, z_sample, weights, n_samp
 
 def reweight_samples(x_sample, y_sample, z_sample, weights, num_group_sample, mu):
     new_weights = np.zeros(int(np.sum(num_group_sample)))
-    l = 0
-    u_old = 0
 
     for i in range(0, NUM_GROUPS_CX):
         for j in range(0, NUM_GROUPS_CY):
             for k in range(0, NUM_GROUPS_CZ):
-                u = u_old + int(num_group_sample[i, j, k])
-
-                M = np.zeros((5, u - l))
+                M = np.zeros((5, int(num_group_sample[i, j, k])))
                 Q = np.zeros((5,))
 
+                x_mask = np.asarray(np.logical_and(x_sample >= CI_CX[i], x_sample <= CF_CX[i])).nonzero()
+                y_mask = np.asarray(np.logical_and(y_sample >= CI_CY[j], y_sample <= CF_CY[j])).nonzero()
+                z_mask = np.asarray(np.logical_and(z_sample >= CI_CZ[k], z_sample <= CF_CZ[k])).nonzero()
+                mask = np.array(list(set(x_mask[0].tolist()) & set(y_mask[0].tolist()) & set(z_mask[0].tolist())))
+
                 M[0, :] = 1
-                M[1, :] = x_sample[l:u]
-                M[2, :] = y_sample[l:u]
-                M[3, :] = z_sample[l:u]
-                M[4, :] = (x_sample[l:u]**2 + y_sample[l:u]**2 + z_sample[l:u]**2)
+                M[1, :] = x_sample[mask]
+                M[2, :] = y_sample[mask]
+                M[3, :] = z_sample[mask]
+                M[4, :] = (x_sample[mask]**2 + y_sample[mask]**2 + z_sample[mask]**2)
 
                 Q[0] = mu[i, j, k, 0]
                 Q[1] = mu[i, j, k, 1]
@@ -118,10 +119,7 @@ def reweight_samples(x_sample, y_sample, z_sample, weights, num_group_sample, mu
                 Q[3] = mu[i, j, k, 3]
                 Q[4] = mu[i, j, k, 4]
                 
-                sol = optimize.least_squares(func, weights[l:u], args=(M, Q), bounds=(0.0, 1.0), loss='soft_l1')
-                new_weights[l:u] = sol.x
-
-                l = int(num_group_sample[i, j, k])
-                u_old = u
+                sol = optimize.least_squares(func, weights[mask], args=(M, Q), bounds=(0.0, 1.0), loss='soft_l1')
+                new_weights[mask] = sol.x
 
     return new_weights
