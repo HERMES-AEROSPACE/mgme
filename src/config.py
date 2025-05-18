@@ -32,7 +32,7 @@ GROUP_PARAMS = {
 
 # Collision parameters
 COLLISION_PARAMS = {
-    'n_coll': 20000,
+    'n_coll': 50000,
     'dt': 0.2,
     'n_t': 100
 }
@@ -52,9 +52,9 @@ LOOKUP_TABLE = {
 }
 
 SAMPLING_PARAMS = {
-    'n_samples_x': 98,
-    'n_samples_y': 98,
-    'n_samples_z': 98
+    'n_samples_x': 28,
+    'n_samples_y': 8,
+    'n_samples_z': 8
 }
 
 # Helper function to get combined beta and w lists

@@ -1,6 +1,7 @@
 import numpy as np
 from .config import VELOCITY_SPACE, GROUP_PARAMS
 from numba import jit
+from scipy import optimize
 
 
 NUM_GROUPS_CX = GROUP_PARAMS['num_groups_cx']
@@ -17,6 +18,9 @@ CF_CZ = GROUP_PARAMS['cf_cz']
 @jit(nopython=True)
 def f(x, y, z, A, b, wx, wy, wz):
     return A * np.exp(-b * ((x - wx)**2 + (y - wy)**2 + (z - wz)**2))
+
+def func(x, M, Q):
+    return np.matmul(M, x) - Q
 
 def generate_grid(n_samples_x, n_samples_y, n_samples_z):
     sample_loc_x = np.linspace(*VELOCITY_SPACE['cx_range'], n_samples_x)
@@ -68,17 +72,18 @@ def generate_regular_samples(n_samples, x_sample, y_sample, z_sample, Ak, bk, wx
 
     return weights, num_group_sample
 
+@jit(nopython=True)
 def calculate_moments_from_weights(x_sample, y_sample, z_sample, weights, n_samples):
-    n = np.zeros((GROUP_PARAMS['num_groups_cx'], GROUP_PARAMS['num_groups_cy'], GROUP_PARAMS['num_groups_cz']))
-    ux = np.zeros((GROUP_PARAMS['num_groups_cx'], GROUP_PARAMS['num_groups_cy'], GROUP_PARAMS['num_groups_cz']))
-    uy = np.zeros((GROUP_PARAMS['num_groups_cx'], GROUP_PARAMS['num_groups_cy'], GROUP_PARAMS['num_groups_cz']))
-    uz = np.zeros((GROUP_PARAMS['num_groups_cx'], GROUP_PARAMS['num_groups_cy'], GROUP_PARAMS['num_groups_cz']))
-    e = np.zeros((GROUP_PARAMS['num_groups_cx'], GROUP_PARAMS['num_groups_cy'], GROUP_PARAMS['num_groups_cz']))
+    n = np.zeros((NUM_GROUPS_CX, NUM_GROUPS_CY, NUM_GROUPS_CZ))
+    ux = np.zeros((NUM_GROUPS_CX, NUM_GROUPS_CY, NUM_GROUPS_CZ))
+    uy = np.zeros((NUM_GROUPS_CX, NUM_GROUPS_CY, NUM_GROUPS_CZ))
+    uz = np.zeros((NUM_GROUPS_CX, NUM_GROUPS_CY, NUM_GROUPS_CZ))
+    e = np.zeros((NUM_GROUPS_CX, NUM_GROUPS_CY, NUM_GROUPS_CZ))
 
     for i in range(0, n_samples):
-        group_idx_x = np.argmax(np.logical_and(x_sample[i] >= GROUP_PARAMS['ci_cx'], x_sample[i] <= GROUP_PARAMS['cf_cx']))
-        group_idx_y = np.argmax(np.logical_and(y_sample[i] >= GROUP_PARAMS['ci_cy'], y_sample[i] <= GROUP_PARAMS['cf_cy']))
-        group_idx_z = np.argmax(np.logical_and(z_sample[i] >= GROUP_PARAMS['ci_cz'], z_sample[i] <= GROUP_PARAMS['cf_cz']))
+        group_idx_x = np.argmax(np.logical_and(x_sample[i] >= CI_CX, x_sample[i] <= CF_CX))
+        group_idx_y = np.argmax(np.logical_and(y_sample[i] >= CI_CY, y_sample[i] <= CF_CY))
+        group_idx_z = np.argmax(np.logical_and(z_sample[i] >= CI_CZ, z_sample[i] <= CF_CZ))
 
         n[group_idx_x, group_idx_y, group_idx_z] += weights[i] 
         ux[group_idx_x, group_idx_y, group_idx_z] += x_sample[i] * weights[i]
@@ -87,3 +92,36 @@ def calculate_moments_from_weights(x_sample, y_sample, z_sample, weights, n_samp
         e[group_idx_x, group_idx_y, group_idx_z] += (x_sample[i]**2 + y_sample[i]**2 + z_sample[i]**2) * weights[i]
 
     return n, ux, uy, uz, e
+
+def reweight_samples(x_sample, y_sample, z_sample, weights, num_group_sample, mu):
+    new_weights = np.zeros(int(np.sum(num_group_sample)))
+    l = 0
+    u_old = 0
+
+    for i in range(0, NUM_GROUPS_CX):
+        for j in range(0, NUM_GROUPS_CY):
+            for k in range(0, NUM_GROUPS_CZ):
+                u = u_old + int(num_group_sample[i, j, k])
+
+                M = np.zeros((5, u - l))
+                Q = np.zeros((5,))
+
+                M[0, :] = 1
+                M[1, :] = x_sample[l:u]
+                M[2, :] = y_sample[l:u]
+                M[3, :] = z_sample[l:u]
+                M[4, :] = (x_sample[l:u]**2 + y_sample[l:u]**2 + z_sample[l:u]**2)
+
+                Q[0] = mu[i, j, k, 0]
+                Q[1] = mu[i, j, k, 1]
+                Q[2] = mu[i, j, k, 2]
+                Q[3] = mu[i, j, k, 3]
+                Q[4] = mu[i, j, k, 4]
+                
+                sol = optimize.least_squares(func, weights[l:u], args=(M, Q), bounds=(0.0, 1.0), loss='soft_l1')
+                new_weights[l:u] = sol.x
+
+                l = int(num_group_sample[i, j, k])
+                u_old = u
+
+    return new_weights

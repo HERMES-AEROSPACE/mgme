@@ -11,7 +11,7 @@ from .config import (
     calculate_velocity_grid
 )
 from .moment_utils import moment_eq, solve_equation, calculate_group_moments, create_table, invert
-from .sampling import generate_regular_samples, calculate_moments_from_weights, generate_grid
+from .sampling import generate_regular_samples, calculate_moments_from_weights, generate_grid, reweight_samples
 from .virtual_collisions import collide
 from .data_utils import save_simulation_data
 from .banner import print_banner
@@ -34,7 +34,6 @@ def run_simulation():
 
     # Calculate group moments.
     mu = calculate_group_moments(f0, cx, cy, cz, cx_vec, cy_vec, cz_vec)
-    print(mu)
 
     # Initialize parameter lists
     Ak_list = np.zeros((COLLISION_PARAMS['n_t'] + 1, GROUP_PARAMS['num_groups_cx'], GROUP_PARAMS['num_groups_cy'], GROUP_PARAMS['num_groups_cz']))
@@ -86,6 +85,7 @@ def run_simulation():
     n_samples = SAMPLING_PARAMS['n_samples_x'] * SAMPLING_PARAMS['n_samples_y'] * SAMPLING_PARAMS['n_samples_z']
     x_sample, y_sample, z_sample = generate_grid(SAMPLING_PARAMS['n_samples_x'], SAMPLING_PARAMS['n_samples_y'], SAMPLING_PARAMS['n_samples_z'])
     weights, num_group_sample = generate_regular_samples(n_samples, x_sample, y_sample, z_sample, Ak_list[0], bk_list[0], wxk_list[0], wyk_list[0], wzk_list[0], mu)
+    reweighted_weights = reweight_samples(x_sample, y_sample, z_sample, weights, num_group_sample, mu)
 
     print('Weights generated. Starting simulation...\n')
 
@@ -94,7 +94,7 @@ def run_simulation():
             print('Time step: ', t)
             # save_simulation_data(t, Ak_list, bk_list, wk_list)
 
-        group_n, group_px, group_py, group_pz, group_e = collide(x_sample, y_sample, z_sample, weights, num_group_sample, n_samples, COLLISION_PARAMS['n_coll'])
+        group_n, group_px, group_py, group_pz, group_e = collide(x_sample, y_sample, z_sample, reweighted_weights, num_group_sample, n_samples, COLLISION_PARAMS['n_coll'])
 
         for i in range(GROUP_PARAMS['num_groups_cx']):
             for j in range(GROUP_PARAMS['num_groups_cy']):
@@ -112,7 +112,7 @@ def run_simulation():
         wyk_list[t] = wy
         wzk_list[t] = wz
 
-        weights, _ = generate_regular_samples(n_samples, x_sample, y_sample, z_sample, Ak_list[t], bk_list[t], wxk_list[t], wyk_list[t], wzk_list[t], mu)
+        reweighted_weights, _ = generate_regular_samples(n_samples, x_sample, y_sample, z_sample, Ak_list[t], bk_list[t], wxk_list[t], wyk_list[t], wzk_list[t], mu)
 
     # Save final state
     save_simulation_data(COLLISION_PARAMS['n_t'], Ak_list, bk_list, wxk_list, wyk_list, wzk_list)
