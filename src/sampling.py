@@ -105,7 +105,7 @@ def reweight_samples(x_sample, y_sample, z_sample, weights, num_group_sample, mu
                 x_mask = np.asarray(np.logical_and(x_sample >= CI_CX[i], x_sample <= CF_CX[i])).nonzero()
                 y_mask = np.asarray(np.logical_and(y_sample >= CI_CY[j], y_sample <= CF_CY[j])).nonzero()
                 z_mask = np.asarray(np.logical_and(z_sample >= CI_CZ[k], z_sample <= CF_CZ[k])).nonzero()
-                mask = np.array(list(set(x_mask[0].tolist()) & set(y_mask[0].tolist()) & set(z_mask[0].tolist())))
+                mask = np.array(list(set(x_mask[0].flatten()) & set(y_mask[0].flatten()) & set(z_mask[0].flatten())))
 
                 M[0, :] = 1
                 M[1, :] = x_sample[mask]

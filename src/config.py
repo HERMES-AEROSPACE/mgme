@@ -13,15 +13,12 @@ VELOCITY_SPACE = {
 
 # Group parameters
 GROUP_PARAMS = {
-    'num_groups_cx': 2,
+    'num_groups_cx': 4,
     'num_groups_cy': 2,
     'num_groups_cz': 2,
-    # 'ci': np.array([-3.0, -1.0, -0.4, 0.0, 0.4, 1.0]),
-    # 'cf': np.array([-1.0, -0.4, 0.0, 0.4, 1.0, 3.0]),
-    # 'group_bounds': np.array([[0, 81], [80, 105], [104, 121], [120, 137], [136, 161], [160, 241]])
-    'ci_cx': np.array([-3.0, 0.0]),
-    'cf_cx': np.array([0.0, 3.0]),
-    'group_bounds_cx': np.array([[0, 121], [120, 241]]),
+    'ci_cx': np.array([-3.0, -1.0, 0.0, 1.0]),
+    'cf_cx': np.array([-1.0, 0.0, 1.0, 3.0]),
+    'group_bounds_cx': np.array([[0, 81], [80, 121], [120, 161], [160, 241]]),
     'ci_cy': np.array([-3.0, 0.0]),
     'cf_cy': np.array([0.0, 3.0]),
     'group_bounds_cy': np.array([[0, 121], [120, 241]]),
@@ -33,7 +30,7 @@ GROUP_PARAMS = {
 # Collision parameters
 COLLISION_PARAMS = {
     'n_coll': 100000,
-    'dt': 0.2,
+    'dt': 2.0,
     'n_t': 100
 }
 
@@ -52,9 +49,9 @@ LOOKUP_TABLE = {
 }
 
 SAMPLING_PARAMS = {
-    'n_samples_x': 8,
-    'n_samples_y': 8,
-    'n_samples_z': 8
+    'n_samples_x': 98,
+    'n_samples_y': 98,
+    'n_samples_z': 98
 }
 
 # Helper function to get combined beta and w lists

@@ -2,7 +2,7 @@ import numpy as np
 from scipy import special
 from scipy import optimize
 from .config import GROUP_PARAMS, LOOKUP_TABLE
-
+import matplotlib.pyplot as plt
 
 def moments(beta, w, ci_cx, cf_cx, ci_cy, cf_cy, ci_cz, cf_cz):
     """
@@ -302,7 +302,7 @@ def invert(mu, b_guess, wx_guess, wy_guess, wz_guess):
         for j in range(0, GROUP_PARAMS['num_groups_cy']):
             for k in range(0, GROUP_PARAMS['num_groups_cz']):
                 b[i, j, k], wx[i, j, k], wy[i, j, k], wz[i, j, k] = optimize.fsolve(moment_eq, \
-                                                                                    [b_guess[i, j, k], wx_guess[i, j, k], wy_guess[i, j, k], wz_guess[i, j, k]], \
+                                                                                    [1.0, 0.0, 0.0, 0.0], \
                                                                                         args=(mu[i, j, k, 1] / mu[i, j, k, 0], mu[i, j, k, 2] / mu[i, j, k, 0], \
                                                                                               mu[i, j, k, 3] / mu[i, j, k, 0], mu[i, j, k, 4] / mu[i, j, k, 0], \
                                                                                                 GROUP_PARAMS['ci_cx'][i], GROUP_PARAMS['cf_cx'][i], \
