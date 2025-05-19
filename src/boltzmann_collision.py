@@ -16,6 +16,7 @@ from .sampling import generate_regular_samples, calculate_moments_from_weights, 
 from .virtual_collisions import collide
 from .data_utils import save_simulation_data
 from .banner import print_banner
+from .amr import calculate_hellinger_distance, refine_group
 
 
 def run_simulation():
@@ -29,13 +30,28 @@ def run_simulation():
     beta_list, w_list = calculate_beta_w_lists()
 
     # Initial distribution function.
-    K = 1 - 0.4 * np.exp(-0/6)
-    f0 = 1 / (2 * K * (np.pi * K)**1.5) * (5 * K - 3 + 2 * (1 - K) / K * (cx**2 + cy**2 + cz**2)) * np.exp(-(cx**2 + cy**2 + cz**2) / K)
+    # K = 1 - 0.4 * np.exp(-0/6)
+    # f0 = 1 / (2 * K * (np.pi * K)**1.5) * (5 * K - 3 + 2 * (1 - K) / K * (cx**2 + cy**2 + cz**2)) * np.exp(-(cx**2 + cy**2 + cz**2) / K)
     # f0 = 1 / (np.pi**1.5) * np.exp(-1 * (cx**2 + cy**2 + cz**2))
-    # f0 = 0.5 * (3 / np.pi)**1.5 * (np.exp(-3.0 * (cx - 1)**2) + np.exp(-3.0 * (cx + 1)**2)) * np.exp(-3.0 * (cy**2 + cz**2))
+    f0 = 0.5 * (3 / np.pi)**1.5 * (np.exp(-3.0 * (cx - 1)**2) + np.exp(-3.0 * (cx + 1)**2)) * np.exp(-3.0 * (cy**2 + cz**2))
 
     # Calculate group moments.
     mu = calculate_group_moments(f0, cx, cy, cz, cx_vec, cy_vec, cz_vec)
+
+    # Create table for moments
+    table = create_table(beta_list, w_list)
+
+    print('Table created.\n')
+
+    # Use AMR to calculate initial groups.
+    A, b, wx, wy, wz = invert(mu, 1.0, 0.0, 0.0, 0.0)
+    initial_f = A[0, 0, 0] * np.exp(-b[0, 0, 0] * ((cx - wx[0, 0, 0])**2 + (cy - wy[0, 0, 0])**2 + (cz - wz[0, 0, 0])**2))
+    hellinger_dist = calculate_hellinger_distance(initial_f, f0, cx_vec, cy_vec, cz_vec, 0, 0, 0)
+    if hellinger_dist > 0.01:
+        results = refine_group(0, 0, 0)
+
+    mu = calculate_group_moments(f0, cx, cy, cz, cx_vec, cy_vec, cz_vec, results)
+    A, b, wx, wy, wz = invert(mu, 1.0, 0.0, 0.0, 0.0, results)
 
     # Initialize parameter lists
     Ak_list = np.zeros((COLLISION_PARAMS['n_t'] + 1, GROUP_PARAMS['num_groups_cx'], GROUP_PARAMS['num_groups_cy'], GROUP_PARAMS['num_groups_cz']))
@@ -43,11 +59,6 @@ def run_simulation():
     wxk_list = np.zeros((COLLISION_PARAMS['n_t'] + 1, GROUP_PARAMS['num_groups_cx'], GROUP_PARAMS['num_groups_cy'], GROUP_PARAMS['num_groups_cz']))
     wyk_list = np.zeros((COLLISION_PARAMS['n_t'] + 1, GROUP_PARAMS['num_groups_cx'], GROUP_PARAMS['num_groups_cy'], GROUP_PARAMS['num_groups_cz']))
     wzk_list = np.zeros((COLLISION_PARAMS['n_t'] + 1, GROUP_PARAMS['num_groups_cx'], GROUP_PARAMS['num_groups_cy'], GROUP_PARAMS['num_groups_cz']))
-
-    # Create table for moments
-    table = create_table(beta_list, w_list)
-
-    print('Table created.\n')
 
     b_guess = np.zeros((GROUP_PARAMS['num_groups_cx'], GROUP_PARAMS['num_groups_cy'], GROUP_PARAMS['num_groups_cz']))
     wx_guess = np.zeros((GROUP_PARAMS['num_groups_cx'], GROUP_PARAMS['num_groups_cy'], GROUP_PARAMS['num_groups_cz']))

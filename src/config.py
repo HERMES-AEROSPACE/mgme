@@ -6,25 +6,41 @@ VELOCITY_SPACE = {
     'num_cx': 241,
     'num_cy': 241,
     'num_cz': 241,
-    'cx_range': (-3, 3),
-    'cy_range': (-3, 3),
-    'cz_range': (-3, 3)
+    'cx_range': (-3.0, 3.0),
+    'cy_range': (-3.0, 3.0),
+    'cz_range': (-3.0, 3.0)
 }
 
 # Group parameters
+# GROUP_PARAMS = {
+#     'num_groups_cx': 4,
+#     'num_groups_cy': 2,
+#     'num_groups_cz': 2,
+#     'ci_cx': np.array([-3.0, -1.0, 0.0, 1.0]),
+#     'cf_cx': np.array([-1.0, 0.0, 1.0, 3.0]),
+#     'group_bounds_cx': np.array([[0, 81], [80, 121], [120, 161], [160, 241]]),
+#     'ci_cy': np.array([-3.0, 0.0]),
+#     'cf_cy': np.array([0.0, 3.0]),
+#     'group_bounds_cy': np.array([[0, 121], [120, 241]]),
+#     'ci_cz': np.array([-3.0, 0.0]),
+#     'cf_cz': np.array([0.0, 3.0]),
+#     'group_bounds_cz': np.array([[0, 121], [120, 241]])
+# }
+
+# AMR group parameters
 GROUP_PARAMS = {
-    'num_groups_cx': 4,
-    'num_groups_cy': 2,
-    'num_groups_cz': 2,
-    'ci_cx': np.array([-3.0, -1.0, 0.0, 1.0]),
-    'cf_cx': np.array([-1.0, 0.0, 1.0, 3.0]),
-    'group_bounds_cx': np.array([[0, 81], [80, 121], [120, 161], [160, 241]]),
-    'ci_cy': np.array([-3.0, 0.0]),
-    'cf_cy': np.array([0.0, 3.0]),
-    'group_bounds_cy': np.array([[0, 121], [120, 241]]),
-    'ci_cz': np.array([-3.0, 0.0]),
-    'cf_cz': np.array([0.0, 3.0]),
-    'group_bounds_cz': np.array([[0, 121], [120, 241]])
+    'num_groups_cx': 1,
+    'num_groups_cy': 1,
+    'num_groups_cz': 1,
+    'ci_cx': np.array([VELOCITY_SPACE['cx_range'][0]]),
+    'cf_cx': np.array([VELOCITY_SPACE['cx_range'][1]]),
+    'group_bounds_cx': np.array([[0, VELOCITY_SPACE['num_cx']]]),
+    'ci_cy': np.array([VELOCITY_SPACE['cy_range'][0]]),
+    'cf_cy': np.array([VELOCITY_SPACE['cy_range'][1]]),
+    'group_bounds_cy': np.array([[0, VELOCITY_SPACE['num_cy']]]),
+    'ci_cz': np.array([VELOCITY_SPACE['cz_range'][0]]),
+    'cf_cz': np.array([VELOCITY_SPACE['cz_range'][1]]),
+    'group_bounds_cz': np.array([[0, VELOCITY_SPACE['num_cz']]])
 }
 
 # Collision parameters

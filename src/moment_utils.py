@@ -256,18 +256,18 @@ def solve_equation(uk, ek, beta_list, w_list, uk_tab, ek_tab):
 
     return (bk[0], wk[0]) 
 
-def calculate_group_moments(f0, cx, cy, cz, cx_vec, cy_vec, cz_vec):
-    mu = np.zeros((GROUP_PARAMS['num_groups_cx'], GROUP_PARAMS['num_groups_cy'], GROUP_PARAMS['num_groups_cz'], 5))
+def calculate_group_moments(f0, cx, cy, cz, cx_vec, cy_vec, cz_vec, params=GROUP_PARAMS):
+    mu = np.zeros((params['num_groups_cx'], params['num_groups_cy'], params['num_groups_cz'], 5))
 
-    for i in range(GROUP_PARAMS['num_groups_cx']):
-        for j in range(GROUP_PARAMS['num_groups_cy']):
-            for k in range(GROUP_PARAMS['num_groups_cz']):
-                lb_cx = GROUP_PARAMS['group_bounds_cx'][i, 0]
-                ub_cx = GROUP_PARAMS['group_bounds_cx'][i, 1]
-                lb_cy = GROUP_PARAMS['group_bounds_cy'][j, 0]
-                ub_cy = GROUP_PARAMS['group_bounds_cy'][j, 1]
-                lb_cz = GROUP_PARAMS['group_bounds_cz'][k, 0]
-                ub_cz = GROUP_PARAMS['group_bounds_cz'][k, 1]
+    for i in range(params['num_groups_cx']):
+        for j in range(params['num_groups_cy']):
+            for k in range(params['num_groups_cz']):
+                lb_cx = params['group_bounds_cx'][i, 0]
+                ub_cx = params['group_bounds_cx'][i, 1]
+                lb_cy = params['group_bounds_cy'][j, 0]
+                ub_cy = params['group_bounds_cy'][j, 1]
+                lb_cz = params['group_bounds_cz'][k, 0]
+                ub_cz = params['group_bounds_cz'][k, 1]
 
                 mu[i, j, k] = calc_moment(f0[lb_cx:ub_cx, lb_cy:ub_cy, lb_cz:ub_cz], cx[lb_cx:ub_cx, lb_cy:ub_cy, lb_cz:ub_cz], \
                                 cy[lb_cx:ub_cx, lb_cy:ub_cy, lb_cz:ub_cz], cz[lb_cx:ub_cx, lb_cy:ub_cy, lb_cz:ub_cz], \
@@ -291,27 +291,27 @@ def create_table(beta_list, w_list):
 
     return table
 
-def invert(mu, b_guess, wx_guess, wy_guess, wz_guess):
-    A = np.zeros((GROUP_PARAMS['num_groups_cx'], GROUP_PARAMS['num_groups_cy'], GROUP_PARAMS['num_groups_cz']))
-    b = np.zeros((GROUP_PARAMS['num_groups_cx'], GROUP_PARAMS['num_groups_cy'], GROUP_PARAMS['num_groups_cz']))
-    wx = np.zeros((GROUP_PARAMS['num_groups_cx'], GROUP_PARAMS['num_groups_cy'], GROUP_PARAMS['num_groups_cz']))
-    wy = np.zeros((GROUP_PARAMS['num_groups_cx'], GROUP_PARAMS['num_groups_cy'], GROUP_PARAMS['num_groups_cz']))
-    wz = np.zeros((GROUP_PARAMS['num_groups_cx'], GROUP_PARAMS['num_groups_cy'], GROUP_PARAMS['num_groups_cz']))
+def invert(mu, b_guess, wx_guess, wy_guess, wz_guess, params=GROUP_PARAMS):
+    A = np.zeros((params['num_groups_cx'], params['num_groups_cy'], params['num_groups_cz']))
+    b = np.zeros((params['num_groups_cx'], params['num_groups_cy'], params['num_groups_cz']))
+    wx = np.zeros((params['num_groups_cx'], params['num_groups_cy'], params['num_groups_cz']))
+    wy = np.zeros((params['num_groups_cx'], params['num_groups_cy'], params['num_groups_cz']))
+    wz = np.zeros((params['num_groups_cx'], params['num_groups_cy'], params['num_groups_cz']))
 
-    for i in range(0, GROUP_PARAMS['num_groups_cx']):
-        for j in range(0, GROUP_PARAMS['num_groups_cy']):
-            for k in range(0, GROUP_PARAMS['num_groups_cz']):
+    for i in range(0, params['num_groups_cx']):
+        for j in range(0, params['num_groups_cy']):
+            for k in range(0, params['num_groups_cz']):
                 b[i, j, k], wx[i, j, k], wy[i, j, k], wz[i, j, k] = optimize.fsolve(moment_eq, \
                                                                                     [1.0, 0.0, 0.0, 0.0], \
                                                                                         args=(mu[i, j, k, 1] / mu[i, j, k, 0], mu[i, j, k, 2] / mu[i, j, k, 0], \
                                                                                               mu[i, j, k, 3] / mu[i, j, k, 0], mu[i, j, k, 4] / mu[i, j, k, 0], \
-                                                                                                GROUP_PARAMS['ci_cx'][i], GROUP_PARAMS['cf_cx'][i], \
-                                                                                                    GROUP_PARAMS['ci_cy'][j], GROUP_PARAMS['cf_cy'][j], \
-                                                                                                        GROUP_PARAMS['ci_cz'][k], GROUP_PARAMS['cf_cz'][k]))
+                                                                                                params['ci_cx'][i], params['cf_cx'][i], \
+                                                                                                    params['ci_cy'][j], params['cf_cy'][j], \
+                                                                                                        params['ci_cz'][k], params['cf_cz'][k]))
 
-                I0x = np.sqrt(np.pi / (4 * b[i, j, k])) * (special.erf(np.sqrt(b[i, j, k]) * (GROUP_PARAMS['cf_cx'][i] - wx[i, j, k])) - special.erf(np.sqrt(b[i, j, k]) * (GROUP_PARAMS['ci_cx'][i] - wx[i, j, k])))
-                I0y = np.sqrt(np.pi / (4 * b[i, j, k])) * (special.erf(np.sqrt(b[i, j, k]) * (GROUP_PARAMS['cf_cy'][j] - wy[i, j, k])) - special.erf(np.sqrt(b[i, j, k]) * (GROUP_PARAMS['ci_cy'][j] - wy[i, j, k])))
-                I0z = np.sqrt(np.pi / (4 * b[i, j, k])) * (special.erf(np.sqrt(b[i, j, k]) * (GROUP_PARAMS['cf_cz'][k] - wz[i, j, k])) - special.erf(np.sqrt(b[i, j, k]) * (GROUP_PARAMS['ci_cz'][k] - wz[i, j, k])))
+                I0x = np.sqrt(np.pi / (4 * b[i, j, k])) * (special.erf(np.sqrt(b[i, j, k]) * (params['cf_cx'][i] - wx[i, j, k])) - special.erf(np.sqrt(b[i, j, k]) * (params['ci_cx'][i] - wx[i, j, k])))
+                I0y = np.sqrt(np.pi / (4 * b[i, j, k])) * (special.erf(np.sqrt(b[i, j, k]) * (params['cf_cy'][j] - wy[i, j, k])) - special.erf(np.sqrt(b[i, j, k]) * (params['ci_cy'][j] - wy[i, j, k])))
+                I0z = np.sqrt(np.pi / (4 * b[i, j, k])) * (special.erf(np.sqrt(b[i, j, k]) * (params['cf_cz'][k] - wz[i, j, k])) - special.erf(np.sqrt(b[i, j, k]) * (params['ci_cz'][k] - wz[i, j, k])))
                 A[i, j, k] = mu[i, j, k, 0] / (I0x * I0y * I0z)
 
     return A, b, wx, wy, wz
