@@ -44,14 +44,14 @@ def run_simulation():
     print('Table created.\n')
 
     # Use AMR to calculate initial groups.
-    A, b, wx, wy, wz = invert(mu, 1.0, 0.0, 0.0, 0.0)
-    initial_f = A[0, 0, 0] * np.exp(-b[0, 0, 0] * ((cx - wx[0, 0, 0])**2 + (cy - wy[0, 0, 0])**2 + (cz - wz[0, 0, 0])**2))
-    hellinger_dist = calculate_hellinger_distance(initial_f, f0, cx_vec, cy_vec, cz_vec, 0, 0, 0)
-    if hellinger_dist > 0.01:
-        results = refine_group(0, 0, 0)
+    # A, b, wx, wy, wz = invert(mu, 1.0, 0.0, 0.0, 0.0)
+    # initial_f = A[0, 0, 0] * np.exp(-b[0, 0, 0] * ((cx - wx[0, 0, 0])**2 + (cy - wy[0, 0, 0])**2 + (cz - wz[0, 0, 0])**2))
+    # hellinger_dist = calculate_hellinger_distance(initial_f, f0, cx_vec, cy_vec, cz_vec, 0, 0, 0)
+    # if hellinger_dist > 0.01:
+    #     results = refine_group(0, 0, 0)
 
-    mu = calculate_group_moments(f0, cx, cy, cz, cx_vec, cy_vec, cz_vec, results)
-    A, b, wx, wy, wz = invert(mu, 1.0, 0.0, 0.0, 0.0, results)
+    # mu = calculate_group_moments(f0, cx, cy, cz, cx_vec, cy_vec, cz_vec, results)
+    # A, b, wx, wy, wz = invert(mu, 1.0, 0.0, 0.0, 0.0, results)
 
     # Initialize parameter lists
     Ak_list = np.zeros((COLLISION_PARAMS['n_t'] + 1, GROUP_PARAMS['num_groups_cx'], GROUP_PARAMS['num_groups_cy'], GROUP_PARAMS['num_groups_cz']))
@@ -113,7 +113,7 @@ def run_simulation():
             print('Time step: ', t)
             # save_simulation_data(t, Ak_list, bk_list, wk_list)
 
-        group_n, group_px, group_py, group_pz, group_e = collide(x_sample, y_sample, z_sample, weights, num_group_sample, n_samples, COLLISION_PARAMS['n_coll'])
+        group_n, group_px, group_py, group_pz, group_e = collide(x_sample, y_sample, z_sample, weights, num_group_sample, n_samples)
 
         for i in range(GROUP_PARAMS['num_groups_cx']):
             for j in range(GROUP_PARAMS['num_groups_cy']):

@@ -1,6 +1,7 @@
 import numpy as np
-from .config import GROUP_PARAMS, VELOCITY_SPACE
-from numba import jit
+from .config import GROUP_PARAMS, VELOCITY_SPACE, COLLISION_PARAMS
+from numba import jit, types
+from numba.typed import Dict
 
 
 NUM_GROUPS_CX = GROUP_PARAMS['num_groups_cx']
@@ -18,26 +19,60 @@ CX_UB = VELOCITY_SPACE['cx_range'][1]
 CY_UB = VELOCITY_SPACE['cy_range'][1]
 CZ_UB = VELOCITY_SPACE['cz_range'][1]
 
+n_coll = COLLISION_PARAMS['n_coll']
+
+key_type = types.UniTuple(types.UniTuple(types.int64, 3), 2)
+
+
 @jit(nopython=True)
-def collide(x_sample, y_sample, z_sample, weights, num_group_sample, n_samples, n_coll):
+def collide(x_sample, y_sample, z_sample, weights, num_group_sample, n_samples):
     group_n = np.zeros((NUM_GROUPS_CX, NUM_GROUPS_CY, NUM_GROUPS_CZ))
     group_px = np.zeros((NUM_GROUPS_CX, NUM_GROUPS_CY, NUM_GROUPS_CZ))
     group_py = np.zeros((NUM_GROUPS_CX, NUM_GROUPS_CY, NUM_GROUPS_CZ))
     group_pz = np.zeros((NUM_GROUPS_CX, NUM_GROUPS_CY, NUM_GROUPS_CZ))
     group_e = np.zeros((NUM_GROUPS_CX, NUM_GROUPS_CY, NUM_GROUPS_CZ))
 
-    for i in range(0, n_coll):
-        # Draw random depletion velocities.
-        depl_idx1 = int(np.floor(np.random.uniform(0, n_samples)))
-        depl_idx2 = int(np.floor(np.random.uniform(0, n_samples)))
-        if depl_idx1 == depl_idx2: continue
+    depl_idx1 = np.floor(np.random.uniform(0, n_samples, n_coll)).astype(np.int32)
+    depl_idx2 = np.floor(np.random.uniform(0, n_samples, n_coll)).astype(np.int32)
 
-        vx1 = x_sample[depl_idx1]
-        vy1 = y_sample[depl_idx1]
-        vz1 = z_sample[depl_idx1]
-        vx2 = x_sample[depl_idx2]
-        vy2 = y_sample[depl_idx2]
-        vz2 = z_sample[depl_idx2]
+    mask = depl_idx1 != depl_idx2
+
+    depl_idx1 = depl_idx1[mask]
+    depl_idx2 = depl_idx2[mask]
+
+    # Group the prospective collisions into which group they end up in.
+    depl_tracker = Dict.empty(key_type=key_type, \
+                              value_type=types.int64)
+
+    for i in range(0, depl_idx1.size):
+        depl_group1_x = np.argmax(np.logical_and(x_sample[depl_idx1[i]] >= CI_CX, x_sample[depl_idx1[i]] <= CF_CX))
+        depl_group1_y = np.argmax(np.logical_and(y_sample[depl_idx1[i]] >= CI_CY, y_sample[depl_idx1[i]] <= CF_CY))
+        depl_group1_z = np.argmax(np.logical_and(z_sample[depl_idx1[i]] >= CI_CZ, z_sample[depl_idx1[i]] <= CF_CZ))
+
+        depl_group2_x = np.argmax(np.logical_and(x_sample[depl_idx2[i]] >= CI_CX, x_sample[depl_idx2[i]] <= CF_CX))
+        depl_group2_y = np.argmax(np.logical_and(y_sample[depl_idx2[i]] >= CI_CY, y_sample[depl_idx2[i]] <= CF_CY))
+        depl_group2_z = np.argmax(np.logical_and(z_sample[depl_idx2[i]] >= CI_CZ, z_sample[depl_idx2[i]] <= CF_CZ))
+
+        depl_1 = (depl_group1_x, depl_group1_y, depl_group1_z)
+        depl_2 = (depl_group2_x, depl_group2_y, depl_group2_z)
+
+        if depl_1 < depl_2: key = (depl_1, depl_2)
+        else: key = (depl_2, depl_1)
+
+        if key in depl_tracker: depl_tracker[key] += 1
+        else: depl_tracker[key] = 1
+
+    for i in range(0, depl_idx1.size):
+        # Draw random depletion velocities.
+        d_idx1 = depl_idx1[i]
+        d_idx2 = depl_idx2[i]
+
+        vx1 = x_sample[d_idx1]
+        vy1 = y_sample[d_idx1]
+        vz1 = z_sample[d_idx1]
+        vx2 = x_sample[d_idx2]
+        vy2 = y_sample[d_idx2]
+        vz2 = z_sample[d_idx2]
 
         # Simulate virtual collisions.
         gx = np.abs(vx2 - vx1)
@@ -74,7 +109,13 @@ def collide(x_sample, y_sample, z_sample, weights, num_group_sample, n_samples, 
         group_idx2_y = np.argmax(np.logical_and(vy2 >= CI_CY, vy2 <= CF_CY))
         group_idx2_z = np.argmax(np.logical_and(vz2 >= CI_CZ, vz2 <= CF_CZ))
 
-        Li = weights[depl_idx1] * weights[depl_idx2] * num_group_sample[group_idx1_x, group_idx1_y, group_idx1_z] * num_group_sample[group_idx2_x, group_idx2_y, group_idx2_z] / n_coll
+        tmp1 = (group_idx1_x, group_idx1_y, group_idx1_z)
+        tmp2 = (group_idx2_x, group_idx2_y, group_idx2_z)
+        if tmp1 < tmp2: key = (tmp1, tmp2)
+        else: key = (tmp2, tmp1)
+        n_coll_group = depl_tracker[key]
+
+        Li = weights[d_idx1] * weights[d_idx2] * num_group_sample[group_idx1_x, group_idx1_y, group_idx1_z] * num_group_sample[group_idx2_x, group_idx2_y, group_idx2_z] / n_coll_group
         group_n[group_idx1_x, group_idx1_y, group_idx1_z] -= Li
         group_px[group_idx1_x, group_idx1_y, group_idx1_z] -= Li * vx1
         group_py[group_idx1_x, group_idx1_y, group_idx1_z] -= Li * vy1
@@ -110,7 +151,7 @@ def collide(x_sample, y_sample, z_sample, weights, num_group_sample, n_samples, 
         if vz2p > CZ_UB:
             group_idx2_z = NUM_GROUPS_CZ - 1
 
-        Gi = weights[depl_idx1] *  weights[depl_idx2] * num_group_sample[group_idx1_x, group_idx1_y, group_idx1_z] * num_group_sample[group_idx2_x, group_idx2_y, group_idx2_z] / n_coll
+        Gi = Li
         group_n[group_idx1_x, group_idx1_y, group_idx1_z] += Gi
         group_px[group_idx1_x, group_idx1_y, group_idx1_z] += Gi * vx1p
         group_py[group_idx1_x, group_idx1_y, group_idx1_z] += Gi * vy1p
@@ -122,5 +163,5 @@ def collide(x_sample, y_sample, z_sample, weights, num_group_sample, n_samples, 
         group_py[group_idx2_x, group_idx2_y, group_idx2_z] += Gi * vy2p
         group_pz[group_idx2_x, group_idx2_y, group_idx2_z] += Gi * vz2p
         group_e[group_idx2_x, group_idx2_y, group_idx2_z] += Gi * (vx2p**2 + vy2p**2 + vz2p**2)
-
+    
     return group_n, group_px, group_py, group_pz, group_e
