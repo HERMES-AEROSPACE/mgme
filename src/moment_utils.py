@@ -291,19 +291,18 @@ def create_table(beta_list, w_list):
 
     return table
 
-def invert(mu, b_guess, wx_guess, wy_guess, wz_guess, n_groups=GROUP_PARAMS, group_bounds=GROUP_PARAMS):
-    A = np.zeros((n_groups['num_groups_cx'], n_groups['num_groups_cy'], n_groups['num_groups_cz']))
-    b = np.zeros((n_groups['num_groups_cx'], n_groups['num_groups_cy'], n_groups['num_groups_cz']))
-    wx = np.zeros((n_groups['num_groups_cx'], n_groups['num_groups_cy'], n_groups['num_groups_cz']))
-    wy = np.zeros((n_groups['num_groups_cx'], n_groups['num_groups_cy'], n_groups['num_groups_cz']))
-    wz = np.zeros((n_groups['num_groups_cx'], n_groups['num_groups_cy'], n_groups['num_groups_cz']))
-
-    b, wx, wy, wz = optimize.fsolve(moment_eq, [1.0, 0.0, 0.0, 0.0], \
-                                    args=(mu[1] / mu[0], mu[2] / mu[0], \
-                                            mu[3] / mu[0], mu[4] / mu[0], \
-                                            group_bounds['ci_cx'], group_bounds['cf_cx'], \
-                                                group_bounds['ci_cy'], group_bounds['cf_cy'], \
-                                                    group_bounds['ci_cz'], group_bounds['cf_cz']))
+def invert(mu, group_bounds=GROUP_PARAMS):
+    try:
+        b, wx, wy, wz = optimize.fsolve(moment_eq, [1.0, 0.0, 0.0, 0.0], \
+                                        args=(mu[1] / mu[0], mu[2] / mu[0], \
+                                                mu[3] / mu[0], mu[4] / mu[0], \
+                                                group_bounds['ci_cx'], group_bounds['cf_cx'], \
+                                                    group_bounds['ci_cy'], group_bounds['cf_cy'], \
+                                                        group_bounds['ci_cz'], group_bounds['cf_cz']))
+        if b == 1.0 and wx == 0.0 and wy == 0.0 and wz == 0.0: raise RuntimeError
+    except RuntimeError:
+        b_guess, wx_guess, wy_guess, wz_guess = solve_equation(mu[1] / mu[0], mu[4] / mu[0], beta_list, w_list, ukx_tab, ek_tab)
+        
 
     I0x = np.sqrt(np.pi / (4 * b)) * (special.erf(np.sqrt(b) * (group_bounds['cf_cx'] - wx)) - special.erf(np.sqrt(b) * (group_bounds['ci_cx'] - wx)))
     I0y = np.sqrt(np.pi / (4 * b)) * (special.erf(np.sqrt(b) * (group_bounds['cf_cy'] - wy)) - special.erf(np.sqrt(b) * (group_bounds['ci_cy'] - wy)))

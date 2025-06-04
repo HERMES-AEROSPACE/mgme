@@ -1,4 +1,6 @@
 import numpy as np
+from itertools import product
+from .moment_utils import calc_moment, invert
 from .config import GROUP_PARAMS, AMR
 
 
@@ -17,56 +19,75 @@ class GroupNode:
         self.children.append(child)
 
 
-def calculate_hellinger_distance(f1_group, f2_group, cx_vec, cy_vec, cz_vec, params=GROUP_PARAMS):
+def calculate_hellinger_distance(f1, f2, cx_vec, cy_vec, cz_vec, params=GROUP_PARAMS):
     """
     Calculate the Hellinger distance between two distributions in a specific group.
+    Make sure distributions are normalized to 1!!!!!!
     
     Args:
-        f1_group, f2_group: Distribution functions
+        f1, f2: Group distribution functions
         cx_vec, cy_vec, cz_vec: Velocity space vectors
-        group_idx_x, group_idx_y, group_idx_z: Group indices
         
     Returns:
-        Hellinger distance between f1 and f2 in the specified group
+        Hellinger distance between f1 and f2
     """
-    # Get group bounds
-    lb_cx = params['group_bounds_cx'][0]
-    ub_cx = params['group_bounds_cx'][1]
-    lb_cy = params['group_bounds_cy'][0]
-    ub_cy = params['group_bounds_cy'][1]
-    lb_cz = params['group_bounds_cz'][0]
-    ub_cz = params['group_bounds_cz'][1]
-    
-    
     # Calculate Hellinger distance
     # H(P,Q) = √(1/2) * √(∫(√P(x) - √Q(x))² dx)
-    diff = np.sqrt(f1_group) - np.sqrt(f2_group)
+    diff = np.sqrt(f1) - np.sqrt(f2)
     squared_diff = diff**2
     
     # Integrate over the group volume
-    integral = np.trapz(np.trapz(np.trapz(squared_diff, cz_vec[lb_cz:ub_cz], axis=2), cy_vec[lb_cy:ub_cy], axis=1), cx_vec[lb_cx:ub_cx], axis=0)
+    integral = np.trapz(np.trapz(np.trapz(squared_diff, cz_vec, axis=2), cy_vec, axis=1), cx_vec, axis=0)
 
     return np.sqrt(0.5 * integral)
 
-def refine_group(node):
+def refine_init(f0, cx, cy, cz, cx_vec, cy_vec, cz_vec, node, max_depth=5, curr_depth=0):
     if node.hellinger_dist < AMR['threshold']:
+        return
+    if curr_depth >= max_depth:
+        print(f"Warning: Maximum recursion depth {max_depth} reached")
         return
     else:
         # Split into octree data structure. Create 8 subnodes off of input node.
-        test_children = refine_group2(node.group_bounds)
-        c1 = GroupNode({'ci_cx': np.array([test_children['ci_cx'][0]]), 'cf_cx': np.array([test_children['cf_cx'][0]]), \
-                        'ci_cy': np.array([test_children['ci_cy'][0]]), 'cf_cy': np.array([test_children['cf_cy'][0]]), \
-                        'ci_cz': np.array([test_children['ci_cz'][0]]), 'cf_cz': np.array([test_children['cf_cz'][0]]), \
-                        'group_bounds_cx': np.array(test_children['group_bounds_cx'][0]), 'group_bounds_cy': np.array(test_children['group_bounds_cy'][0]), 'group_bounds_cz': np.array(test_children['group_bounds_cz'][0])})
-        print(test_children)
-        print(c1.group_bounds)
+        ref_child = refine_group2(node.group_bounds)
 
-        # Calculate mu in each sub-node and invert.
+        children = []
+        for cx_idx, cy_idx, cz_idx in product([0, 1], repeat=3):
+            # Get important group bounds as they will be used everywhere.
+            lb_cx, ub_cx = ref_child['group_bounds_cx'][cx_idx]
+            lb_cy, ub_cy = ref_child['group_bounds_cy'][cy_idx]
+            lb_cz, ub_cz = ref_child['group_bounds_cz'][cz_idx]
 
-        # Calculate Hellinger distance.
+            child = GroupNode({'ci_cx': ref_child['ci_cx'][cx_idx], 'cf_cx': ref_child['cf_cx'][cx_idx], 'group_bounds_cx': np.array([lb_cx, ub_cx]), \
+                        'ci_cy': ref_child['ci_cy'][cy_idx], 'cf_cy': ref_child['cf_cy'][cy_idx], 'group_bounds_cy': np.array([lb_cy, ub_cy]), \
+                        'ci_cz': ref_child['ci_cz'][cz_idx], 'cf_cz': ref_child['cf_cz'][cz_idx], 'group_bounds_cz': np.array([lb_cz, ub_cz])})
+            
+            node.add_child(child)
+
+            f0_slice = f0[lb_cx:ub_cx, lb_cy:ub_cy, lb_cz:ub_cz]
+            cx_slice = cx[lb_cx:ub_cx, lb_cy:ub_cy, lb_cz:ub_cz]
+            cy_slice = cy[lb_cx:ub_cx, lb_cy:ub_cy, lb_cz:ub_cz]
+            cz_slice = cz[lb_cx:ub_cx, lb_cy:ub_cy, lb_cz:ub_cz]
+            cx_vec_slice = cx_vec[lb_cx:ub_cx]
+            cy_vec_slice = cy_vec[lb_cy:ub_cy]
+            cz_vec_slice = cz_vec[lb_cz:ub_cz]
+
+            # Calculate mu in each sub-node and invert.
+            mu = calc_moment(f0_slice, cx_slice, cy_slice, cz_slice, cx_vec_slice, cy_vec_slice, cz_vec_slice)
+            
+            A, b, wx, wy, wz = invert(mu, child.group_bounds)
+            print(A, b, wx, wy, wz)
+            
+            # Calculate Hellinger distance.
+            f = A * np.exp(-b * ((cx_slice - wx)**2 + (cy_slice - wy)**2 + (cz_slice - wz)**2))
+            dist = calculate_hellinger_distance(f0_slice, f, cx_vec_slice, cy_vec_slice, cz_vec_slice, child.group_bounds)
+            child.set_hellinger_distance(dist)
+
+            children.append(child)
 
         # Refine the children cells if needed.
-        # refine_group()
+        for child in children:
+            refine_init(f0, cx, cy, cz, cx_vec, cy_vec, cz_vec, child, max_depth, curr_depth + 1)
 
 
 def refine_group2(group_bounds):
@@ -133,3 +154,27 @@ def refine_group2(group_bounds):
         'group_bounds_cy': new_group_bounds_cy,
         'group_bounds_cz': new_group_bounds_cz
     }
+
+def print_tree_structure(root, prefix="", is_last=True):
+    """
+    Print tree structure with visual formatting
+    
+    Args:
+        root: TreeNode - the root of the tree/subtree
+        prefix: str - prefix for current line (used for indentation)
+        is_last: bool - whether this is the last child of its parent
+    """
+    if root is None:
+        return
+    
+    # Print current node with proper connector
+    connector = "└── " if is_last else "├── "
+    print(f"{prefix}{connector}O")
+    
+    # Update prefix for children
+    child_prefix = prefix + ("    " if is_last else "│   ")
+    
+    # Print all children
+    for i, child in enumerate(root.children):
+        is_child_last = (i == len(root.children) - 1)
+        print_tree_structure(child, child_prefix, is_child_last)

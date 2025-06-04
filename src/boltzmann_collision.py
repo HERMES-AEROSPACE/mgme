@@ -17,7 +17,7 @@ from .sampling import generate_regular_samples, calculate_moments_from_weights, 
 from .virtual_collisions import collide
 from .data_utils import save_simulation_data
 from .banner import print_banner
-from .amr import calculate_hellinger_distance, GroupNode, refine_group
+from .amr import calculate_hellinger_distance, GroupNode, refine_init, print_tree_structure
 
 
 def run_simulation():
@@ -31,10 +31,10 @@ def run_simulation():
     beta_list, w_list = calculate_beta_w_lists()
 
     # Initial distribution function.
-    # K = 1 - 0.4 * np.exp(-0/6)
-    # f0 = 1 / (2 * K * (np.pi * K)**1.5) * (5 * K - 3 + 2 * (1 - K) / K * (cx**2 + cy**2 + cz**2)) * np.exp(-(cx**2 + cy**2 + cz**2) / K)
+    K = 1 - 0.4 * np.exp(-0/6)
+    f0 = 1 / (2 * K * (np.pi * K)**1.5) * (5 * K - 3 + 2 * (1 - K) / K * (cx**2 + cy**2 + cz**2)) * np.exp(-(cx**2 + cy**2 + cz**2) / K)
     # f0 = 1 / (np.pi**1.5) * np.exp(-1 * (cx**2 + cy**2 + cz**2))
-    f0 = 0.5 * (3 / np.pi)**1.5 * (np.exp(-3.0 * (cx - 1)**2) + np.exp(-3.0 * (cx + 1)**2)) * np.exp(-3 * (cy**2 + cz**2))
+    # f0 = 0.5 * (3 / np.pi)**1.5 * (np.exp(-3.0 * (cx - 1)**2) + np.exp(-3.0 * (cx + 1)**2)) * np.exp(-3 * (cy**2 + cz**2))
 
     # Calculate group moments.
     mu = calculate_group_moments(f0, cx, cy, cz, cx_vec, cy_vec, cz_vec)
@@ -54,12 +54,15 @@ def run_simulation():
                       'ci_cz': VELOCITY_SPACE['cz_range'][0], 'cf_cz': VELOCITY_SPACE['cz_range'][1], 'group_bounds_cz': np.array([0, VELOCITY_SPACE['num_cz']])})
     mu = calc_moment(f0, cx, cy, cz, cx_vec, cy_vec, cz_vec)
     root.set_mu(mu)
-    A, b, wx, wy, wz = invert(root.mu, 1.0, 0.0, 0.0, 0.0, curr_n_groups, root.group_bounds)
+    A, b, wx, wy, wz = invert(root.mu, root.group_bounds)
     root_f = A * np.exp(-b * ((cx - wx)**2 + (cy - wy)**2 + (cz - wz)**2))
     dist = calculate_hellinger_distance(f0, root_f, cx_vec, cy_vec, cz_vec, root.group_bounds)
     root.set_hellinger_distance(dist)
 
-    refine_group(root)
+    print('Running AMR to get initial groups...')
+    refine_init(f0, cx, cy, cz, cx_vec, cy_vec, cz_vec, root)
+
+    # print_tree_structure(root)
 
     # Initialize parameter lists
     Ak_list = np.zeros((COLLISION_PARAMS['n_t'] + 1, GROUP_PARAMS['num_groups_cx'], GROUP_PARAMS['num_groups_cy'], GROUP_PARAMS['num_groups_cz']))
