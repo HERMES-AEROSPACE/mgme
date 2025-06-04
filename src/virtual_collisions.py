@@ -63,7 +63,6 @@ def collide(x_sample, y_sample, z_sample, weights, num_group_sample, n_samples):
         else: depl_tracker[key] = 1
 
     for i in range(0, depl_idx1.size):
-        # Draw random depletion velocities.
         d_idx1 = depl_idx1[i]
         d_idx2 = depl_idx2[i]
 

@@ -6,17 +6,18 @@ from scipy.stats import qmc, norm
 from .config import (
     VELOCITY_SPACE,
     GROUP_PARAMS, 
+    AMR,
     COLLISION_PARAMS, 
     SAMPLING_PARAMS,
     calculate_beta_w_lists,
     calculate_velocity_grid
 )
-from .moment_utils import moment_eq, solve_equation, calculate_group_moments, create_table, invert
+from .moment_utils import moment_eq, solve_equation, calculate_group_moments, create_table, invert, calc_moment
 from .sampling import generate_regular_samples, calculate_moments_from_weights, generate_grid, reweight_samples
 from .virtual_collisions import collide
 from .data_utils import save_simulation_data
 from .banner import print_banner
-from .amr import calculate_hellinger_distance, refine_group
+from .amr import calculate_hellinger_distance, GroupNode, refine_group
 
 
 def run_simulation():
@@ -33,7 +34,7 @@ def run_simulation():
     # K = 1 - 0.4 * np.exp(-0/6)
     # f0 = 1 / (2 * K * (np.pi * K)**1.5) * (5 * K - 3 + 2 * (1 - K) / K * (cx**2 + cy**2 + cz**2)) * np.exp(-(cx**2 + cy**2 + cz**2) / K)
     # f0 = 1 / (np.pi**1.5) * np.exp(-1 * (cx**2 + cy**2 + cz**2))
-    f0 = 0.5 * (3 / np.pi)**1.5 * (np.exp(-3.0 * (cx - 1)**2) + np.exp(-3.0 * (cx + 1)**2)) * np.exp(-3.0 * (cy**2 + cz**2))
+    f0 = 0.5 * (3 / np.pi)**1.5 * (np.exp(-3.0 * (cx - 1)**2) + np.exp(-3.0 * (cx + 1)**2)) * np.exp(-3 * (cy**2 + cz**2))
 
     # Calculate group moments.
     mu = calculate_group_moments(f0, cx, cy, cz, cx_vec, cy_vec, cz_vec)
@@ -43,15 +44,22 @@ def run_simulation():
 
     print('Table created.\n')
 
-    # Use AMR to calculate initial groups.
-    # A, b, wx, wy, wz = invert(mu, 1.0, 0.0, 0.0, 0.0)
-    # initial_f = A[0, 0, 0] * np.exp(-b[0, 0, 0] * ((cx - wx[0, 0, 0])**2 + (cy - wy[0, 0, 0])**2 + (cz - wz[0, 0, 0])**2))
-    # hellinger_dist = calculate_hellinger_distance(initial_f, f0, cx_vec, cy_vec, cz_vec, 0, 0, 0)
-    # if hellinger_dist > 0.01:
-    #     results = refine_group(0, 0, 0)
+    prev_n_groups = {'num_groups_cx': 1, 'num_groups_cy': 1, 'num_groups_cz': 1}
+    curr_n_groups = {'num_groups_cx': 1, 'num_groups_cy': 1, 'num_groups_cz': 1}
+    refine_n_groups = {'num_groups_cx': 1, 'num_groups_cy': 1, 'num_groups_cz': 1}
 
-    # mu = calculate_group_moments(f0, cx, cy, cz, cx_vec, cy_vec, cz_vec, results)
-    # A, b, wx, wy, wz = invert(mu, 1.0, 0.0, 0.0, 0.0, results)
+    # Use AMR to calculate initial groups.
+    root = GroupNode({'ci_cx': VELOCITY_SPACE['cx_range'][0], 'cf_cx': VELOCITY_SPACE['cx_range'][1], 'group_bounds_cx': np.array([0, VELOCITY_SPACE['num_cx']]),
+                      'ci_cy': VELOCITY_SPACE['cy_range'][0], 'cf_cy': VELOCITY_SPACE['cy_range'][1], 'group_bounds_cy': np.array([0, VELOCITY_SPACE['num_cy']]), 
+                      'ci_cz': VELOCITY_SPACE['cz_range'][0], 'cf_cz': VELOCITY_SPACE['cz_range'][1], 'group_bounds_cz': np.array([0, VELOCITY_SPACE['num_cz']])})
+    mu = calc_moment(f0, cx, cy, cz, cx_vec, cy_vec, cz_vec)
+    root.set_mu(mu)
+    A, b, wx, wy, wz = invert(root.mu, 1.0, 0.0, 0.0, 0.0, curr_n_groups, root.group_bounds)
+    root_f = A * np.exp(-b * ((cx - wx)**2 + (cy - wy)**2 + (cz - wz)**2))
+    dist = calculate_hellinger_distance(f0, root_f, cx_vec, cy_vec, cz_vec, root.group_bounds)
+    root.set_hellinger_distance(dist)
+
+    refine_group(root)
 
     # Initialize parameter lists
     Ak_list = np.zeros((COLLISION_PARAMS['n_t'] + 1, GROUP_PARAMS['num_groups_cx'], GROUP_PARAMS['num_groups_cy'], GROUP_PARAMS['num_groups_cz']))
