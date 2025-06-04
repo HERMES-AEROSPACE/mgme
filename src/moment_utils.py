@@ -1,8 +1,10 @@
 import numpy as np
 from scipy import special
 from scipy import optimize
-from .config import GROUP_PARAMS, LOOKUP_TABLE
-import matplotlib.pyplot as plt
+from .config import GROUP_PARAMS, LOOKUP_TABLE, VELOCITY_SPACE
+from matplotlib import pyplot as plt
+
+import sys
 
 def moments(beta, w, ci_cx, cf_cx, ci_cy, cf_cy, ci_cz, cf_cz):
     """
@@ -275,34 +277,34 @@ def calculate_group_moments(f0, cx, cy, cz, cx_vec, cy_vec, cz_vec, n_groups=GRO
 
     return mu
 
-def create_table(beta_list, w_list):
-    table = np.zeros((GROUP_PARAMS['num_groups_cx'], GROUP_PARAMS['num_groups_cy'], GROUP_PARAMS['num_groups_cz'], 4, LOOKUP_TABLE['n_points'], LOOKUP_TABLE['n_points']))
-    X, Y = np.meshgrid(beta_list, w_list, indexing='ij')
+def invert(mu, group_bounds=GROUP_PARAMS, max_attempts=10):
+    guess_arr = [1.0, 0.0, 0.0, 0.0]
 
-    for i in range(GROUP_PARAMS['num_groups_cx']):
-        for j in range(GROUP_PARAMS['num_groups_cy']):
-            for k in range(GROUP_PARAMS['num_groups_cz']):
-                uxk_tab, uyk_tab, uzk_tab, ek_tab = np.array(moments(X, Y, GROUP_PARAMS['ci_cx'][i], GROUP_PARAMS['cf_cx'][i], \
-                                                  GROUP_PARAMS['ci_cy'][j], GROUP_PARAMS['cf_cy'][j], GROUP_PARAMS['ci_cz'][k], GROUP_PARAMS['cf_cz'][k]))
-                table[i, j, k, 0] = uxk_tab
-                table[i, j, k, 1] = uyk_tab
-                table[i, j, k, 2] = uzk_tab
-                table[i, j, k, 3] = ek_tab
-
-    return table
-
-def invert(mu, group_bounds=GROUP_PARAMS):
-    try:
-        b, wx, wy, wz = optimize.fsolve(moment_eq, [1.0, 0.0, 0.0, 0.0], \
-                                        args=(mu[1] / mu[0], mu[2] / mu[0], \
-                                                mu[3] / mu[0], mu[4] / mu[0], \
-                                                group_bounds['ci_cx'], group_bounds['cf_cx'], \
-                                                    group_bounds['ci_cy'], group_bounds['cf_cy'], \
-                                                        group_bounds['ci_cz'], group_bounds['cf_cz']))
-        if b == 1.0 and wx == 0.0 and wy == 0.0 and wz == 0.0: raise RuntimeError
-    except RuntimeError:
-        b_guess, wx_guess, wy_guess, wz_guess = solve_equation(mu[1] / mu[0], mu[4] / mu[0], beta_list, w_list, ukx_tab, ek_tab)
-        
+    for attempt in range(max_attempts):
+        try:
+            sol, _, ier, _ = optimize.fsolve(moment_eq, guess_arr, \
+                                            args=(mu[1] / mu[0], mu[2] / mu[0], \
+                                                    mu[3] / mu[0], mu[4] / mu[0], \
+                                                    group_bounds['ci_cx'], group_bounds['cf_cx'], \
+                                                        group_bounds['ci_cy'], group_bounds['cf_cy'], \
+                                                            group_bounds['ci_cz'], group_bounds['cf_cz']), full_output=True)
+            b = sol[0]
+            wx = sol[1]
+            wy = sol[2]
+            wz = sol[3]
+            
+            if ier != 1: raise RuntimeError
+            if VELOCITY_SPACE['cx_range'][0] > wx or VELOCITY_SPACE['cx_range'][1] < wx: raise RuntimeError
+            if VELOCITY_SPACE['cy_range'][0] > wy or VELOCITY_SPACE['cy_range'][1] < wy: raise RuntimeError
+            if VELOCITY_SPACE['cz_range'][0] > wz or VELOCITY_SPACE['cz_range'][1] < wz: raise RuntimeError
+        except RuntimeError:
+            guess_arr[0] /= 10
+            if mu[1] > 0: guess_arr[1] += 0.1
+            else: guess_arr[1] -= 0.1
+            if mu[2] > 0: guess_arr[2] += 0.1
+            else: guess_arr[2] -= 0.1
+            if mu[3] > 0: guess_arr[3] += 0.1
+            else: guess_arr[3] -= 0.1
 
     I0x = np.sqrt(np.pi / (4 * b)) * (special.erf(np.sqrt(b) * (group_bounds['cf_cx'] - wx)) - special.erf(np.sqrt(b) * (group_bounds['ci_cx'] - wx)))
     I0y = np.sqrt(np.pi / (4 * b)) * (special.erf(np.sqrt(b) * (group_bounds['cf_cy'] - wy)) - special.erf(np.sqrt(b) * (group_bounds['ci_cy'] - wy)))

@@ -61,7 +61,7 @@ def refine_init(f0, cx, cy, cz, cx_vec, cy_vec, cz_vec, node, max_depth=5, curr_
             child = GroupNode({'ci_cx': ref_child['ci_cx'][cx_idx], 'cf_cx': ref_child['cf_cx'][cx_idx], 'group_bounds_cx': np.array([lb_cx, ub_cx]), \
                         'ci_cy': ref_child['ci_cy'][cy_idx], 'cf_cy': ref_child['cf_cy'][cy_idx], 'group_bounds_cy': np.array([lb_cy, ub_cy]), \
                         'ci_cz': ref_child['ci_cz'][cz_idx], 'cf_cz': ref_child['cf_cz'][cz_idx], 'group_bounds_cz': np.array([lb_cz, ub_cz])})
-            
+            print(child.group_bounds['ci_cx'], child.group_bounds['cf_cx'], child.group_bounds['ci_cy'], child.group_bounds['cf_cy'], child.group_bounds['ci_cz'], child.group_bounds['cf_cz'])
             node.add_child(child)
 
             f0_slice = f0[lb_cx:ub_cx, lb_cy:ub_cy, lb_cz:ub_cz]
@@ -75,15 +75,20 @@ def refine_init(f0, cx, cy, cz, cx_vec, cy_vec, cz_vec, node, max_depth=5, curr_
             # Calculate mu in each sub-node and invert.
             mu = calc_moment(f0_slice, cx_slice, cy_slice, cz_slice, cx_vec_slice, cy_vec_slice, cz_vec_slice)
             
-            A, b, wx, wy, wz = invert(mu, child.group_bounds)
-            print(A, b, wx, wy, wz)
+            if mu[0] > 1e-3:
+                A, b, wx, wy, wz = invert(mu, child.group_bounds)
+                print(mu, A, b, wx, wy, wz)
             
-            # Calculate Hellinger distance.
-            f = A * np.exp(-b * ((cx_slice - wx)**2 + (cy_slice - wy)**2 + (cz_slice - wz)**2))
-            dist = calculate_hellinger_distance(f0_slice, f, cx_vec_slice, cy_vec_slice, cz_vec_slice, child.group_bounds)
-            child.set_hellinger_distance(dist)
+                # Calculate Hellinger distance.
+                f = A * np.exp(-b * ((cx_slice - wx)**2 + (cy_slice - wy)**2 + (cz_slice - wz)**2))
+                dist = calculate_hellinger_distance(f0_slice, f, cx_vec_slice, cy_vec_slice, cz_vec_slice, child.group_bounds)
+                child.set_hellinger_distance(dist)
 
-            children.append(child)
+                children.append(child)
+            else:
+                child.set_hellinger_distance(0.0)
+
+                children.append(child)
 
         # Refine the children cells if needed.
         for child in children:

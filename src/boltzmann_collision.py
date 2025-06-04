@@ -9,10 +9,9 @@ from .config import (
     AMR,
     COLLISION_PARAMS, 
     SAMPLING_PARAMS,
-    calculate_beta_w_lists,
     calculate_velocity_grid
 )
-from .moment_utils import moment_eq, solve_equation, calculate_group_moments, create_table, invert, calc_moment
+from .moment_utils import moment_eq, solve_equation, calculate_group_moments, invert, calc_moment
 from .sampling import generate_regular_samples, calculate_moments_from_weights, generate_grid, reweight_samples
 from .virtual_collisions import collide
 from .data_utils import save_simulation_data
@@ -27,28 +26,17 @@ def run_simulation():
     # Get velocity space grid.
     cx_vec, cy_vec, cz_vec, cx, cy, cz = calculate_velocity_grid()
 
-    # Get beta and w lists.
-    beta_list, w_list = calculate_beta_w_lists()
-
     # Initial distribution function.
     K = 1 - 0.4 * np.exp(-0/6)
     f0 = 1 / (2 * K * (np.pi * K)**1.5) * (5 * K - 3 + 2 * (1 - K) / K * (cx**2 + cy**2 + cz**2)) * np.exp(-(cx**2 + cy**2 + cz**2) / K)
     # f0 = 1 / (np.pi**1.5) * np.exp(-1 * (cx**2 + cy**2 + cz**2))
     # f0 = 0.5 * (3 / np.pi)**1.5 * (np.exp(-3.0 * (cx - 1)**2) + np.exp(-3.0 * (cx + 1)**2)) * np.exp(-3 * (cy**2 + cz**2))
 
-    # Calculate group moments.
-    mu = calculate_group_moments(f0, cx, cy, cz, cx_vec, cy_vec, cz_vec)
-
-    # Create table for moments
-    table = create_table(beta_list, w_list)
-
-    print('Table created.\n')
-
+    # Use AMR to calculate initial groups.
     prev_n_groups = {'num_groups_cx': 1, 'num_groups_cy': 1, 'num_groups_cz': 1}
     curr_n_groups = {'num_groups_cx': 1, 'num_groups_cy': 1, 'num_groups_cz': 1}
     refine_n_groups = {'num_groups_cx': 1, 'num_groups_cy': 1, 'num_groups_cz': 1}
 
-    # Use AMR to calculate initial groups.
     root = GroupNode({'ci_cx': VELOCITY_SPACE['cx_range'][0], 'cf_cx': VELOCITY_SPACE['cx_range'][1], 'group_bounds_cx': np.array([0, VELOCITY_SPACE['num_cx']]),
                       'ci_cy': VELOCITY_SPACE['cy_range'][0], 'cf_cy': VELOCITY_SPACE['cy_range'][1], 'group_bounds_cy': np.array([0, VELOCITY_SPACE['num_cy']]), 
                       'ci_cz': VELOCITY_SPACE['cz_range'][0], 'cf_cz': VELOCITY_SPACE['cz_range'][1], 'group_bounds_cz': np.array([0, VELOCITY_SPACE['num_cz']])})
@@ -62,7 +50,7 @@ def run_simulation():
     print('Running AMR to get initial groups...')
     refine_init(f0, cx, cy, cz, cx_vec, cy_vec, cz_vec, root)
 
-    # print_tree_structure(root)
+    print_tree_structure(root)
 
     # Initialize parameter lists
     Ak_list = np.zeros((COLLISION_PARAMS['n_t'] + 1, GROUP_PARAMS['num_groups_cx'], GROUP_PARAMS['num_groups_cy'], GROUP_PARAMS['num_groups_cz']))
@@ -70,33 +58,6 @@ def run_simulation():
     wxk_list = np.zeros((COLLISION_PARAMS['n_t'] + 1, GROUP_PARAMS['num_groups_cx'], GROUP_PARAMS['num_groups_cy'], GROUP_PARAMS['num_groups_cz']))
     wyk_list = np.zeros((COLLISION_PARAMS['n_t'] + 1, GROUP_PARAMS['num_groups_cx'], GROUP_PARAMS['num_groups_cy'], GROUP_PARAMS['num_groups_cz']))
     wzk_list = np.zeros((COLLISION_PARAMS['n_t'] + 1, GROUP_PARAMS['num_groups_cx'], GROUP_PARAMS['num_groups_cy'], GROUP_PARAMS['num_groups_cz']))
-
-    b_guess = np.zeros((GROUP_PARAMS['num_groups_cx'], GROUP_PARAMS['num_groups_cy'], GROUP_PARAMS['num_groups_cz']))
-    wx_guess = np.zeros((GROUP_PARAMS['num_groups_cx'], GROUP_PARAMS['num_groups_cy'], GROUP_PARAMS['num_groups_cz']))
-    wy_guess = np.zeros((GROUP_PARAMS['num_groups_cx'], GROUP_PARAMS['num_groups_cy'], GROUP_PARAMS['num_groups_cz']))
-    wz_guess = np.zeros((GROUP_PARAMS['num_groups_cx'], GROUP_PARAMS['num_groups_cy'], GROUP_PARAMS['num_groups_cz']))
-
-    for i in range(0, GROUP_PARAMS['num_groups_cx']):
-        for j in range(0, GROUP_PARAMS['num_groups_cy']):
-            for k in range(0, GROUP_PARAMS['num_groups_cz']):
-                if np.abs(mu[i, j, k, 1]) < 1e-8:
-                    b_guess[i, j, k] = 1.0
-                    wx_guess[i, j, k] = 0.0
-                else:
-                    pass
-                    # b_guess[i, j, k], wx_guess[i, j, k] = solve_equation(mu[i, j, k, 1] / mu[i, j, k, 0], mu[i, j, k, 4] / mu[i, j, k, 0], beta_list, w_list, table[i, j, k, 0], table[i, j, k, 3])
-                if np.abs(mu[i, j, k, 2]) < 1e-8:
-                    b_guess[i, j, k] = 1.0
-                    wy_guess[i, j, k] = 0.0
-                else:
-                    pass
-                    # b_guess[i, j, k], wy_guess[i, j, k] = solve_equation(mu[i, j, k, 2] / mu[i, j, k, 0], mu[i, j, k, 4] / mu[i, j, k, 0], beta_list, w_list, table[i, j, k, 1], table[i, j, k, 3])
-                if np.abs(mu[i, j, k, 3]) < 1e-8:
-                    b_guess[i, j, k] = 1.0
-                    wz_guess[i, j, k] = 0.0
-                else:
-                    pass
-                    # b_guess[i, j, k], wz_guess[i, j, k] = solve_equation(mu[i, j, k, 3] / mu[i, j, k, 0], mu[i, j, k, 4] / mu[i, j, k, 0], beta_list, w_list, table[i, j, k, 2], table[i, j, k, 3])
 
     A, b, wx, wy, wz = invert(mu, b_guess, wx_guess, wy_guess, wz_guess)
     Ak_list[0] = A
