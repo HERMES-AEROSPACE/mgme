@@ -11,12 +11,13 @@ from .config import (
     SAMPLING_PARAMS,
     calculate_velocity_grid
 )
-from .moment_utils import moment_eq, solve_equation, calculate_group_moments, invert, calc_moment
+from .moment_utils import moment_eq, calculate_group_moments, invert, calc_moment
 from .sampling import generate_regular_samples, calculate_moments_from_weights, generate_grid, reweight_samples
 from .virtual_collisions import collide
 from .data_utils import save_simulation_data
 from .banner import print_banner
-from .amr import calculate_hellinger_distance, GroupNode, refine_init, print_tree_structure
+from .amr import calculate_hellinger_distance, GroupNode, refine_init, print_tree_structure, get_current_groups
+import sys
 
 
 def run_simulation():
@@ -27,16 +28,12 @@ def run_simulation():
     cx_vec, cy_vec, cz_vec, cx, cy, cz = calculate_velocity_grid()
 
     # Initial distribution function.
-    K = 1 - 0.4 * np.exp(-0/6)
-    f0 = 1 / (2 * K * (np.pi * K)**1.5) * (5 * K - 3 + 2 * (1 - K) / K * (cx**2 + cy**2 + cz**2)) * np.exp(-(cx**2 + cy**2 + cz**2) / K)
+    # K = 1 - 0.4 * np.exp(-0/6)
+    # f0 = 1 / (2 * K * (np.pi * K)**1.5) * (5 * K - 3 + 2 * (1 - K) / K * (cx**2 + cy**2 + cz**2)) * np.exp(-(cx**2 + cy**2 + cz**2) / K)
     # f0 = 1 / (np.pi**1.5) * np.exp(-1 * (cx**2 + cy**2 + cz**2))
-    # f0 = 0.5 * (3 / np.pi)**1.5 * (np.exp(-3.0 * (cx - 1)**2) + np.exp(-3.0 * (cx + 1)**2)) * np.exp(-3 * (cy**2 + cz**2))
+    f0 = 0.5 * (3 / np.pi)**1.5 * (np.exp(-3.0 * (cx - 1)**2) + np.exp(-3.0 * (cx + 1)**2)) * np.exp(-3 * (cy**2 + cz**2))
 
     # Use AMR to calculate initial groups.
-    prev_n_groups = {'num_groups_cx': 1, 'num_groups_cy': 1, 'num_groups_cz': 1}
-    curr_n_groups = {'num_groups_cx': 1, 'num_groups_cy': 1, 'num_groups_cz': 1}
-    refine_n_groups = {'num_groups_cx': 1, 'num_groups_cy': 1, 'num_groups_cz': 1}
-
     root = GroupNode({'ci_cx': VELOCITY_SPACE['cx_range'][0], 'cf_cx': VELOCITY_SPACE['cx_range'][1], 'group_bounds_cx': np.array([0, VELOCITY_SPACE['num_cx']]),
                       'ci_cy': VELOCITY_SPACE['cy_range'][0], 'cf_cy': VELOCITY_SPACE['cy_range'][1], 'group_bounds_cy': np.array([0, VELOCITY_SPACE['num_cy']]), 
                       'ci_cz': VELOCITY_SPACE['cz_range'][0], 'cf_cz': VELOCITY_SPACE['cz_range'][1], 'group_bounds_cz': np.array([0, VELOCITY_SPACE['num_cz']])})
@@ -47,32 +44,18 @@ def run_simulation():
     dist = calculate_hellinger_distance(f0, root_f, cx_vec, cy_vec, cz_vec, root.group_bounds)
     root.set_hellinger_distance(dist)
 
-    print('Running AMR to get initial groups...')
+    print('Running AMR to get initial groups...\n')
     refine_init(f0, cx, cy, cz, cx_vec, cy_vec, cz_vec, root)
 
     print_tree_structure(root)
 
-    # Initialize parameter lists
-    Ak_list = np.zeros((COLLISION_PARAMS['n_t'] + 1, GROUP_PARAMS['num_groups_cx'], GROUP_PARAMS['num_groups_cy'], GROUP_PARAMS['num_groups_cz']))
-    bk_list = np.zeros((COLLISION_PARAMS['n_t'] + 1, GROUP_PARAMS['num_groups_cx'], GROUP_PARAMS['num_groups_cy'], GROUP_PARAMS['num_groups_cz']))
-    wxk_list = np.zeros((COLLISION_PARAMS['n_t'] + 1, GROUP_PARAMS['num_groups_cx'], GROUP_PARAMS['num_groups_cy'], GROUP_PARAMS['num_groups_cz']))
-    wyk_list = np.zeros((COLLISION_PARAMS['n_t'] + 1, GROUP_PARAMS['num_groups_cx'], GROUP_PARAMS['num_groups_cy'], GROUP_PARAMS['num_groups_cz']))
-    wzk_list = np.zeros((COLLISION_PARAMS['n_t'] + 1, GROUP_PARAMS['num_groups_cx'], GROUP_PARAMS['num_groups_cy'], GROUP_PARAMS['num_groups_cz']))
+    print('Initial group generation complete. Generating samples...\n')
 
-    A, b, wx, wy, wz = invert(mu, b_guess, wx_guess, wy_guess, wz_guess)
-    Ak_list[0] = A
-    bk_list[0] = b
-    wxk_list[0] = wx
-    wyk_list[0] = wy
-    wzk_list[0] = wz
-
-    # Save initial state
-    # save_simulation_data(0, Ak_list, bk_list, wxk_list, wyk_list, wzk_list)
-    print('Inversion complete. Generating initial samples...\n')
+    curr_groups = get_current_groups(root)
 
     n_samples = SAMPLING_PARAMS['n_samples_x'] * SAMPLING_PARAMS['n_samples_y'] * SAMPLING_PARAMS['n_samples_z']
     x_sample, y_sample, z_sample = generate_grid(SAMPLING_PARAMS['n_samples_x'], SAMPLING_PARAMS['n_samples_y'], SAMPLING_PARAMS['n_samples_z'])
-    weights, num_group_sample = generate_regular_samples(n_samples, x_sample, y_sample, z_sample, Ak_list[0], bk_list[0], wxk_list[0], wyk_list[0], wzk_list[0], mu)
+    weights, num_group_sample = generate_regular_samples(n_samples, x_sample, y_sample, z_sample, curr_groups)
 
     print('Reweighting samples...\n')
 

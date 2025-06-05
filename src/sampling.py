@@ -2,18 +2,7 @@ import numpy as np
 from .config import VELOCITY_SPACE, GROUP_PARAMS
 from numba import jit
 from scipy import optimize
-
-
-NUM_GROUPS_CX = GROUP_PARAMS['num_groups_cx']
-NUM_GROUPS_CY = GROUP_PARAMS['num_groups_cy']
-NUM_GROUPS_CZ = GROUP_PARAMS['num_groups_cz']
-
-CI_CX = GROUP_PARAMS['ci_cx']
-CF_CX = GROUP_PARAMS['cf_cx']
-CI_CY = GROUP_PARAMS['ci_cy']
-CF_CY = GROUP_PARAMS['cf_cy']
-CI_CZ = GROUP_PARAMS['ci_cz']
-CF_CZ = GROUP_PARAMS['cf_cz']
+import sys
 
 @jit(nopython=True)
 def f(x, y, z, A, b, wx, wy, wz):
@@ -36,39 +25,40 @@ def generate_grid(n_samples_x, n_samples_y, n_samples_z):
     return x_sample, y_sample, z_sample
 
 @jit(nopython=True)
-def calc_sum_f_group(n_samples, x_sample, y_sample, z_sample, Ak, bk, wxk, wyk, wzk):
-    sum_f_group = np.zeros((NUM_GROUPS_CX, NUM_GROUPS_CY, NUM_GROUPS_CZ))
-    num_group_sample = np.zeros((NUM_GROUPS_CX, NUM_GROUPS_CY, NUM_GROUPS_CZ))
+def generate_regular_samples_helper(mu, x_sample, y_sample, z_sample, ci_cx, cf_cx, ci_cy, cf_cy, ci_cz, cf_cz, Ak, bk, wxk, wyk, wzk):
+    mask = (x_sample >= ci_cx) & (x_sample <= cf_cx) & \
+    (y_sample >= ci_cy) & (y_sample < cf_cy) & \
+    (z_sample >= ci_cz) & (z_sample < cf_cz)
 
-    for i in range(0, n_samples):
-        group_idx_x = np.argmax(np.logical_and(x_sample[i] >= CI_CX, x_sample[i] <= CF_CX))
-        group_idx_y = np.argmax(np.logical_and(y_sample[i] >= CI_CY, y_sample[i] <= CF_CY))
-        group_idx_z = np.argmax(np.logical_and(z_sample[i] >= CI_CZ, z_sample[i] <= CF_CZ))
+    x_sample_slice = x_sample[mask]
+    y_sample_slice = y_sample[mask]
+    z_sample_slice = z_sample[mask]
 
-        sum_f_group[group_idx_x, group_idx_y, group_idx_z] += f(x_sample[i], y_sample[i], z_sample[i], \
-                                                                Ak[group_idx_x, group_idx_y, group_idx_z], bk[group_idx_x, group_idx_y, group_idx_z], \
-                                                                    wxk[group_idx_x, group_idx_y, group_idx_z], wyk[group_idx_x, group_idx_y, group_idx_z], \
-                                                                        wzk[group_idx_x, group_idx_y, group_idx_z])
-        
-        num_group_sample[group_idx_x, group_idx_y, group_idx_z] += 1
+    sum_f_group = np.sum(f(x_sample_slice, y_sample_slice, z_sample_slice, Ak, bk, wxk, wyk, wzk))
+    num_group_sample = len(x_sample_slice)
+    weights = mu[0] * f(x_sample_slice, y_sample_slice, z_sample_slice, Ak, bk, wxk, wyk, wzk) / sum_f_group
 
-    return sum_f_group, num_group_sample
+    return num_group_sample, weights
 
-@jit(nopython=True)
-def generate_regular_samples(n_samples, x_sample, y_sample, z_sample, Ak, bk, wxk, wyk, wzk, mu):
+def generate_regular_samples(n_samples, x_sample, y_sample, z_sample, curr_groups):
     weights = np.zeros(n_samples)
+    num_group_sample = np.zeros(len(curr_groups))
 
-    sum_f_group, num_group_sample = calc_sum_f_group(n_samples, x_sample, y_sample, z_sample, Ak, bk, wxk, wyk, wzk)
+    l, u = 0, 0
+    for i, group in enumerate(curr_groups):
+        ci_cx, cf_cx = group.group_bounds['ci_cx'], group.group_bounds['cf_cx']
+        ci_cy, cf_cy = group.group_bounds['ci_cy'], group.group_bounds['cf_cy']
+        ci_cz, cf_cz = group.group_bounds['ci_cz'], group.group_bounds['cf_cz']
 
-    for i in range(0, n_samples):
-        group_idx_x = np.argmax(np.logical_and(x_sample[i] >= CI_CX, x_sample[i] <= CF_CX))
-        group_idx_y = np.argmax(np.logical_and(y_sample[i] >= CI_CY, y_sample[i] <= CF_CY))
-        group_idx_z = np.argmax(np.logical_and(z_sample[i] >= CI_CZ, z_sample[i] <= CF_CZ))
+        Ak, bk, wxk, wyk, wzk = group.A, group.b, group.wx, group.wy, group.wz
+        mu = group.mu
+        n_group_sample, group_weights = generate_regular_samples_helper(mu, x_sample, y_sample, z_sample, \
+                                                                                       ci_cx, cf_cx, ci_cy, cf_cy, ci_cz, cf_cz, Ak, bk, wxk, wyk, wzk)
         
-        weights[i] = mu[group_idx_x, group_idx_y, group_idx_z, 0] * f(x_sample[i], y_sample[i], z_sample[i], \
-                                                                      Ak[group_idx_x, group_idx_y, group_idx_z], bk[group_idx_x, group_idx_y, group_idx_z], \
-                                                                          wxk[group_idx_x, group_idx_y, group_idx_z], wyk[group_idx_x, group_idx_y, group_idx_z], \
-                                                                              wzk[group_idx_x, group_idx_y, group_idx_z]) / sum_f_group[group_idx_x, group_idx_y, group_idx_z]
+        u += len(group_weights)
+        num_group_sample[i] = n_group_sample
+        weights[l:u] = group_weights
+        l = u
 
     return weights, num_group_sample
 

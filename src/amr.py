@@ -12,6 +12,13 @@ class GroupNode:
     def set_mu(self, mu):
         self.mu = mu
 
+    def set_dist_param(self, A, b, wx, wy, wz):
+        self.A = A
+        self.b = b
+        self.wx = wx
+        self.wy = wy
+        self.wz = wz
+
     def set_hellinger_distance(self, dist):
         self.hellinger_dist = dist
 
@@ -58,10 +65,11 @@ def refine_init(f0, cx, cy, cz, cx_vec, cy_vec, cz_vec, node, max_depth=5, curr_
             lb_cy, ub_cy = ref_child['group_bounds_cy'][cy_idx]
             lb_cz, ub_cz = ref_child['group_bounds_cz'][cz_idx]
 
+            # Create child node.
             child = GroupNode({'ci_cx': ref_child['ci_cx'][cx_idx], 'cf_cx': ref_child['cf_cx'][cx_idx], 'group_bounds_cx': np.array([lb_cx, ub_cx]), \
                         'ci_cy': ref_child['ci_cy'][cy_idx], 'cf_cy': ref_child['cf_cy'][cy_idx], 'group_bounds_cy': np.array([lb_cy, ub_cy]), \
                         'ci_cz': ref_child['ci_cz'][cz_idx], 'cf_cz': ref_child['cf_cz'][cz_idx], 'group_bounds_cz': np.array([lb_cz, ub_cz])})
-            print(child.group_bounds['ci_cx'], child.group_bounds['cf_cx'], child.group_bounds['ci_cy'], child.group_bounds['cf_cy'], child.group_bounds['ci_cz'], child.group_bounds['cf_cz'])
+
             node.add_child(child)
 
             f0_slice = f0[lb_cx:ub_cx, lb_cy:ub_cy, lb_cz:ub_cz]
@@ -74,10 +82,12 @@ def refine_init(f0, cx, cy, cz, cx_vec, cy_vec, cz_vec, node, max_depth=5, curr_
 
             # Calculate mu in each sub-node and invert.
             mu = calc_moment(f0_slice, cx_slice, cy_slice, cz_slice, cx_vec_slice, cy_vec_slice, cz_vec_slice)
+
+            child.set_mu(mu)
             
             if mu[0] > 1e-3:
                 A, b, wx, wy, wz = invert(mu, child.group_bounds)
-                print(mu, A, b, wx, wy, wz)
+                child.set_dist_param(A, b, wx, wy, wz)
             
                 # Calculate Hellinger distance.
                 f = A * np.exp(-b * ((cx_slice - wx)**2 + (cy_slice - wy)**2 + (cz_slice - wz)**2))
@@ -86,6 +96,7 @@ def refine_init(f0, cx, cy, cz, cx_vec, cy_vec, cz_vec, node, max_depth=5, curr_
 
                 children.append(child)
             else:
+                child.set_dist_param(0.0, 0.0, 0.0, 0.0, 0.0)
                 child.set_hellinger_distance(0.0)
 
                 children.append(child)
@@ -183,3 +194,16 @@ def print_tree_structure(root, prefix="", is_last=True):
     for i, child in enumerate(root.children):
         is_child_last = (i == len(root.children) - 1)
         print_tree_structure(child, child_prefix, is_child_last)
+
+def get_current_groups(node):
+    leaves = []
+
+    def _get_leaves(node, leaves):
+        if node:
+            if len(node.children) == 0:
+                leaves.append(node)
+            for n in node.children:
+                _get_leaves(n, leaves)
+
+    _get_leaves(node, leaves)
+    return leaves

@@ -143,7 +143,7 @@ def calculate_group_moments(f0, cx, cy, cz, cx_vec, cy_vec, cz_vec, n_groups=GRO
     return mu
 
 def invert(mu, group_bounds=GROUP_PARAMS, max_attempts=10):
-    guess_arr = [1.0, 0.0, 0.0, 0.0]
+    guess_arr=[1.0, 0.0, 0.0, 0.0]
 
     for attempt in range(max_attempts):
         try:
