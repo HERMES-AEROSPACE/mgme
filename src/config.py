@@ -34,7 +34,7 @@ AMR = {
 
 # Collision parameters
 COLLISION_PARAMS = {
-    'n_coll': 200000,
+    'n_coll': 100000,
     'dt': 0.2,
     'n_t': 100
 }

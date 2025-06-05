@@ -39,19 +39,38 @@ def run_simulation():
                       'ci_cz': VELOCITY_SPACE['cz_range'][0], 'cf_cz': VELOCITY_SPACE['cz_range'][1], 'group_bounds_cz': np.array([0, VELOCITY_SPACE['num_cz']])})
     mu = calc_moment(f0, cx, cy, cz, cx_vec, cy_vec, cz_vec)
     root.set_mu(mu)
-    A, b, wx, wy, wz = invert(root.mu, root.group_bounds)
-    root_f = A * np.exp(-b * ((cx - wx)**2 + (cy - wy)**2 + (cz - wz)**2))
+    root._update_group_dist_params()
+    root_f = root.A * np.exp(-root.b * ((cx - root.wx)**2 + (cy - root.wy)**2 + (cz - root.wz)**2))
     dist = calculate_hellinger_distance(f0, root_f, cx_vec, cy_vec, cz_vec, root.group_bounds)
     root.set_hellinger_distance(dist)
 
     print('Running AMR to get initial groups...\n')
     refine_init(f0, cx, cy, cz, cx_vec, cy_vec, cz_vec, root)
+    curr_groups = get_current_groups(root)
+    n_groups = len(curr_groups)
 
+    bounds_list = np.zeros((n_groups, 6))
+    for i, group in enumerate(curr_groups):
+        bounds_list[i] = np.array([group.group_bounds['ci_cx'], group.group_bounds['cf_cx'], group.group_bounds['ci_cy'], \
+                                   group.group_bounds['cf_cy'], group.group_bounds['ci_cz'], group.group_bounds['cf_cz']])
+
+    print(bounds_list)
     print_tree_structure(root)
 
     print('Initial group generation complete. Generating samples...\n')
 
-    curr_groups = get_current_groups(root)
+    Ak_list = np.zeros((COLLISION_PARAMS['n_t'] + 1, n_groups))
+    bk_list = np.zeros((COLLISION_PARAMS['n_t'] + 1, n_groups))
+    wxk_list = np.zeros((COLLISION_PARAMS['n_t'] + 1, n_groups))
+    wyk_list = np.zeros((COLLISION_PARAMS['n_t'] + 1, n_groups))
+    wzk_list = np.zeros((COLLISION_PARAMS['n_t'] + 1, n_groups))
+
+    for i, group in enumerate(curr_groups):
+        Ak_list[0, i] = group.A
+        bk_list[0, i] = group.b
+        wxk_list[0, i] = group.wx
+        wyk_list[0, i] = group.wy
+        wzk_list[0, i] = group.wz
 
     n_samples = SAMPLING_PARAMS['n_samples_x'] * SAMPLING_PARAMS['n_samples_y'] * SAMPLING_PARAMS['n_samples_z']
     x_sample, y_sample, z_sample = generate_grid(SAMPLING_PARAMS['n_samples_x'], SAMPLING_PARAMS['n_samples_y'], SAMPLING_PARAMS['n_samples_z'])
@@ -68,25 +87,21 @@ def run_simulation():
             print('Time step: ', t)
             # save_simulation_data(t, Ak_list, bk_list, wk_list)
 
-        group_n, group_px, group_py, group_pz, group_e = collide(x_sample, y_sample, z_sample, weights, num_group_sample, n_samples)
+        group_n, group_px, group_py, group_pz, group_e = collide(x_sample, y_sample, z_sample, weights, num_group_sample, bounds_list, n_samples, n_groups)
 
-        for i in range(GROUP_PARAMS['num_groups_cx']):
-            for j in range(GROUP_PARAMS['num_groups_cy']):
-                for k in range(GROUP_PARAMS['num_groups_cz']):
-                    mu[i, j, k, 0] += COLLISION_PARAMS['dt'] * group_n[i, j, k]
-                    mu[i, j, k, 1] += COLLISION_PARAMS['dt'] * group_px[i, j, k]
-                    mu[i, j, k, 2] += COLLISION_PARAMS['dt'] * group_py[i, j, k]
-                    mu[i, j, k, 3] += COLLISION_PARAMS['dt'] * group_pz[i, j, k]
-                    mu[i, j, k, 4] += COLLISION_PARAMS['dt'] * group_e[i, j, k]
+        for i, group in enumerate(curr_groups):
+            # Update group parameters after collisions.
+            group.update_parameters(COLLISION_PARAMS['dt'], group_n[i], group_px[i], group_py[i], group_pz[i], group_e[i])
 
-        A, b, wx, wy, wz = invert(mu, bk_list[t - 1], wxk_list[t - 1], wyk_list[t - 1], wzk_list[t - 1])
-        Ak_list[t] = A
-        bk_list[t] = b
-        wxk_list[t] = wx
-        wyk_list[t] = wy
-        wzk_list[t] = wz
+            # Save results for plotting and such.
+            Ak_list[t, i] = group.A
+            bk_list[t, i] = group.b
+            wxk_list[t, i] = group.wx
+            wyk_list[t, i] = group.wy
+            wzk_list[t, i] = group.wz
 
-        weights, _ = generate_regular_samples(n_samples, x_sample, y_sample, z_sample, Ak_list[t], bk_list[t], wxk_list[t], wyk_list[t], wzk_list[t], mu)
+        # Update weights for next simulation step.
+        weights, _ = generate_regular_samples(n_samples, x_sample, y_sample, z_sample, curr_groups)
         # reweighted_weights = reweight_samples(x_sample, y_sample, z_sample, weights, num_group_sample, mu)
 
     # Save final state

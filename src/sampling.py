@@ -27,8 +27,8 @@ def generate_grid(n_samples_x, n_samples_y, n_samples_z):
 @jit(nopython=True)
 def generate_regular_samples_helper(mu, x_sample, y_sample, z_sample, ci_cx, cf_cx, ci_cy, cf_cy, ci_cz, cf_cz, Ak, bk, wxk, wyk, wzk):
     mask = (x_sample >= ci_cx) & (x_sample <= cf_cx) & \
-    (y_sample >= ci_cy) & (y_sample < cf_cy) & \
-    (z_sample >= ci_cz) & (z_sample < cf_cz)
+    (y_sample >= ci_cy) & (y_sample <= cf_cy) & \
+    (z_sample >= ci_cz) & (z_sample <= cf_cz)
 
     x_sample_slice = x_sample[mask]
     y_sample_slice = y_sample[mask]
@@ -38,13 +38,12 @@ def generate_regular_samples_helper(mu, x_sample, y_sample, z_sample, ci_cx, cf_
     num_group_sample = len(x_sample_slice)
     weights = mu[0] * f(x_sample_slice, y_sample_slice, z_sample_slice, Ak, bk, wxk, wyk, wzk) / sum_f_group
 
-    return num_group_sample, weights
+    return num_group_sample, weights, mask
 
 def generate_regular_samples(n_samples, x_sample, y_sample, z_sample, curr_groups):
     weights = np.zeros(n_samples)
     num_group_sample = np.zeros(len(curr_groups))
 
-    l, u = 0, 0
     for i, group in enumerate(curr_groups):
         ci_cx, cf_cx = group.group_bounds['ci_cx'], group.group_bounds['cf_cx']
         ci_cy, cf_cy = group.group_bounds['ci_cy'], group.group_bounds['cf_cy']
@@ -52,13 +51,11 @@ def generate_regular_samples(n_samples, x_sample, y_sample, z_sample, curr_group
 
         Ak, bk, wxk, wyk, wzk = group.A, group.b, group.wx, group.wy, group.wz
         mu = group.mu
-        n_group_sample, group_weights = generate_regular_samples_helper(mu, x_sample, y_sample, z_sample, \
+        n_group_sample, group_weights, mask = generate_regular_samples_helper(mu, x_sample, y_sample, z_sample, \
                                                                                        ci_cx, cf_cx, ci_cy, cf_cy, ci_cz, cf_cz, Ak, bk, wxk, wyk, wzk)
         
-        u += len(group_weights)
         num_group_sample[i] = n_group_sample
-        weights[l:u] = group_weights
-        l = u
+        weights[mask] = group_weights
 
     return weights, num_group_sample
 
