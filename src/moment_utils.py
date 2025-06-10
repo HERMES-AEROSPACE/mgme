@@ -4,9 +4,8 @@ from scipy import optimize
 from .config import GROUP_PARAMS, LOOKUP_TABLE, VELOCITY_SPACE
 from matplotlib import pyplot as plt
 
-import sys
-
-def moments(beta, w, ci_cx, cf_cx, ci_cy, cf_cy, ci_cz, cf_cz):
+        
+def moments(beta, wx, wy, wz, ci_cx, cf_cx, ci_cy, cf_cy, ci_cz, cf_cz, ux, uy, uz, e):
     """
     Calculate moments for given beta and w parameters.
     
@@ -19,23 +18,23 @@ def moments(beta, w, ci_cx, cf_cx, ci_cy, cf_cy, ci_cz, cf_cz):
     Returns:
         Tuple of (I1x + w*I0x)/I0x and (I2x + I0x*w**2 + 2*w*I1x + I0x/beta)/I0x
     """
-    I0x = np.sqrt(np.pi / (4 * beta)) * (special.erf(np.sqrt(beta) * (cf_cx - w)) - special.erf(np.sqrt(beta) * (ci_cx - w)))
-    I0y = np.sqrt(np.pi / (4 * beta)) * (special.erf(np.sqrt(beta) * (cf_cy - w)) - special.erf(np.sqrt(beta) * (ci_cy - w)))
-    I0z = np.sqrt(np.pi / (4 * beta)) * (special.erf(np.sqrt(beta) * (cf_cz - w)) - special.erf(np.sqrt(beta) * (ci_cz - w)))
+    I0x = np.sqrt(np.pi / (4 * beta)) * (special.erf(np.sqrt(beta) * (cf_cx - wx)) - special.erf(np.sqrt(beta) * (ci_cx - wx)))
+    I0y = np.sqrt(np.pi / (4 * beta)) * (special.erf(np.sqrt(beta) * (cf_cy - wy)) - special.erf(np.sqrt(beta) * (ci_cy - wy)))
+    I0z = np.sqrt(np.pi / (4 * beta)) * (special.erf(np.sqrt(beta) * (cf_cz - wz)) - special.erf(np.sqrt(beta) * (ci_cz - wz)))
 
-    I1x = (np.exp(-beta * (ci_cx - w)**2) - np.exp(-beta * (cf_cx - w)**2)) / (2 * beta)
-    I1y = (np.exp(-beta * (ci_cy - w)**2) - np.exp(-beta * (cf_cy - w)**2)) / (2 * beta)
-    I1z = (np.exp(-beta * (ci_cz - w)**2) - np.exp(-beta * (cf_cz - w)**2)) / (2 * beta)
+    I1x = (np.exp(-beta * (ci_cx - wx)**2) - np.exp(-beta * (cf_cx - wx)**2)) / (2 * beta)
+    I1y = (np.exp(-beta * (ci_cy - wy)**2) - np.exp(-beta * (cf_cy - wy)**2)) / (2 * beta)
+    I1z = (np.exp(-beta * (ci_cz - wz)**2) - np.exp(-beta * (cf_cz - wz)**2)) / (2 * beta)
 
     I2x = -np.sqrt(np.pi) / (2 * np.sqrt(beta)) * \
-        ((np.exp(-beta * (cf_cx - w)**2) * (cf_cx - w))/np.sqrt(np.pi * beta) - (np.exp(-beta * (ci_cx - w)**2) * (ci_cx - w))/np.sqrt(np.pi * beta)) + \
-            np.sqrt(np.pi)/(4 * np.sqrt(beta**3)) * (special.erf(np.sqrt(beta) * (cf_cx - w)) - special.erf(np.sqrt(beta) * (ci_cx - w)))
+        ((np.exp(-beta * (cf_cx - wx)**2) * (cf_cx - wx))/np.sqrt(np.pi * beta) - (np.exp(-beta * (ci_cx - wx)**2) * (ci_cx - wx))/np.sqrt(np.pi * beta)) + \
+            np.sqrt(np.pi)/(4 * np.sqrt(beta**3)) * (special.erf(np.sqrt(beta) * (cf_cx - wx)) - special.erf(np.sqrt(beta) * (ci_cx - wx)))
     I2y = -np.sqrt(np.pi) / (2 * np.sqrt(beta)) * \
-        ((np.exp(-beta * (cf_cy - w)**2) * (cf_cy - w))/np.sqrt(np.pi * beta) - (np.exp(-beta * (ci_cy - w)**2) * (ci_cy - w))/np.sqrt(np.pi * beta)) + \
-            np.sqrt(np.pi)/(4 * np.sqrt(beta**3)) * (special.erf(np.sqrt(beta) * (cf_cy - w)) - special.erf(np.sqrt(beta) * (ci_cy - w)))
+        ((np.exp(-beta * (cf_cy - wy)**2) * (cf_cy - wy))/np.sqrt(np.pi * beta) - (np.exp(-beta * (ci_cy - wy)**2) * (ci_cy - wy))/np.sqrt(np.pi * beta)) + \
+            np.sqrt(np.pi)/(4 * np.sqrt(beta**3)) * (special.erf(np.sqrt(beta) * (cf_cy - wy)) - special.erf(np.sqrt(beta) * (ci_cy - wy)))
     I2z = -np.sqrt(np.pi) / (2 * np.sqrt(beta)) * \
-        ((np.exp(-beta * (cf_cz - w)**2) * (cf_cz - w))/np.sqrt(np.pi * beta) - (np.exp(-beta * (ci_cz - w)**2) * (ci_cz - w))/np.sqrt(np.pi * beta)) + \
-            np.sqrt(np.pi)/(4 * np.sqrt(beta**3)) * (special.erf(np.sqrt(beta) * (cf_cz - w)) - special.erf(np.sqrt(beta) * (ci_cz - w)))
+        ((np.exp(-beta * (cf_cz - wz)**2) * (cf_cz - wz))/np.sqrt(np.pi * beta) - (np.exp(-beta * (ci_cz - wz)**2) * (ci_cz - wz))/np.sqrt(np.pi * beta)) + \
+            np.sqrt(np.pi)/(4 * np.sqrt(beta**3)) * (special.erf(np.sqrt(beta) * (cf_cz - wz)) - special.erf(np.sqrt(beta) * (ci_cz - wz)))
     
     if I0x.size != 1:
         for i, row in enumerate(I0x):
@@ -52,7 +51,8 @@ def moments(beta, w, ci_cx, cf_cx, ci_cy, cf_cy, ci_cz, cf_cz):
             row = np.where(row > 1e-12, row, np.nan)
             I0z[i, :] = row
 
-    return [(I1x + w*I0x) / I0x, (I1y + w*I0y) / I0y, (I1z + w*I0z) / I0z, (I2x + 2 * w * I1x + w**2 * I0x) / I0x + (I2y + 2 * w * I1y + w**2 * I0y) / I0y + (I2z + 2 * w * I1z + w**2 * I0z) / I0z]
+    return [(I1x + wx*I0x) / I0x - ux, (I1y + wy*I0y) / I0y - uy, (I1z + wz*I0z) / I0z - uz, \
+            (I2x + 2 * wx * I1x + wx**2 * I0x) / I0x + (I2y + 2 * wy * I1y + wy**2 * I0y) / I0y + (I2z + 2 * wz * I1z + wz**2 * I0z) / I0z - e]
 
 def moment_eq(x, ux, uy, uz, e, ci_cx, cf_cx, ci_cy, cf_cy, ci_cz, cf_cz):
     """
@@ -142,38 +142,78 @@ def calculate_group_moments(f0, cx, cy, cz, cx_vec, cy_vec, cz_vec, n_groups=GRO
 
     return mu
 
+def initial_guess(group_bounds, ux, uy, uz, e):
+    ci_cx = group_bounds['ci_cx']
+    cf_cx = group_bounds['cf_cx']
+    ci_cy = group_bounds['ci_cy']
+    cf_cy = group_bounds['cf_cy']
+    ci_cz = group_bounds['ci_cz']
+    cf_cz = group_bounds['cf_cz']
+
+    b_range = np.logspace(1e-4, 2.0, 20, endpoint=True)
+    wx_range, wy_range, wz_range = np.linspace(ci_cx, cf_cx, 20), np.linspace(ci_cy, cf_cy, 20), np.linspace(ci_cz, cf_cz, 20)
+
+    B, WX, WY, WZ = np.meshgrid(b_range, wx_range, wy_range, wz_range, indexing='ij')    
+
+    f_values = moments(B, WX, WY, WZ, ci_cx, cf_cx, ci_cy, cf_cy, ci_cz, cf_cz, ux, uy, uz, e)
+
+    abs_sum = np.sum(np.abs(f_values), axis=-1)
+
+    n_guess = 3
+    flat_idx = np.argpartition(abs_sum.flatten(), n_guess)[:n_guess]
+    best_idx = np.unravel_index(flat_idx, abs_sum.shape)
+
+    initial_guess = []
+    for idx in range(n_guess):
+        i, j, k, l = best_idx[0][idx], best_idx[1][idx], best_idx[2][idx], best_idx[3][idx]
+        guess = [B[i, j, k, l], WX[i, j, k, l], WY[i, j, k, l], WZ[i, j, k, l]]
+        residual_sum = abs_sum[i, j, k, l]
+        initial_guess.append((guess, residual_sum))
+
+    return initial_guess
+
+
 def invert(mu, group_bounds=GROUP_PARAMS, max_attempts=10):
-    guess_arr=[1.0, 0.0, 0.0, 0.0]
+    guess_arr=[1.0, mu[1], mu[2], mu[3]]
+    A, b, wx, wy, wz = 0.0, 0.0, 0.0, 0.0, 0.0
+    method = 'hybr'
 
     for attempt in range(max_attempts):
         try:
-            sol, _, ier, _ = optimize.fsolve(moment_eq, guess_arr, \
+            sol = optimize.root(moment_eq, guess_arr, \
                                             args=(mu[1] / mu[0], mu[2] / mu[0], \
                                                     mu[3] / mu[0], mu[4] / mu[0], \
                                                     group_bounds['ci_cx'], group_bounds['cf_cx'], \
                                                         group_bounds['ci_cy'], group_bounds['cf_cy'], \
-                                                            group_bounds['ci_cz'], group_bounds['cf_cz']), full_output=True)
-            b = sol[0]
-            wx = sol[1]
-            wy = sol[2]
-            wz = sol[3]
+                                                            group_bounds['ci_cz'], group_bounds['cf_cz']), method=method)
+
+            b = sol.x[0]
+            wx = sol.x[1]
+            wy = sol.x[2]
+            wz = sol.x[3]
             
-            if ier != 1: raise RuntimeError
+            if sol.success != 1: raise RuntimeError
             if VELOCITY_SPACE['cx_range'][0] > wx or VELOCITY_SPACE['cx_range'][1] < wx: raise RuntimeError
             if VELOCITY_SPACE['cy_range'][0] > wy or VELOCITY_SPACE['cy_range'][1] < wy: raise RuntimeError
             if VELOCITY_SPACE['cz_range'][0] > wz or VELOCITY_SPACE['cz_range'][1] < wz: raise RuntimeError
-        except RuntimeError:
-            guess_arr[0] /= 10
-            if mu[1] > 0: guess_arr[1] += 0.1
-            else: guess_arr[1] -= 0.1
-            if mu[2] > 0: guess_arr[2] += 0.1
-            else: guess_arr[2] -= 0.1
-            if mu[3] > 0: guess_arr[3] += 0.1
-            else: guess_arr[3] -= 0.1
 
-    I0x = np.sqrt(np.pi / (4 * b)) * (special.erf(np.sqrt(b) * (group_bounds['cf_cx'] - wx)) - special.erf(np.sqrt(b) * (group_bounds['ci_cx'] - wx)))
-    I0y = np.sqrt(np.pi / (4 * b)) * (special.erf(np.sqrt(b) * (group_bounds['cf_cy'] - wy)) - special.erf(np.sqrt(b) * (group_bounds['ci_cy'] - wy)))
-    I0z = np.sqrt(np.pi / (4 * b)) * (special.erf(np.sqrt(b) * (group_bounds['cf_cz'] - wz)) - special.erf(np.sqrt(b) * (group_bounds['ci_cz'] - wz)))
-    A = mu[0] / (I0x * I0y * I0z)
+            I0x = np.sqrt(np.pi / (4 * b)) * (special.erf(np.sqrt(b) * (group_bounds['cf_cx'] - wx)) - special.erf(np.sqrt(b) * (group_bounds['ci_cx'] - wx)))
+            I0y = np.sqrt(np.pi / (4 * b)) * (special.erf(np.sqrt(b) * (group_bounds['cf_cy'] - wy)) - special.erf(np.sqrt(b) * (group_bounds['ci_cy'] - wy)))
+            I0z = np.sqrt(np.pi / (4 * b)) * (special.erf(np.sqrt(b) * (group_bounds['cf_cz'] - wz)) - special.erf(np.sqrt(b) * (group_bounds['ci_cz'] - wz)))
+            A = mu[0] / (I0x * I0y * I0z)
+        except RuntimeError:
+            method = 'lm'
+            
+            guess_arr[0] /= 2
+
+            guess_arr[1] = mu[1] + mu[1] * 0.05
+            # else: guess_arr[1] = mu[1] + mu[1] * 0.05
+        
+            guess_arr[2] = mu[2] + mu[2] * 0.05
+            # else: guess_arr[2] -= mu[2] + mu[2] * attempt * 0.1
+
+            guess_arr[3] = mu[3] + mu[3] * 0.05
+            # else: guess_arr[3] -= mu[3] + mu[3] * attempt * 0.1
+        # if attempt == max_attempts - 1: print('uh oh')
 
     return A, b, wx, wy, wz

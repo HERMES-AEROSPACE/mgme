@@ -2,7 +2,16 @@ import numpy as np
 from itertools import product
 from .moment_utils import calc_moment, invert
 from .config import GROUP_PARAMS, AMR
+from contextlib import contextmanager
 
+
+@contextmanager
+def suppress_fsolve_warnings():
+    old_settings = np.seterr(invalid='ignore', divide='ignore')
+    try:
+        yield
+    finally:
+        np.seterr(**old_settings)
 
 class GroupNode:
     def __init__(self, data: dict):
@@ -32,7 +41,8 @@ class GroupNode:
         self.mu[3] += dt * dpz
         self.mu[4] += dt * de
 
-        self._update_group_dist_params()
+        if self.mu[0] > 1e-4:
+            self._update_group_dist_params()
     
     def _update_group_dist_params(self):
         self.A, self.b, self.wx, self.wy, self.wz = invert(self.mu, self.group_bounds)
@@ -60,7 +70,7 @@ def calculate_hellinger_distance(f1, f2, cx_vec, cy_vec, cz_vec, params=GROUP_PA
 
     return np.sqrt(0.5 * integral)
 
-def refine_init(f0, cx, cy, cz, cx_vec, cy_vec, cz_vec, node, max_depth=5, curr_depth=0):
+def refine_init(f0, cx, cy, cz, cx_vec, cy_vec, cz_vec, node, max_depth=6, curr_depth=0):
     if node.hellinger_dist < AMR['threshold']:
         return
     if curr_depth >= max_depth:
@@ -97,7 +107,7 @@ def refine_init(f0, cx, cy, cz, cx_vec, cy_vec, cz_vec, node, max_depth=5, curr_
 
             child.set_mu(mu)
             
-            if mu[0] > 1e-3:
+            if mu[0] > 1e-4:
                 A, b, wx, wy, wz = invert(mu, child.group_bounds)
                 child.set_dist_param(A, b, wx, wy, wz)
             

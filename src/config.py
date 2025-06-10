@@ -44,9 +44,9 @@ LOOKUP_TABLE = {
 }
 
 SAMPLING_PARAMS = {
-    'n_samples_x': 98,
-    'n_samples_y': 98,
-    'n_samples_z': 98
+    'n_samples_x': 196,
+    'n_samples_y': 196,
+    'n_samples_z': 196
 }
 
 # Helper function to get velocity space grid

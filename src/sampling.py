@@ -36,7 +36,10 @@ def generate_regular_samples_helper(mu, x_sample, y_sample, z_sample, ci_cx, cf_
 
     sum_f_group = np.sum(f(x_sample_slice, y_sample_slice, z_sample_slice, Ak, bk, wxk, wyk, wzk))
     num_group_sample = len(x_sample_slice)
-    weights = mu[0] * f(x_sample_slice, y_sample_slice, z_sample_slice, Ak, bk, wxk, wyk, wzk) / sum_f_group
+    if Ak == 0.0 and bk == 0.0  and wxk == 0.0 and wyk == 0.0 and wzk == 0.0:
+        weights = np.zeros(len(x_sample_slice))
+    else:
+        weights = mu[0] * f(x_sample_slice, y_sample_slice, z_sample_slice, Ak, bk, wxk, wyk, wzk) / sum_f_group
 
     return num_group_sample, weights, mask
 

@@ -11,13 +11,13 @@ from .config import (
     SAMPLING_PARAMS,
     calculate_velocity_grid
 )
-from .moment_utils import moment_eq, calculate_group_moments, invert, calc_moment
+from .moment_utils import moment_eq, calculate_group_moments, invert, calc_moment, initial_guess
 from .sampling import generate_regular_samples, calculate_moments_from_weights, generate_grid, reweight_samples
 from .virtual_collisions import collide
 from .data_utils import save_simulation_data
 from .banner import print_banner
 from .amr import calculate_hellinger_distance, GroupNode, refine_init, print_tree_structure, get_current_groups
-import sys
+import copy
 
 
 def run_simulation():
@@ -59,18 +59,8 @@ def run_simulation():
 
     print('Initial group generation complete. Generating samples...\n')
 
-    Ak_list = np.zeros((COLLISION_PARAMS['n_t'] + 1, n_groups))
-    bk_list = np.zeros((COLLISION_PARAMS['n_t'] + 1, n_groups))
-    wxk_list = np.zeros((COLLISION_PARAMS['n_t'] + 1, n_groups))
-    wyk_list = np.zeros((COLLISION_PARAMS['n_t'] + 1, n_groups))
-    wzk_list = np.zeros((COLLISION_PARAMS['n_t'] + 1, n_groups))
-
-    for i, group in enumerate(curr_groups):
-        Ak_list[0, i] = group.A
-        bk_list[0, i] = group.b
-        wxk_list[0, i] = group.wx
-        wyk_list[0, i] = group.wy
-        wzk_list[0, i] = group.wz
+    curr_groups_list = [0 for x in range(COLLISION_PARAMS['n_t'] + 1)]
+    curr_groups_list[0] = copy.deepcopy(curr_groups)
 
     n_samples = SAMPLING_PARAMS['n_samples_x'] * SAMPLING_PARAMS['n_samples_y'] * SAMPLING_PARAMS['n_samples_z']
     x_sample, y_sample, z_sample = generate_grid(SAMPLING_PARAMS['n_samples_x'], SAMPLING_PARAMS['n_samples_y'], SAMPLING_PARAMS['n_samples_z'])
@@ -85,7 +75,6 @@ def run_simulation():
     for t in range(1, COLLISION_PARAMS['n_t'] + 1):
         if t % 10 == 0:
             print('Time step: ', t)
-            # save_simulation_data(t, Ak_list, bk_list, wk_list)
 
         group_n, group_px, group_py, group_pz, group_e = collide(x_sample, y_sample, z_sample, weights, num_group_sample, bounds_list, n_samples, n_groups)
 
@@ -93,19 +82,17 @@ def run_simulation():
             # Update group parameters after collisions.
             group.update_parameters(COLLISION_PARAMS['dt'], group_n[i], group_px[i], group_py[i], group_pz[i], group_e[i])
 
-            # Save results for plotting and such.
-            Ak_list[t, i] = group.A
-            bk_list[t, i] = group.b
-            wxk_list[t, i] = group.wx
-            wyk_list[t, i] = group.wy
-            wzk_list[t, i] = group.wz
+            print(group.A, group.b, group.wx, group.wy, group.wz, group.mu[0])
+
+        # Save data for plotting.
+        curr_groups_list[t] = copy.deepcopy(curr_groups)
 
         # Update weights for next simulation step.
         weights, _ = generate_regular_samples(n_samples, x_sample, y_sample, z_sample, curr_groups)
         # reweighted_weights = reweight_samples(x_sample, y_sample, z_sample, weights, num_group_sample, mu)
 
     # Save final state
-    save_simulation_data(COLLISION_PARAMS['n_t'], Ak_list, bk_list, wxk_list, wyk_list, wzk_list)
+    save_simulation_data(COLLISION_PARAMS['n_t'], curr_groups_list)
 
 if __name__ == '__main__':
     run_simulation()
