@@ -42,10 +42,10 @@ class GroupNode:
         self.mu[4] += dt * de
 
         if self.mu[0] > 1e-4:
-            self._update_group_dist_params()
+            self._update_group_dist_params([self.b, self.wx, self.wy, self.wz])
     
-    def _update_group_dist_params(self):
-        self.A, self.b, self.wx, self.wy, self.wz = invert(self.mu, self.group_bounds)
+    def _update_group_dist_params(self, initial_guess):
+        self.A, self.b, self.wx, self.wy, self.wz = invert(self.mu, initial_guess, self.group_bounds)
 
 
 def calculate_hellinger_distance(f1, f2, cx_vec, cy_vec, cz_vec, params=GROUP_PARAMS):
@@ -108,7 +108,7 @@ def refine_init(f0, cx, cy, cz, cx_vec, cy_vec, cz_vec, node, max_depth=6, curr_
             child.set_mu(mu)
             
             if mu[0] > 1e-4:
-                A, b, wx, wy, wz = invert(mu, child.group_bounds)
+                A, b, wx, wy, wz = invert(mu, [1.0, 0.0, 0.0, 0.0], child.group_bounds)
                 child.set_dist_param(A, b, wx, wy, wz)
             
                 # Calculate Hellinger distance.

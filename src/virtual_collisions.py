@@ -22,8 +22,8 @@ def collide(x_sample, y_sample, z_sample, weights, num_group_sample, bounds_list
     group_pz = np.zeros(n_groups)
     group_e = np.zeros(n_groups)
 
-    depl_idx1 = np.floor(np.random.uniform(0, n_samples, n_coll)).astype(np.int32)
-    depl_idx2 = np.floor(np.random.uniform(0, n_samples, n_coll)).astype(np.int32)
+    depl_idx1 = np.random.randint(0, n_samples, n_coll)
+    depl_idx2 = np.random.randint(0, n_samples, n_coll)
 
     mask = depl_idx1 != depl_idx2
 
@@ -45,12 +45,12 @@ def collide(x_sample, y_sample, z_sample, weights, num_group_sample, bounds_list
         x_valid = (x_sample[depl_idx1[i]] >= ci_cx) & (x_sample[depl_idx1[i]] <= cf_cx)
         y_valid = (y_sample[depl_idx1[i]] >= ci_cy) & (y_sample[depl_idx1[i]] <= cf_cy)
         z_valid = (z_sample[depl_idx1[i]] >= ci_cz) & (z_sample[depl_idx1[i]] <= cf_cz)
-        depl_group1 = np.where(x_valid & y_valid & z_valid)[0][0]
+        depl_group1 = np.argmax(x_valid & y_valid & z_valid)
 
         x_valid = (x_sample[depl_idx2[i]] >= ci_cx) & (x_sample[depl_idx2[i]] <= cf_cx)
         y_valid = (y_sample[depl_idx2[i]] >= ci_cy) & (y_sample[depl_idx2[i]] <= cf_cy)
         z_valid = (z_sample[depl_idx2[i]] >= ci_cz) & (z_sample[depl_idx2[i]] <= cf_cz)
-        depl_group2 = np.where(x_valid & y_valid & z_valid)[0][0]
+        depl_group2 = np.argmax(x_valid & y_valid & z_valid)
 
         if depl_group1 < depl_group2: key = (depl_group1, depl_group2)
         else: key = (depl_group2, depl_group1)
@@ -100,12 +100,12 @@ def collide(x_sample, y_sample, z_sample, weights, num_group_sample, bounds_list
         x_valid = (vx1 >= ci_cx) & (vx1 <= cf_cx)
         y_valid = (vy1 >= ci_cy) & (vy1 <= cf_cy)
         z_valid = (vz1 >= ci_cz) & (vz1 <= cf_cz)
-        group_idx1 = np.where(x_valid & y_valid & z_valid)[0][0]
+        group_idx1 = np.argmax(x_valid & y_valid & z_valid)
 
         x_valid = (vx2 >= ci_cx) & (vx2 <= cf_cx)
         y_valid = (vy2 >= ci_cy) & (vy2 <= cf_cy)
         z_valid = (vz2 >= ci_cz) & (vz2 <= cf_cz)
-        group_idx2 = np.where(x_valid & y_valid & z_valid)[0][0]
+        group_idx2 = np.argmax(x_valid & y_valid & z_valid)
 
         if group_idx1 < group_idx2: key = (group_idx1, group_idx2)
         else: key = (group_idx2, group_idx1)
@@ -131,7 +131,7 @@ def collide(x_sample, y_sample, z_sample, weights, num_group_sample, bounds_list
         x_valid = (vx1p_clamped >= ci_cx) & (vx1p_clamped <= cf_cx)
         y_valid = (vy1p_clamped >= ci_cy) & (vy1p_clamped <= cf_cy)
         z_valid = (vz1p_clamped >= ci_cz) & (vz1p_clamped <= cf_cz)
-        group_idx1 = np.where(x_valid & y_valid & z_valid)[0][0]
+        group_idx1 = np.argmax(x_valid & y_valid & z_valid)
 
         vx2p_clamped = np.minimum(np.maximum(vx2p, CX_LB), CX_UB)
         vy2p_clamped = np.minimum(np.maximum(vy2p, CY_LB), CY_UB)
@@ -139,7 +139,7 @@ def collide(x_sample, y_sample, z_sample, weights, num_group_sample, bounds_list
         x_valid = (vx2p_clamped >= ci_cx) & (vx2p_clamped <= cf_cx)
         y_valid = (vy2p_clamped >= ci_cy) & (vy2p_clamped <= cf_cy)
         z_valid = (vz2p_clamped >= ci_cz) & (vz2p_clamped <= cf_cz)
-        group_idx2 = np.where(x_valid & y_valid & z_valid)[0][0]
+        group_idx2 = np.argmax(x_valid & y_valid & z_valid)
         
         Gi = Li
         group_n[group_idx1] += Gi

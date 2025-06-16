@@ -142,7 +142,7 @@ def calculate_group_moments(f0, cx, cy, cz, cx_vec, cy_vec, cz_vec, n_groups=GRO
 
     return mu
 
-def initial_guess(group_bounds, ux, uy, uz, e):
+def grid_search(group_bounds, ux, uy, uz, e):
     ci_cx = group_bounds['ci_cx']
     cf_cx = group_bounds['cf_cx']
     ci_cy = group_bounds['ci_cy']
@@ -173,47 +173,64 @@ def initial_guess(group_bounds, ux, uy, uz, e):
     return initial_guess
 
 
-def invert(mu, group_bounds=GROUP_PARAMS, max_attempts=10):
-    guess_arr=[1.0, mu[1], mu[2], mu[3]]
+def invert(mu, initial_guess, group_bounds=GROUP_PARAMS):
     A, b, wx, wy, wz = 0.0, 0.0, 0.0, 0.0, 0.0
+    ci_cx = group_bounds['ci_cx']
+    cf_cx = group_bounds['cf_cx']
+    ci_cy = group_bounds['ci_cy']
+    cf_cy = group_bounds['cf_cy']
+    ci_cz = group_bounds['ci_cz']
+    cf_cz = group_bounds['cf_cz']
     method = 'hybr'
 
-    for attempt in range(max_attempts):
-        try:
-            sol = optimize.root(moment_eq, guess_arr, \
-                                            args=(mu[1] / mu[0], mu[2] / mu[0], \
-                                                    mu[3] / mu[0], mu[4] / mu[0], \
-                                                    group_bounds['ci_cx'], group_bounds['cf_cx'], \
-                                                        group_bounds['ci_cy'], group_bounds['cf_cy'], \
-                                                            group_bounds['ci_cz'], group_bounds['cf_cz']), method=method)
+    try:
+        sol = optimize.root(moment_eq, initial_guess, \
+                                        args=(mu[1] / mu[0], mu[2] / mu[0], \
+                                                mu[3] / mu[0], mu[4] / mu[0], \
+                                                ci_cx, cf_cx, ci_cy, cf_cy, ci_cz, cf_cz), method=method)
 
+        if sol.success:
             b = sol.x[0]
             wx = sol.x[1]
             wy = sol.x[2]
             wz = sol.x[3]
-            
-            if sol.success != 1: raise RuntimeError
-            if VELOCITY_SPACE['cx_range'][0] > wx or VELOCITY_SPACE['cx_range'][1] < wx: raise RuntimeError
-            if VELOCITY_SPACE['cy_range'][0] > wy or VELOCITY_SPACE['cy_range'][1] < wy: raise RuntimeError
-            if VELOCITY_SPACE['cz_range'][0] > wz or VELOCITY_SPACE['cz_range'][1] < wz: raise RuntimeError
-
-            I0x = np.sqrt(np.pi / (4 * b)) * (special.erf(np.sqrt(b) * (group_bounds['cf_cx'] - wx)) - special.erf(np.sqrt(b) * (group_bounds['ci_cx'] - wx)))
-            I0y = np.sqrt(np.pi / (4 * b)) * (special.erf(np.sqrt(b) * (group_bounds['cf_cy'] - wy)) - special.erf(np.sqrt(b) * (group_bounds['ci_cy'] - wy)))
-            I0z = np.sqrt(np.pi / (4 * b)) * (special.erf(np.sqrt(b) * (group_bounds['cf_cz'] - wz)) - special.erf(np.sqrt(b) * (group_bounds['ci_cz'] - wz)))
-            A = mu[0] / (I0x * I0y * I0z)
-        except RuntimeError:
-            method = 'lm'
-            
-            guess_arr[0] /= 2
-
-            guess_arr[1] = mu[1] + mu[1] * 0.05
-            # else: guess_arr[1] = mu[1] + mu[1] * 0.05
         
-            guess_arr[2] = mu[2] + mu[2] * 0.05
-            # else: guess_arr[2] -= mu[2] + mu[2] * attempt * 0.1
+        if sol.success == False: raise RuntimeError
+        if VELOCITY_SPACE['cx_range'][0] > wx or VELOCITY_SPACE['cx_range'][1] < wx: raise RuntimeError
+        if VELOCITY_SPACE['cy_range'][0] > wy or VELOCITY_SPACE['cy_range'][1] < wy: raise RuntimeError
+        if VELOCITY_SPACE['cz_range'][0] > wz or VELOCITY_SPACE['cz_range'][1] < wz: raise RuntimeError
+    except RuntimeError:
+        guesses = grid_search(group_bounds, mu[1] / mu[0], mu[2] / mu[0], \
+                                                mu[3] / mu[0], mu[4] / mu[0])
+    
+        for guess in guesses:
+            if guess[1] > 1e-3:
+                sol = optimize.least_squares(moment_eq, guess[0], args=(mu[1] / mu[0], mu[2] / mu[0], \
+                                                mu[3] / mu[0], mu[4] / mu[0], \
+                                                ci_cx, cf_cx, ci_cy, cf_cy, ci_cz, cf_cz), \
+                                                    bounds=([0.0, ci_cx, ci_cy, ci_cz], [np.inf, cf_cx, cf_cy, cf_cz]), method='trf', loss='soft_l1')
 
-            guess_arr[3] = mu[3] + mu[3] * 0.05
-            # else: guess_arr[3] -= mu[3] + mu[3] * attempt * 0.1
-        # if attempt == max_attempts - 1: print('uh oh')
+                if b != 0.0:
+                    I0x = np.sqrt(np.pi / (4 * b)) * (special.erf(np.sqrt(b) * (group_bounds['cf_cx'] - wx)) - special.erf(np.sqrt(b) * (group_bounds['ci_cx'] - wx)))
+                    I0y = np.sqrt(np.pi / (4 * b)) * (special.erf(np.sqrt(b) * (group_bounds['cf_cy'] - wy)) - special.erf(np.sqrt(b) * (group_bounds['ci_cy'] - wy)))
+                    I0z = np.sqrt(np.pi / (4 * b)) * (special.erf(np.sqrt(b) * (group_bounds['cf_cz'] - wz)) - special.erf(np.sqrt(b) * (group_bounds['ci_cz'] - wz)))
+                    A = mu[0] / (I0x * I0y * I0z)
+
+                if sol.success and A < 1.0:
+                    b = sol.x[0]
+                    wx = sol.x[1]
+                    wy = sol.x[2]
+                    wz = sol.x[3]
+                    break
+            else:
+                b = guess[0][0]
+                wx = guess[0][1]
+                wy = guess[0][2]
+                wz = guess[0][3]
+    
+    I0x = np.sqrt(np.pi / (4 * b)) * (special.erf(np.sqrt(b) * (group_bounds['cf_cx'] - wx)) - special.erf(np.sqrt(b) * (group_bounds['ci_cx'] - wx)))
+    I0y = np.sqrt(np.pi / (4 * b)) * (special.erf(np.sqrt(b) * (group_bounds['cf_cy'] - wy)) - special.erf(np.sqrt(b) * (group_bounds['ci_cy'] - wy)))
+    I0z = np.sqrt(np.pi / (4 * b)) * (special.erf(np.sqrt(b) * (group_bounds['cf_cz'] - wz)) - special.erf(np.sqrt(b) * (group_bounds['ci_cz'] - wz)))
+    A = mu[0] / (I0x * I0y * I0z)
 
     return A, b, wx, wy, wz

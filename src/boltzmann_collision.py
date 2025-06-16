@@ -11,7 +11,7 @@ from .config import (
     SAMPLING_PARAMS,
     calculate_velocity_grid
 )
-from .moment_utils import moment_eq, calculate_group_moments, invert, calc_moment, initial_guess
+from .moment_utils import moment_eq, calculate_group_moments, invert, calc_moment
 from .sampling import generate_regular_samples, calculate_moments_from_weights, generate_grid, reweight_samples
 from .virtual_collisions import collide
 from .data_utils import save_simulation_data
@@ -39,7 +39,7 @@ def run_simulation():
                       'ci_cz': VELOCITY_SPACE['cz_range'][0], 'cf_cz': VELOCITY_SPACE['cz_range'][1], 'group_bounds_cz': np.array([0, VELOCITY_SPACE['num_cz']])})
     mu = calc_moment(f0, cx, cy, cz, cx_vec, cy_vec, cz_vec)
     root.set_mu(mu)
-    root._update_group_dist_params()
+    root._update_group_dist_params([1.0, 0.0, 0.0, 0.0])
     root_f = root.A * np.exp(-root.b * ((cx - root.wx)**2 + (cy - root.wy)**2 + (cz - root.wz)**2))
     dist = calculate_hellinger_distance(f0, root_f, cx_vec, cy_vec, cz_vec, root.group_bounds)
     root.set_hellinger_distance(dist)
@@ -54,7 +54,6 @@ def run_simulation():
         bounds_list[i] = np.array([group.group_bounds['ci_cx'], group.group_bounds['cf_cx'], group.group_bounds['ci_cy'], \
                                    group.group_bounds['cf_cy'], group.group_bounds['ci_cz'], group.group_bounds['cf_cz']])
 
-    print(bounds_list)
     print_tree_structure(root)
 
     print('Initial group generation complete. Generating samples...\n')
@@ -81,8 +80,6 @@ def run_simulation():
         for i, group in enumerate(curr_groups):
             # Update group parameters after collisions.
             group.update_parameters(COLLISION_PARAMS['dt'], group_n[i], group_px[i], group_py[i], group_pz[i], group_e[i])
-
-            print(group.A, group.b, group.wx, group.wy, group.wz, group.mu[0])
 
         # Save data for plotting.
         curr_groups_list[t] = copy.deepcopy(curr_groups)
