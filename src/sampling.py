@@ -3,6 +3,8 @@ from .config import VELOCITY_SPACE, GROUP_PARAMS
 from numba import jit
 from scipy import optimize
 import sys
+from matplotlib import pyplot as plt
+
 
 @jit(nopython=True)
 def f(x, y, z, A, b, wx, wy, wz):
@@ -15,6 +17,7 @@ def generate_grid(n_samples_x, n_samples_y, n_samples_z):
     sample_loc_x = np.linspace(*VELOCITY_SPACE['cx_range'], n_samples_x)
     sample_loc_y = np.linspace(*VELOCITY_SPACE['cy_range'], n_samples_y)
     sample_loc_z = np.linspace(*VELOCITY_SPACE['cz_range'], n_samples_z)
+    print(sample_loc_x)
 
     [xgrid, ygrid, zgrid] = np.meshgrid(sample_loc_x, sample_loc_y, sample_loc_z, indexing='ij')
 
@@ -62,54 +65,33 @@ def generate_regular_samples(n_samples, x_sample, y_sample, z_sample, curr_group
 
     return weights, num_group_sample
 
-@jit(nopython=True)
-def calculate_moments_from_weights(x_sample, y_sample, z_sample, weights, n_samples):
-    n = np.zeros((NUM_GROUPS_CX, NUM_GROUPS_CY, NUM_GROUPS_CZ))
-    ux = np.zeros((NUM_GROUPS_CX, NUM_GROUPS_CY, NUM_GROUPS_CZ))
-    uy = np.zeros((NUM_GROUPS_CX, NUM_GROUPS_CY, NUM_GROUPS_CZ))
-    uz = np.zeros((NUM_GROUPS_CX, NUM_GROUPS_CY, NUM_GROUPS_CZ))
-    e = np.zeros((NUM_GROUPS_CX, NUM_GROUPS_CY, NUM_GROUPS_CZ))
+# def reweight_samples(x_sample, y_sample, z_sample, weights, num_group_sample, mu):
+#     new_weights = np.zeros(int(np.sum(num_group_sample)))
 
-    for i in range(0, n_samples):
-        group_idx_x = np.argmax(np.logical_and(x_sample[i] >= CI_CX, x_sample[i] <= CF_CX))
-        group_idx_y = np.argmax(np.logical_and(y_sample[i] >= CI_CY, y_sample[i] <= CF_CY))
-        group_idx_z = np.argmax(np.logical_and(z_sample[i] >= CI_CZ, z_sample[i] <= CF_CZ))
+#     for i in range(0, NUM_GROUPS_CX):
+#         for j in range(0, NUM_GROUPS_CY):
+#             for k in range(0, NUM_GROUPS_CZ):
+#                 M = np.zeros((5, int(num_group_sample[i, j, k])))
+#                 Q = np.zeros((5,))
 
-        n[group_idx_x, group_idx_y, group_idx_z] += weights[i] 
-        ux[group_idx_x, group_idx_y, group_idx_z] += x_sample[i] * weights[i]
-        uy[group_idx_x, group_idx_y, group_idx_z] += y_sample[i] * weights[i]
-        uz[group_idx_x, group_idx_y, group_idx_z] += z_sample[i] * weights[i]
-        e[group_idx_x, group_idx_y, group_idx_z] += (x_sample[i]**2 + y_sample[i]**2 + z_sample[i]**2) * weights[i]
+#                 x_mask = np.asarray(np.logical_and(x_sample >= CI_CX[i], x_sample <= CF_CX[i])).nonzero()
+#                 y_mask = np.asarray(np.logical_and(y_sample >= CI_CY[j], y_sample <= CF_CY[j])).nonzero()
+#                 z_mask = np.asarray(np.logical_and(z_sample >= CI_CZ[k], z_sample <= CF_CZ[k])).nonzero()
+#                 mask = np.array(list(set(x_mask[0].flatten()) & set(y_mask[0].flatten()) & set(z_mask[0].flatten())))
 
-    return n, ux, uy, uz, e
+#                 M[0, :] = 1
+#                 M[1, :] = x_sample[mask]
+#                 M[2, :] = y_sample[mask]
+#                 M[3, :] = z_sample[mask]
+#                 M[4, :] = (x_sample[mask]**2 + y_sample[mask]**2 + z_sample[mask]**2)
 
-def reweight_samples(x_sample, y_sample, z_sample, weights, num_group_sample, mu):
-    new_weights = np.zeros(int(np.sum(num_group_sample)))
-
-    for i in range(0, NUM_GROUPS_CX):
-        for j in range(0, NUM_GROUPS_CY):
-            for k in range(0, NUM_GROUPS_CZ):
-                M = np.zeros((5, int(num_group_sample[i, j, k])))
-                Q = np.zeros((5,))
-
-                x_mask = np.asarray(np.logical_and(x_sample >= CI_CX[i], x_sample <= CF_CX[i])).nonzero()
-                y_mask = np.asarray(np.logical_and(y_sample >= CI_CY[j], y_sample <= CF_CY[j])).nonzero()
-                z_mask = np.asarray(np.logical_and(z_sample >= CI_CZ[k], z_sample <= CF_CZ[k])).nonzero()
-                mask = np.array(list(set(x_mask[0].flatten()) & set(y_mask[0].flatten()) & set(z_mask[0].flatten())))
-
-                M[0, :] = 1
-                M[1, :] = x_sample[mask]
-                M[2, :] = y_sample[mask]
-                M[3, :] = z_sample[mask]
-                M[4, :] = (x_sample[mask]**2 + y_sample[mask]**2 + z_sample[mask]**2)
-
-                Q[0] = mu[i, j, k, 0]
-                Q[1] = mu[i, j, k, 1]
-                Q[2] = mu[i, j, k, 2]
-                Q[3] = mu[i, j, k, 3]
-                Q[4] = mu[i, j, k, 4]
+#                 Q[0] = mu[i, j, k, 0]
+#                 Q[1] = mu[i, j, k, 1]
+#                 Q[2] = mu[i, j, k, 2]
+#                 Q[3] = mu[i, j, k, 3]
+#                 Q[4] = mu[i, j, k, 4]
                 
-                sol = optimize.least_squares(func, weights[mask], args=(M, Q), bounds=(0.0, 1.0), loss='soft_l1')
-                new_weights[mask] = sol.x
+#                 sol = optimize.least_squares(func, weights[mask], args=(M, Q), bounds=(0.0, 1.0), loss='soft_l1')
+#                 new_weights[mask] = sol.x
 
-    return new_weights
+#     return new_weights

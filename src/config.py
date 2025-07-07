@@ -13,18 +13,30 @@ VELOCITY_SPACE = {
 
 # Group parameters
 GROUP_PARAMS = {
-    'num_groups_cx': 2,
-    'num_groups_cy': 2,
-    'num_groups_cz': 2,
-    'ci_cx': np.array([-3.0, 0.0]),
-    'cf_cx': np.array([0.0, 3.0]),
-    'group_bounds_cx': np.array([[0, 121], [120, 241]]),
-    'ci_cy': np.array([-3.0, 0.0]),
-    'cf_cy': np.array([0.0, 3.0]),
-    'group_bounds_cy': np.array([[0, 121], [120, 241]]),
-    'ci_cz': np.array([-3.0, 0.0]),
-    'cf_cz': np.array([0.0, 3.0]),
-    'group_bounds_cz': np.array([[0, 121], [120, 241]])
+    # 'num_groups_cx': 4,
+    # 'num_groups_cy': 4,
+    # 'num_groups_cz': 4,
+    # 'ci_cx': np.array([-3.0, -0.5, 0.0, 0.5]),
+    # 'cf_cx': np.array([-0.5, 0.0, 0.5, 3.0]),
+    # 'group_bounds_cx': np.array([[0, 101], [100, 121], [120, 141], [140, 241]]),
+    # 'ci_cy': np.array([-3.0, -0.5, 0.0, 0.5]),
+    # 'cf_cy': np.array([-0.5, 0.0, 0.5, 3.0]),
+    # 'group_bounds_cy': np.array([[0, 101], [100, 121], [120, 141], [140, 241]]),
+    # 'ci_cz': np.array([-3.0, -0.5, 0.0, 0.5]),
+    # 'cf_cz': np.array([-0.5, 0.0, 0.5, 3.0]),
+    # 'group_bounds_cz': np.array([[0, 101], [100, 121], [120, 141], [140, 241]])
+    'num_groups_cx': 4,
+    'num_groups_cy': 1,
+    'num_groups_cz': 1,
+    'ci_cx': np.array([-3.0, -0.5, 0.0, 0.5]),
+    'cf_cx': np.array([-0.5, 0.0, 0.5, 3.0]),
+    'group_bounds_cx': np.array([[0, 101], [100, 121], [120, 141], [140, 241]]),
+    'ci_cy': np.array([-3.0]),
+    'cf_cy': np.array([3.0]),
+    'group_bounds_cy': np.array([[0, 241]]),
+    'ci_cz': np.array([-3.0]),
+    'cf_cz': np.array([3.0]),
+    'group_bounds_cz': np.array([[0, 241]])
 }
 
 # AMR parameters
@@ -34,9 +46,9 @@ AMR = {
 
 # Collision parameters
 COLLISION_PARAMS = {
-    'n_coll': 500000,
+    'n_coll': 1000000,
     'dt': 0.2,
-    'n_t': 100
+    'n_t': 20
 }
 
 LOOKUP_TABLE = {
@@ -44,9 +56,9 @@ LOOKUP_TABLE = {
 }
 
 SAMPLING_PARAMS = {
-    'n_samples_x': 98 * 2,
-    'n_samples_y': 98 * 2,
-    'n_samples_z': 98 * 2
+    'n_samples_x': 98,
+    'n_samples_y': 98,
+    'n_samples_z': 98
 }
 
 # Helper function to get velocity space grid

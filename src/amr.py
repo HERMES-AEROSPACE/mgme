@@ -229,3 +229,70 @@ def get_current_groups(node):
 
     _get_leaves(node, leaves)
     return leaves
+
+def custom_groups(f0, cx, cy, cz, cx_vec, cy_vec, cz_vec, root, group_params):
+    group_bounds_cx = group_params['group_bounds_cx']
+    group_bounds_cy = group_params['group_bounds_cy']
+    group_bounds_cz = group_params['group_bounds_cz']
+    ci_cx = group_params['ci_cx']
+    cf_cx = group_params['cf_cx']
+    ci_cy = group_params['ci_cy']
+    cf_cy = group_params['cf_cy']
+    ci_cz = group_params['ci_cz']
+    cf_cz = group_params['cf_cz']
+
+    idx_x, idx_y, idx_z = np.meshgrid(
+        np.arange(len(ci_cx)),
+        np.arange(len(ci_cy)),
+        np.arange(len(ci_cz)),
+        indexing='ij'
+    )
+
+    # Flatten the grids
+    idx_x_flat = idx_x.flatten()
+    idx_y_flat = idx_y.flatten()
+    idx_z_flat = idx_z.flatten()
+
+    velocity_bounds_cx = np.column_stack([ci_cx[idx_x_flat], cf_cx[idx_x_flat]])
+    velocity_bounds_cy = np.column_stack([ci_cy[idx_y_flat], cf_cy[idx_y_flat]])
+    velocity_bounds_cz = np.column_stack([ci_cz[idx_z_flat], cf_cz[idx_z_flat]])
+
+    group_bounds_cx_selected = group_bounds_cx[idx_x_flat]
+    group_bounds_cy_selected = group_bounds_cy[idx_y_flat]
+    group_bounds_cz_selected = group_bounds_cz[idx_z_flat]
+
+    for i in range(len(idx_x_flat)):
+        data_dict = {
+            'ci_cx': velocity_bounds_cx[i][0], 'cf_cx': velocity_bounds_cx[i][1], 'group_bounds_cx': group_bounds_cx_selected[i],
+            'ci_cy': velocity_bounds_cy[i][0], 'cf_cy': velocity_bounds_cy[i][1], 'group_bounds_cy': group_bounds_cy_selected[i],
+            'ci_cz': velocity_bounds_cz[i][0], 'cf_cz': velocity_bounds_cz[i][1], 'group_bounds_cz': group_bounds_cz_selected[i],
+        }
+        child = GroupNode(data_dict)
+
+        lb_cx, ub_cx = group_bounds_cx_selected[i]
+        lb_cy, ub_cy = group_bounds_cy_selected[i]
+        lb_cz, ub_cz = group_bounds_cz_selected[i]
+        f0_slice = f0[lb_cx:ub_cx, lb_cy:ub_cy, lb_cz:ub_cz]
+        cx_slice = cx[lb_cx:ub_cx, lb_cy:ub_cy, lb_cz:ub_cz]
+        cy_slice = cy[lb_cx:ub_cx, lb_cy:ub_cy, lb_cz:ub_cz]
+        cz_slice = cz[lb_cx:ub_cx, lb_cy:ub_cy, lb_cz:ub_cz]
+        cx_vec_slice = cx_vec[lb_cx:ub_cx]
+        cy_vec_slice = cy_vec[lb_cy:ub_cy]
+        cz_vec_slice = cz_vec[lb_cz:ub_cz]
+
+        mu = calc_moment(f0_slice, cx_slice, cy_slice, cz_slice, cx_vec_slice, cy_vec_slice, cz_vec_slice)
+        child.set_mu(mu)
+            
+        if mu[0] > 1e-4:
+            A, b, wx, wy, wz = invert(mu, [1.0, 0.0, 0.0, 0.0], child.group_bounds)
+            child.set_dist_param(A, b, wx, wy, wz)
+        
+            # Calculate Hellinger distance.
+            f = A * np.exp(-b * ((cx_slice - wx)**2 + (cy_slice - wy)**2 + (cz_slice - wz)**2))
+            dist = calculate_hellinger_distance(f0_slice, f, cx_vec_slice, cy_vec_slice, cz_vec_slice, child.group_bounds)
+            child.set_hellinger_distance(dist)
+        else:
+            child.set_dist_param(0.0, 0.0, 0.0, 0.0, 0.0)
+            child.set_hellinger_distance(0.0)
+        
+        root.add_child(child)
