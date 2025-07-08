@@ -4,26 +4,27 @@ from numba import jit, types
 from numba.typed import Dict
 
 
-n_coll = 100000
+n_coll = 1000000
 key_type = types.UniTuple(types.UniTuple(types.int64, 3), 2)
 
 CI_CX = np.array([-3.0, -1.0, 0.0, 1.0])
 CF_CX = np.array([-1.0, 0.0, 1.0, 3.0])
-CI_CY = np.array([-3.0])
-CF_CY = np.array([3.0])
-CI_CZ = np.array([-3.0])
-CF_CZ = np.array([3.0])
+CI_CY = np.array([-3.0, -1.0, 0.0, 1.0])
+CF_CY = np.array([-1.0, 0.0, 1.0, 3.0])
+CI_CZ = np.array([-3.0, -1.0, 0.0, 1.0])
+CF_CZ = np.array([-1.0, 0.0, 1.0, 3.0])
 
 CX_UB = 3
 CY_UB = 3
 CZ_UB = 3
 
+@jit(nopython=True)
 def work_collide(x_sample, y_sample, z_sample, weights, num_group_sample, n_samples, Rf1, Rf2, depl_idx1, depl_idx2):
-    group_n = np.zeros((4, 1, 1))
-    group_px = np.zeros((4, 1, 1))
-    group_py = np.zeros((4, 1, 1))
-    group_pz = np.zeros((4, 1, 1))
-    group_e = np.zeros((4, 1, 1))
+    group_n = np.zeros((4, 4, 4))
+    group_px = np.zeros((4, 4, 4))
+    group_py = np.zeros((4, 4, 4))
+    group_pz = np.zeros((4, 4, 4))
+    group_e = np.zeros((4, 4, 4))
 
     # depl_idx1 = np.floor(np.random.uniform(0, n_samples, n_coll)).astype(np.int32)
     # print(depl_idx1)
@@ -136,14 +137,14 @@ def work_collide(x_sample, y_sample, z_sample, weights, num_group_sample, n_samp
             group_idx2_x = 4 - 1
 
         if vy1p > CY_UB:
-            group_idx1_y = 1 - 1
+            group_idx1_y = 4 - 1
         if vy2p > CY_UB:
-            group_idx2_y = 1 - 1
+            group_idx2_y = 4 - 1
 
         if vz1p > CZ_UB:
-            group_idx1_z = 1 - 1
+            group_idx1_z = 4 - 1
         if vz2p > CZ_UB:
-            group_idx2_z = 1 - 1
+            group_idx2_z = 4 - 1
 
         Gi = Li
         group_n[group_idx1_x, group_idx1_y, group_idx1_z] += Gi

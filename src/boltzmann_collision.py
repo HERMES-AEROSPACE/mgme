@@ -82,38 +82,25 @@ def run_simulation():
     print('Weights generated. Starting simulation...\n')
 
     group_collector = np.zeros((n_groups, 5))
-    # np.random.seed(34957293)
+    np.random.seed(34957293)
     for t in range(1, COLLISION_PARAMS['n_t'] + 1):
         if t % 10 == 0:
             print('Time step: ', t)
 
         # fig, ((ax1, ax2, ax3), (ax4, ax5, ax6)) = plt.subplots(2, 3, figsize=(15, 10))
 
-        Rf1 = np.random.uniform(0.0, 1.0, 100000)
-        Rf2 = np.random.uniform(0.0, 1.0, 100000)
-        depl_idx1 = np.random.randint(0, n_samples, 100000)
-        depl_idx2 = np.random.randint(0, n_samples, 100000)
-        group_n_d, group_n_r, group_px, group_py, group_pz, group_e, d_group, r_group, vx_collector, vxp_collector\
-              = collide(x_sample, y_sample, z_sample, weights, num_group_sample, bounds_list, n_samples, n_groups, Rf1, Rf2, depl_idx1, depl_idx2)
-        # group_n, group_px2, group_py, group_pz, group_e = work_collide(x_sample, y_sample, z_sample, weights, num_group_sample.reshape((4, 1, 1)), n_samples, Rf1, Rf2, depl_idx1, depl_idx2)
+        Rf1 = np.random.uniform(0.0, 1.0, COLLISION_PARAMS['n_coll'])
+        Rf2 = np.random.uniform(0.0, 1.0, COLLISION_PARAMS['n_coll'])
+        depl_idx1 = np.random.randint(0, n_samples, COLLISION_PARAMS['n_coll'])
+        depl_idx2 = np.random.randint(0, n_samples, COLLISION_PARAMS['n_coll'])
+        # group_n, group_px, group_py, group_pz, group_e = collide(x_sample, y_sample, z_sample, weights, num_group_sample, bounds_list, n_groups, Rf1, Rf2, depl_idx1, depl_idx2)
+        group_n, group_px, group_py, group_pz, group_e = work_collide(x_sample, y_sample, z_sample, weights, num_group_sample.reshape((4, 4, 4)), n_samples, Rf1, Rf2, depl_idx1, depl_idx2)
         # print(group_n_d + group_n_r, group_n.reshape(4))
-
-        # ax1.bar(np.linspace(0, n_groups, n_groups), group_n_d)
-        # ax2.bar(np.linspace(0, n_groups, n_groups), group_n_r)
-        # ax3.bar(np.linspace(0, n_groups, n_groups), group_n_r + group_n_d)
-        # ax4.bar(np.linspace(0, n_groups, n_groups), d_group)
-        # ax5.bar(np.linspace(0, n_groups, n_groups), r_group)
-        # ax6.bar(np.linspace(0, n_groups, n_groups), group_px)
-        # plt.tight_layout()
-        # plt.show()
-
-        # fig2 = plt.figure(figsize=(6, 6))
-        # ax1 = fig2.add_subplot(111)
-        # ax1.hist(vxp_collector, bins=200)
-        # ax1.hist(vx_collector, bins=200)
-        # plt.tight_layout()
-        # plt.show()
-        group_n = group_n_d + group_n_r
+        group_n = group_n.reshape(64)
+        group_px = group_px.reshape(64)
+        group_py = group_py.reshape(64)
+        group_pz = group_pz.reshape(64)
+        group_e = group_e.reshape(64)
 
         for i, group in enumerate(curr_groups):
             # Update group parameters after collisions.

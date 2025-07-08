@@ -48,7 +48,7 @@ AMR = {
 COLLISION_PARAMS = {
     'n_coll': 1000000,
     'dt': 0.2,
-    'n_t': 100
+    'n_t': 10
 }
 
 LOOKUP_TABLE = {
@@ -56,9 +56,9 @@ LOOKUP_TABLE = {
 }
 
 SAMPLING_PARAMS = {
-    'n_samples_x': 99 * 2,
-    'n_samples_y': 99 * 2,
-    'n_samples_z': 99 * 2
+    'n_samples_x': 98,
+    'n_samples_y': 98,
+    'n_samples_z': 98
 }
 
 # Helper function to get velocity space grid
