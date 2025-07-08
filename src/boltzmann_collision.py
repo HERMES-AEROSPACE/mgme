@@ -18,6 +18,8 @@ from .data_utils import save_simulation_data
 from .banner import print_banner
 from .amr import calculate_hellinger_distance, GroupNode, refine_init, print_tree_structure, get_current_groups, custom_groups
 import copy
+from .working_virtual_coll import work_collide
+import sys
 
 
 def run_simulation():
@@ -54,7 +56,8 @@ def run_simulation():
     for i, group in enumerate(curr_groups):
         bounds_list[i] = np.array([group.group_bounds['ci_cx'], group.group_bounds['cf_cx'], group.group_bounds['ci_cy'], \
                                    group.group_bounds['cf_cy'], group.group_bounds['ci_cz'], group.group_bounds['cf_cz']])
-        # print(group.A, group.b, group.wx, group.wy, group.wz, group.mu, group.group_bounds)
+        print(group.A, group.b, group.wx, group.wy, group.wz, group.mu, group.group_bounds)
+        print(group.mu)
 
     # print_tree_structure(root)
     print(bounds_list)
@@ -80,14 +83,22 @@ def run_simulation():
     print('Weights generated. Starting simulation...\n')
 
     group_collector = np.zeros((n_groups, 5))
+    np.random.seed(34957293)
     for t in range(1, COLLISION_PARAMS['n_t'] + 1):
         if t % 10 == 0:
             print('Time step: ', t)
 
         fig, ((ax1, ax2, ax3), (ax4, ax5, ax6)) = plt.subplots(2, 3, figsize=(15, 10))
 
+        Rf1 = np.random.uniform(0.0, 1.0, 100000)
+        Rf2 = np.random.uniform(0.0, 1.0, 100000)
+        depl_idx1 = np.random.randint(0, n_samples, 100000)
+        depl_idx2 = np.random.randint(0, n_samples, 100000)
         group_n_d, group_n_r, group_px, group_py, group_pz, group_e, d_group, r_group, vx_collector, vxp_collector\
-              = collide(x_sample, y_sample, z_sample, weights, num_group_sample, bounds_list, n_samples, n_groups)
+              = collide(x_sample, y_sample, z_sample, weights, num_group_sample, bounds_list, n_samples, n_groups, Rf1, Rf2, depl_idx1, depl_idx2)
+        group_n, group_px, group_py, group_pz, group_e = work_collide(x_sample, y_sample, z_sample, weights, num_group_sample.reshape((4, 1, 1)), n_samples, Rf1, Rf2, depl_idx1, depl_idx2)
+        print(group_n.reshape(4), group_n_d + group_n_r)
+
         # ax1.bar(np.linspace(0, n_groups, n_groups), group_n_d)
         # ax2.bar(np.linspace(0, n_groups, n_groups), group_n_r)
         # ax3.bar(np.linspace(0, n_groups, n_groups), group_n_r + group_n_d)
@@ -109,6 +120,7 @@ def run_simulation():
             # Update group parameters after collisions.
             group.update_parameters(COLLISION_PARAMS['dt'], group_n[i], group_px[i], group_py[i], group_pz[i], group_e[i])
             # print(group.A, group.b, group.wx, group.wy, group.wz, group.group_bounds)
+            # print(group.mu)
 
         # Save data for plotting.
         curr_groups_list[t] = copy.deepcopy(curr_groups)

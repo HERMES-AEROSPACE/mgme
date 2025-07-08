@@ -16,7 +16,7 @@ key_type = types.UniTuple(types.int64, 2)
 
 
 @jit(nopython=True)
-def collide(x_sample, y_sample, z_sample, weights, num_group_sample, bounds_list, n_samples, n_groups):
+def collide(x_sample, y_sample, z_sample, weights, num_group_sample, bounds_list, n_samples, n_groups, Rf1, Rf2, depl_idx1, depl_idx2):
     group_n_d = np.zeros(n_groups)
     group_n_r = np.zeros(n_groups)
     group_px = np.zeros(n_groups)
@@ -24,8 +24,8 @@ def collide(x_sample, y_sample, z_sample, weights, num_group_sample, bounds_list
     group_pz = np.zeros(n_groups)
     group_e = np.zeros(n_groups)
 
-    depl_idx1 = np.random.randint(0, n_samples, n_coll)
-    depl_idx2 = np.random.randint(0, n_samples, n_coll)
+    # depl_idx1 = np.random.randint(0, n_samples, n_coll)
+    # depl_idx2 = np.random.randint(0, n_samples, n_coll)
 
     mask = depl_idx1 != depl_idx2
 
@@ -83,9 +83,10 @@ def collide(x_sample, y_sample, z_sample, weights, num_group_sample, bounds_list
         gz = np.abs(vz2 - vz1)
         g = np.sqrt(gx**2 + gy**2 + gz**2)
 
-        Rf = np.random.uniform(0.0, 1.0, 2)
-        phi = 2 * np.pi * Rf[0]
-        cos_theta = 2 * Rf[1] - 1
+        Rf = Rf1[i]
+        phi = 2 * np.pi * Rf
+        Rf = Rf2[i]
+        cos_theta = 2 * Rf - 1
         sin_theta = np.sqrt(1 - cos_theta**2)
 
         gx_p = 0.5 * g * sin_theta * np.cos(phi)
