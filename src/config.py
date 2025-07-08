@@ -28,15 +28,15 @@ GROUP_PARAMS = {
     'num_groups_cx': 4,
     'num_groups_cy': 4,
     'num_groups_cz': 4,
-    'ci_cx': np.array([-3.0, -1.0, 0.0, 1.0]),
-    'cf_cx': np.array([-1.0, 0.0, 1.0, 3.0]),
-    'group_bounds_cx': np.array([[0, 81], [80, 121], [120, 161], [160, 241]]),
-    'ci_cy': np.array([-3.0, -1.0, 0.0, 1.0]),
-    'cf_cy': np.array([-1.0, 0.0, 1.0, 3.0]),
-    'group_bounds_cy': np.array([[0, 81], [80, 121], [120, 161], [160, 241]]),
-    'ci_cz': np.array([-3.0, -1.0, 0.0, 1.0]),
-    'cf_cz': np.array([-1.0, 0.0, 1.0, 3.0]),
-    'group_bounds_cz': np.array([[0, 81], [80, 121], [120, 161], [160, 241]])
+    'ci_cx': np.array([-3.0, -0.5, 0.0, 0.5]),
+    'cf_cx': np.array([-0.5, 0.0, 0.5, 3.0]),
+    'group_bounds_cx': np.array([[0, 101], [100, 121], [120, 141], [140, 241]]),
+    'ci_cy': np.array([-3.0, -0.5, 0.0, 0.5]),
+    'cf_cy': np.array([-0.5, 0.0, 0.5, 3.0]),
+    'group_bounds_cy': np.array([[0, 101], [100, 121], [120, 141], [140, 241]]),
+    'ci_cz': np.array([-3.0, -0.5, 0.0, 0.5]),
+    'cf_cz': np.array([-0.5, 0.0, 0.5, 3.0]),
+    'group_bounds_cz': np.array([[0, 101], [100, 121], [120, 141], [140, 241]])
 }
 
 # AMR parameters

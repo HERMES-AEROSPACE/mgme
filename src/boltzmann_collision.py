@@ -56,10 +56,6 @@ def run_simulation():
     for i, group in enumerate(curr_groups):
         bounds_list[i] = np.array([group.group_bounds['ci_cx'], group.group_bounds['cf_cx'], group.group_bounds['ci_cy'], \
                                    group.group_bounds['cf_cy'], group.group_bounds['ci_cz'], group.group_bounds['cf_cz']])
-        # print(group.A, group.b, group.wx, group.wy, group.wz, group.mu, group.group_bounds)
-
-    # print_tree_structure(root)
-    print(bounds_list)
 
     print('Initial group generation complete. Generating samples...\n')
 
@@ -70,12 +66,6 @@ def run_simulation():
     x_sample, y_sample, z_sample = generate_grid(SAMPLING_PARAMS['n_samples_x'], SAMPLING_PARAMS['n_samples_y'], SAMPLING_PARAMS['n_samples_z'])
     weights, num_group_sample = generate_regular_samples(n_samples, x_sample, y_sample, z_sample, curr_groups)
     print('Reweighting samples...\n')
-
-    # print(np.sum(weights[0:n_samples//2]), np.sum(weights[n_samples//2:]))
-    # print(np.sum(weights[0:n_samples//2] * x_sample[0:n_samples//2]), np.sum(weights[n_samples//2:] * x_sample[n_samples//2:]))
-    # print(np.sum(weights[0:n_samples//2] * y_sample[0:n_samples//2]), np.sum(weights[n_samples//2:] * y_sample[n_samples//2:]))
-    # print(np.sum(weights[0:n_samples//2] * z_sample[0:n_samples//2]), np.sum(weights[n_samples//2:] * z_sample[n_samples//2:]))
-    # print(np.sum((x_sample[0:n_samples//2]**2 + y_sample[0:n_samples//2]**2 + z_sample[0:n_samples//2]**2) * weights[0:n_samples//2]))
 
     # reweighted_weights = reweight_samples(x_sample, y_sample, z_sample, weights, num_group_sample, mu)
 
@@ -93,20 +83,11 @@ def run_simulation():
         Rf2 = np.random.uniform(0.0, 1.0, COLLISION_PARAMS['n_coll'])
         depl_idx1 = np.random.randint(0, n_samples, COLLISION_PARAMS['n_coll'])
         depl_idx2 = np.random.randint(0, n_samples, COLLISION_PARAMS['n_coll'])
-        # group_n, group_px, group_py, group_pz, group_e = collide(x_sample, y_sample, z_sample, weights, num_group_sample, bounds_list, n_groups, Rf1, Rf2, depl_idx1, depl_idx2)
-        group_n, group_px, group_py, group_pz, group_e = work_collide(x_sample, y_sample, z_sample, weights, num_group_sample.reshape((4, 4, 4)), n_samples, Rf1, Rf2, depl_idx1, depl_idx2)
-        # print(group_n_d + group_n_r, group_n.reshape(4))
-        group_n = group_n.reshape(64)
-        group_px = group_px.reshape(64)
-        group_py = group_py.reshape(64)
-        group_pz = group_pz.reshape(64)
-        group_e = group_e.reshape(64)
+        group_n, group_px, group_py, group_pz, group_e = collide(x_sample, y_sample, z_sample, weights, num_group_sample, bounds_list, n_groups, Rf1, Rf2, depl_idx1, depl_idx2)
 
         for i, group in enumerate(curr_groups):
             # Update group parameters after collisions.
             group.update_parameters(COLLISION_PARAMS['dt'], group_n[i], group_px[i], group_py[i], group_pz[i], group_e[i])
-            # print(group.A, group.b, group.wx, group.wy, group.wz, group.group_bounds)
-            # print(group.mu)
 
         # Save data for plotting.
         curr_groups_list[t] = copy.deepcopy(curr_groups)
@@ -118,6 +99,5 @@ def run_simulation():
     # Save final state
     save_simulation_data(COLLISION_PARAMS['n_t'], curr_groups_list)
 
-    # np.save('notebooks/group_collector.npy', group_collector)
 if __name__ == '__main__':
     run_simulation()
