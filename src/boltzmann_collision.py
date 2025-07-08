@@ -56,8 +56,7 @@ def run_simulation():
     for i, group in enumerate(curr_groups):
         bounds_list[i] = np.array([group.group_bounds['ci_cx'], group.group_bounds['cf_cx'], group.group_bounds['ci_cy'], \
                                    group.group_bounds['cf_cy'], group.group_bounds['ci_cz'], group.group_bounds['cf_cz']])
-        print(group.A, group.b, group.wx, group.wy, group.wz, group.mu, group.group_bounds)
-        print(group.mu)
+        # print(group.A, group.b, group.wx, group.wy, group.wz, group.mu, group.group_bounds)
 
     # print_tree_structure(root)
     print(bounds_list)
@@ -83,12 +82,12 @@ def run_simulation():
     print('Weights generated. Starting simulation...\n')
 
     group_collector = np.zeros((n_groups, 5))
-    np.random.seed(34957293)
+    # np.random.seed(34957293)
     for t in range(1, COLLISION_PARAMS['n_t'] + 1):
         if t % 10 == 0:
             print('Time step: ', t)
 
-        fig, ((ax1, ax2, ax3), (ax4, ax5, ax6)) = plt.subplots(2, 3, figsize=(15, 10))
+        # fig, ((ax1, ax2, ax3), (ax4, ax5, ax6)) = plt.subplots(2, 3, figsize=(15, 10))
 
         Rf1 = np.random.uniform(0.0, 1.0, 100000)
         Rf2 = np.random.uniform(0.0, 1.0, 100000)
