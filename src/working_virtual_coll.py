@@ -7,8 +7,8 @@ from numba.typed import Dict
 n_coll = 100000
 key_type = types.UniTuple(types.UniTuple(types.int64, 3), 2)
 
-CI_CX = np.array([-3.0, -0.5, 0.0, 0.5])
-CF_CX = np.array([-0.5, 0.0, 0.5, 3.0])
+CI_CX = np.array([-3.0, -1.0, 0.0, 1.0])
+CF_CX = np.array([-1.0, 0.0, 1.0, 3.0])
 CI_CY = np.array([-3.0])
 CF_CY = np.array([3.0])
 CI_CZ = np.array([-3.0])

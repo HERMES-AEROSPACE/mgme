@@ -96,8 +96,8 @@ def run_simulation():
         depl_idx2 = np.random.randint(0, n_samples, 100000)
         group_n_d, group_n_r, group_px, group_py, group_pz, group_e, d_group, r_group, vx_collector, vxp_collector\
               = collide(x_sample, y_sample, z_sample, weights, num_group_sample, bounds_list, n_samples, n_groups, Rf1, Rf2, depl_idx1, depl_idx2)
-        group_n, group_px, group_py, group_pz, group_e = work_collide(x_sample, y_sample, z_sample, weights, num_group_sample.reshape((4, 1, 1)), n_samples, Rf1, Rf2, depl_idx1, depl_idx2)
-        print(group_n.reshape(4), group_n_d + group_n_r)
+        # group_n, group_px2, group_py, group_pz, group_e = work_collide(x_sample, y_sample, z_sample, weights, num_group_sample.reshape((4, 1, 1)), n_samples, Rf1, Rf2, depl_idx1, depl_idx2)
+        # print(group_n_d + group_n_r, group_n.reshape(4))
 
         # ax1.bar(np.linspace(0, n_groups, n_groups), group_n_d)
         # ax2.bar(np.linspace(0, n_groups, n_groups), group_n_r)
