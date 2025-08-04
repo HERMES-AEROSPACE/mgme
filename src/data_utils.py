@@ -3,7 +3,7 @@ import os
 from datetime import datetime
 from .config import GROUP_PARAMS, VELOCITY_SPACE, COLLISION_PARAMS, SAMPLING_PARAMS
 
-def save_simulation_data(t, curr_groups_list, save_dir='simulation_data'):
+def save_simulation_data(t, curr_groups_list, entropy_list, save_dir='simulation_data'):
     """Save simulation data at time step t.
     
     Args:
@@ -20,6 +20,7 @@ def save_simulation_data(t, curr_groups_list, save_dir='simulation_data'):
     
     # Save data
     np.save(f'{save_dir}/groups{t}_{timestamp}.npy', curr_groups_list)
+    np.save(f'{save_dir}/entropy{t}_{timestamp}.npy', entropy_list)
     
     # Save metadata
     metadata = {

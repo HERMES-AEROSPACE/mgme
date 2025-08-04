@@ -48,7 +48,7 @@ AMR = {
 COLLISION_PARAMS = {
     'n_coll': 2000000,
     'dt': 0.2,
-    'n_t': 60
+    'n_t': 100
 }
 
 LOOKUP_TABLE = {

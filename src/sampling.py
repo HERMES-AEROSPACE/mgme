@@ -147,8 +147,6 @@ def generate_regular_samples(n_samples, x_sample, y_sample, z_sample, curr_group
         # n_group_sample, group_weights, mask, test = generate_regular_samples_helper(mu, x_sample, y_sample, z_sample, \
                                                                                     #    ci_cx, cf_cx, ci_cy, cf_cy, ci_cz, cf_cz, Ak, bk, wxk, wyk, wzk)
         n_group_sample, group_weights, mask = generate_convex_helper(mu, x_sample, y_sample, z_sample, ci_cx, cf_cx, ci_cy, cf_cy, ci_cz, cf_cz)
-        # print(group_weights, test)
-        # print()
         num_sample_group[i] = n_group_sample
         weights[mask] = group_weights
 
