@@ -14,13 +14,44 @@ def f(x, y, z, A, b, wx, wy, wz):
 def func(x, M, Q):
     return np.matmul(M, x) - Q
 
-def generate_grid(n_samples_x, n_samples_y, n_samples_z):
-    # sample_loc_x = np.linspace(*VELOCITY_SPACE['cx_range'], n_samples_x)
-    # sample_loc_y = np.linspace(*VELOCITY_SPACE['cy_range'], n_samples_y)
-    # sample_loc_z = np.linspace(*VELOCITY_SPACE['cz_range'], n_samples_z)
+def calculate_volume_elements(x_centers, y_centers, z_centers):
+    """
+    Calculate volume elements for discretization with given center points.
+    Boundary points get full spacing to neighbors (extending past centers).
+    """
+    def get_spacings(centers):
+        # Calculate spacings between adjacent centers
+        center_spacings = centers[1:] - centers[:-1]
+        
+        spacings = np.zeros_like(centers)
+        
+        # Interior points: average of adjacent spacings
+        spacings[1:-1] = (center_spacings[:-1] + center_spacings[1:]) / 2
+        
+        # Boundary points: full spacing to neighbor
+        spacings[0] = center_spacings[0]   # Full distance to next center
+        spacings[-1] = center_spacings[-1]  # Full distance to previous center
+        
+        return spacings
+    
+    dx = get_spacings(x_centers)
+    dy = get_spacings(y_centers) 
+    dz = get_spacings(z_centers)
+    
+    # Create 3D mesh of volume elements
+    DX, DY, DZ = np.meshgrid(dx, dy, dz, indexing='ij')
+    volume_elements = DX * DY * DZ
+    
+    return volume_elements
 
-    sample_loc_x_neg = np.append(np.linspace(-2.5, -0.51, 12), np.linspace(-0.49, 0.0, 8, endpoint=False))
-    sample_loc_x_pos = -1 * np.append(np.linspace(-0.49, 0.0, 8, endpoint=False)[::-1], np.linspace(-2.5, -0.51, 12)[::-1])
+@jit(nopython=True)
+def calculate_entropy(weights, volume_elements, sample_loc_x, sample_loc_y, sample_loc_z):
+    f = np.reshape(weights, (48, 48, 48)) / volume_elements
+    return np.trapezoid(np.trapezoid(np.trapezoid(-f * np.log(f), sample_loc_z), sample_loc_y), sample_loc_x)
+
+def generate_grid(n_samples_x, n_samples_y, n_samples_z):
+    sample_loc_x_neg = np.append(np.linspace(-4., -2.6, 4), np.linspace(-2.4, -0.01, 20))
+    sample_loc_x_pos = -1 * np.append(np.linspace(-2.4, -0.01, 20)[::-1], np.linspace(-4, -2.6, 4)[::-1])
 
     sample_loc_x = np.append(sample_loc_x_neg, sample_loc_x_pos)
     sample_loc_y = sample_loc_x
@@ -33,7 +64,7 @@ def generate_grid(n_samples_x, n_samples_y, n_samples_z):
     y_sample = ygrid.flatten()
     z_sample = zgrid.flatten()
 
-    return x_sample, y_sample, z_sample
+    return x_sample, y_sample, z_sample, sample_loc_x, sample_loc_y, sample_loc_z
 
 @jit(nopython=True)
 def generate_regular_samples_helper(mu, x_sample, y_sample, z_sample, ci_cx, cf_cx, ci_cy, cf_cy, ci_cz, cf_cz, Ak, bk, wxk, wyk, wzk):
@@ -66,22 +97,40 @@ def generate_convex_helper(mu, x_sample, y_sample, z_sample, ci_cx, cf_cx, ci_cy
     z_sample_slice = z_sample[mask]
 
     num_sample_group = len(x_sample_slice)
-    x = cp.Variable(shape=num_sample_group)
-    obj = cp.Maximize(cp.sum(cp.entr(x)))
 
-    constraints = [cp.sum(x) == mu[0], x >= 0, cp.sum(cp.multiply(x_sample_slice, x)) == mu[1], \
-                cp.sum(cp.multiply(y_sample_slice, x)) == mu[2], cp.sum(cp.multiply(z_sample_slice, x)) == mu[3], \
-                cp.sum(cp.multiply(x_sample_slice**2 + y_sample_slice**2 + z_sample_slice**2, x)) == mu[4]]
-    prob = cp.Problem(obj, constraints)
-    prob.solve()
+    if mu[0] < 1e-4: # change this to a different scheme for better AMR stuff.
+        A = np.zeros((5, num_sample_group))
+        b = np.zeros(5)
+        A[0, :] = 1
+        A[1, :] = x_sample_slice
+        A[2, :] = y_sample_slice
+        A[3, :] = z_sample_slice
+        A[4, :] = x_sample_slice**2 + y_sample_slice**2 + z_sample_slice**2
+        b[0] = mu[0]
+        b[1] = mu[1]
+        b[2] = mu[2]
+        b[3] = mu[3]
+        b[4] = mu[4]
 
-    # print('density:', np.sum(x.value))
-    # print('x-momentum:', np.sum(x.value * x_sample_slice))
-    # print('y-momentum:', np.sum(x.value * y_sample_slice))
-    # print('z-momentum:', np.sum(x.value * z_sample_slice))
-    # print('energy:', np.sum((x_sample_slice**2 + y_sample_slice**2 + z_sample_slice**2) * x.value))
+        x = cp.Variable(shape=num_sample_group, nonneg=True)
+        cost = cp.sum_squares(A @ x - b)
+        prob = cp.Problem(cp.Minimize(cost))
+        prob.solve()
 
-    return num_sample_group, x.value, mask
+        weights = x.value
+    else:
+        x = cp.Variable(shape=num_sample_group, nonneg=True)
+        obj = cp.Maximize(cp.sum(cp.entr(x)))
+
+        constraints = [cp.sum(x) == mu[0], cp.sum(cp.multiply(x_sample_slice, x)) == mu[1], \
+                    cp.sum(cp.multiply(y_sample_slice, x)) == mu[2], cp.sum(cp.multiply(z_sample_slice, x)) == mu[3], \
+                    cp.sum(cp.multiply(x_sample_slice**2 + y_sample_slice**2 + z_sample_slice**2, x)) == mu[4]]
+        prob = cp.Problem(obj, constraints)
+        prob.solve()
+        
+        weights = x.value
+
+    return num_sample_group, weights, mask
 
 def generate_regular_samples(n_samples, x_sample, y_sample, z_sample, curr_groups):
     weights = np.zeros(n_samples)
@@ -94,6 +143,7 @@ def generate_regular_samples(n_samples, x_sample, y_sample, z_sample, curr_group
 
         Ak, bk, wxk, wyk, wzk = group.A, group.b, group.wx, group.wy, group.wz
         mu = group.mu
+        # print(ci_cx, cf_cx, ci_cy, cf_cy, ci_cz, cf_cz, mu[0])
         # n_group_sample, group_weights, mask, test = generate_regular_samples_helper(mu, x_sample, y_sample, z_sample, \
                                                                                     #    ci_cx, cf_cx, ci_cy, cf_cy, ci_cz, cf_cz, Ak, bk, wxk, wyk, wzk)
         n_group_sample, group_weights, mask = generate_convex_helper(mu, x_sample, y_sample, z_sample, ci_cx, cf_cx, ci_cy, cf_cy, ci_cz, cf_cz)

@@ -12,7 +12,7 @@ from .config import (
     calculate_velocity_grid
 )
 from .moment_utils import moment_eq, calculate_group_moments, invert, calc_moment
-from .sampling import generate_regular_samples, generate_grid
+from .sampling import generate_regular_samples, generate_grid, calculate_volume_elements, calculate_entropy
 from .virtual_collisions import collide
 from .data_utils import save_simulation_data
 from .banner import print_banner
@@ -30,9 +30,9 @@ def run_simulation():
     cx_vec, cy_vec, cz_vec, cx, cy, cz = calculate_velocity_grid()
 
     # Initial distribution function.
-    K = 1 - 0.4 * np.exp(-0/6)
-    f0 = 1 / (2 * K * (np.pi * K)**1.5) * (5 * K - 3 + 2 * (1 - K) / K * (cx**2 + cy**2 + cz**2)) * np.exp(-(cx**2 + cy**2 + cz**2) / K)
-    # f0 = 1 / (np.pi**1.5) * np.exp(-1 * (cx**2 + cy**2 + cz**2))
+    # K = 1 - 0.4 * np.exp(-0/6)
+    # f0 = 1 / (2 * K * (np.pi * K)**1.5) * (5 * K - 3 + 2 * (1 - K) / K * (cx**2 + cy**2 + cz**2)) * np.exp(-(cx**2 + cy**2 + cz**2) / K)
+    f0 = 1 / (np.pi**1.5) * np.exp(-1 * (cx**2 + cy**2 + cz**2))
     # f0 = 0.5 * (3 / np.pi)**1.5 * (np.exp(-3.0 * (cx - 1)**2) + np.exp(-3.0 * (cx + 1)**2)) * np.exp(-3 * (cy**2 + cz**2))
 
     # Use AMR to calculate initial groups.
@@ -48,9 +48,10 @@ def run_simulation():
 
     print('Running AMR to get initial groups...\n')
     # custom_groups(f0, cx, cy, cz, cx_vec, cy_vec, cz_vec, root, GROUP_PARAMS)
-    refine_init(f0, cx, cy, cz, cx_vec, cy_vec, cz_vec, root, 2)
+    refine_init(f0, cx, cy, cz, cx_vec, cy_vec, cz_vec, root, 4)
     curr_groups = get_current_groups(root)
     n_groups = len(curr_groups)
+    print(n_groups)
 
     bounds_list = np.zeros((n_groups, 6))
     for i, group in enumerate(curr_groups):
@@ -64,8 +65,11 @@ def run_simulation():
     curr_groups_list[0] = copy.deepcopy(curr_groups)
 
     n_samples = SAMPLING_PARAMS['n_samples_x'] * SAMPLING_PARAMS['n_samples_y'] * SAMPLING_PARAMS['n_samples_z']
-    x_sample, y_sample, z_sample = generate_grid(SAMPLING_PARAMS['n_samples_x'], SAMPLING_PARAMS['n_samples_y'], SAMPLING_PARAMS['n_samples_z'])
+    x_sample, y_sample, z_sample, sample_loc_x, sample_loc_y, sample_loc_z = generate_grid(SAMPLING_PARAMS['n_samples_x'], SAMPLING_PARAMS['n_samples_y'], SAMPLING_PARAMS['n_samples_z'])
+    volume_elements = calculate_volume_elements(sample_loc_x, sample_loc_y, sample_loc_z)
     weights, num_group_sample = generate_regular_samples(n_samples, x_sample, y_sample, z_sample, curr_groups)
+
+    print(calculate_entropy(weights, volume_elements, sample_loc_x, sample_loc_y, sample_loc_z))
 
     print('Weights generated. Starting simulation...\n')
 
@@ -85,7 +89,6 @@ def run_simulation():
         for i, group in enumerate(curr_groups):
             # Update group parameters after collisions.
             group.update_parameters(COLLISION_PARAMS['dt'], group_n[i], group_px[i], group_py[i], group_pz[i], group_e[i])
-            # print(group.A, group.b, group.wx, group.wy, group.wz, group.group_bounds, group.mu)
 
         # Save data for plotting.
         curr_groups_list[t] = copy.deepcopy(curr_groups)
