@@ -37,6 +37,7 @@ def calculate_volume_elements(x_centers, y_centers, z_centers):
     dx = get_spacings(x_centers)
     dy = get_spacings(y_centers) 
     dz = get_spacings(z_centers)
+    print(dx)
     
     # Create 3D mesh of volume elements
     DX, DY, DZ = np.meshgrid(dx, dy, dz, indexing='ij')
@@ -45,13 +46,17 @@ def calculate_volume_elements(x_centers, y_centers, z_centers):
     return volume_elements
 
 @jit(nopython=True)
-def calculate_entropy(weights, volume_elements, sample_loc_x, sample_loc_y, sample_loc_z):
-    f = np.reshape(weights, (48, 48, 48)) / volume_elements
-    return np.trapezoid(np.trapezoid(np.trapezoid(-f * np.log(f), sample_loc_z), sample_loc_y), sample_loc_x)
+def calculate_entropy(weights, volume_elements, sample_loc_x, sample_loc_y, sample_loc_z, n_samples_x, n_samples_y, n_samples_z):
+    f = np.reshape(weights, (n_samples_x, n_samples_y, n_samples_z)) / volume_elements
+    logf = np.where(f > 0, np.log(f), 0)
+
+    return np.trapezoid(np.trapezoid(np.trapezoid(-f * logf, sample_loc_z), sample_loc_y), sample_loc_x)
 
 def generate_grid(n_samples_x, n_samples_y, n_samples_z):
-    sample_loc_x_neg = np.append(np.linspace(-4., -2.6, 4), np.linspace(-2.4, -0.01, 20))
-    sample_loc_x_pos = -1 * np.append(np.linspace(-2.4, -0.01, 20)[::-1], np.linspace(-4, -2.6, 4)[::-1])
+    num1 = 6
+    num2 = 4
+    sample_loc_x_neg = np.append(np.linspace(-3.2, -0.55, num1), np.linspace(-0.45, -1e-5, num2))
+    sample_loc_x_pos = -1 * np.append(np.linspace(-0.45, -1e-5, num2)[::-1], np.linspace(-3.2, -0.55, num1)[::-1])
 
     sample_loc_x = np.append(sample_loc_x_neg, sample_loc_x_pos)
     sample_loc_y = sample_loc_x
@@ -75,8 +80,6 @@ def generate_regular_samples_helper(mu, x_sample, y_sample, z_sample, ci_cx, cf_
     x_sample_slice = x_sample[mask]
     y_sample_slice = y_sample[mask]
     z_sample_slice = z_sample[mask]
-    dx = 3 - 2.93814433
-    test = f(x_sample_slice, y_sample_slice, z_sample_slice, Ak, bk, wxk, wyk, wzk) * (dx)**3
 
     sum_f_group = np.sum(f(x_sample_slice, y_sample_slice, z_sample_slice, Ak, bk, wxk, wyk, wzk))
     num_sample_group = len(x_sample_slice)
@@ -85,7 +88,7 @@ def generate_regular_samples_helper(mu, x_sample, y_sample, z_sample, ci_cx, cf_
     else:
         weights = mu[0] * f(x_sample_slice, y_sample_slice, z_sample_slice, Ak, bk, wxk, wyk, wzk) / sum_f_group
 
-    return num_sample_group, test, mask, test
+    return num_sample_group, weights, mask
 
 def generate_convex_helper(mu, x_sample, y_sample, z_sample, ci_cx, cf_cx, ci_cy, cf_cy, ci_cz, cf_cz):
     mask = (x_sample >= ci_cx) & (x_sample <= cf_cx) & \
@@ -98,7 +101,7 @@ def generate_convex_helper(mu, x_sample, y_sample, z_sample, ci_cx, cf_cx, ci_cy
 
     num_sample_group = len(x_sample_slice)
 
-    if mu[0] < 1e-4: # change this to a different scheme for better AMR stuff.
+    if mu[0] < 1e-4: # wonder what a good threshold is.
         A = np.zeros((5, num_sample_group))
         b = np.zeros(5)
         A[0, :] = 1
@@ -143,8 +146,7 @@ def generate_regular_samples(n_samples, x_sample, y_sample, z_sample, curr_group
 
         Ak, bk, wxk, wyk, wzk = group.A, group.b, group.wx, group.wy, group.wz
         mu = group.mu
-        # print(ci_cx, cf_cx, ci_cy, cf_cy, ci_cz, cf_cz, mu[0])
-        # n_group_sample, group_weights, mask, test = generate_regular_samples_helper(mu, x_sample, y_sample, z_sample, \
+        # n_group_sample, group_weights, mask = generate_regular_samples_helper(mu, x_sample, y_sample, z_sample, \
                                                                                     #    ci_cx, cf_cx, ci_cy, cf_cy, ci_cz, cf_cz, Ak, bk, wxk, wyk, wzk)
         n_group_sample, group_weights, mask = generate_convex_helper(mu, x_sample, y_sample, z_sample, ci_cx, cf_cx, ci_cy, cf_cy, ci_cz, cf_cz)
         num_sample_group[i] = n_group_sample

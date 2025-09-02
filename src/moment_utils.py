@@ -193,14 +193,13 @@ def invert(mu, initial_guess, group_bounds=GROUP_PARAMS):
     sol = optimize.least_squares(moment_eq, initial_guess, args=(mu[1] / mu[0], mu[2] / mu[0], \
                                     mu[3] / mu[0], mu[4] / mu[0], \
                                     ci_cx, cf_cx, ci_cy, cf_cy, ci_cz, cf_cz), \
-                                        bounds=([0.0, -10, -10, -10], [np.inf, 10, 10, 10]), method='trf', loss='soft_l1')
+                                        bounds=([0.0, -10, -10, -10], [2.0, 10, 10, 10]), method='trf', loss='soft_l1')
     # print(sol)
-    # print(np.linalg.norm(sol.fun))
+    print('residual:', np.linalg.norm(sol.fun))
     
     # sol = optimize.root(moment_eq, initial_guess, args=(mu[1] / mu[0], mu[2] / mu[0], \
     #                                 mu[3] / mu[0], mu[4] / mu[0], \
     #                                     ci_cx, cf_cx, ci_cy, cf_cy, ci_cz, cf_cz), method='lm')
-
     if sol.success:
         b = sol.x[0]
         wx = sol.x[1]

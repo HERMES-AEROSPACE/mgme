@@ -13,30 +13,30 @@ VELOCITY_SPACE = {
 
 # Group parameters
 GROUP_PARAMS = {
+    # 'num_groups_cx': 4,
+    # 'num_groups_cy': 4,
+    # 'num_groups_cz': 4,
+    # 'ci_cx': np.array([-5.0, -0.5, 0.0, 0.5]),
+    # 'cf_cx': np.array([-0.5, 0.0, 0.5, 5.0]),
+    # 'group_bounds_cx': np.array([[0, 109], [108, 121], [120, 133], [132, 241]]),
+    # 'ci_cy': np.array([-5.0, -0.5, 0.0, 0.5]),
+    # 'cf_cy': np.array([-0.5, 0.0, 0.5, 5.0]),
+    # 'group_bounds_cy': np.array([[0, 109], [108, 121], [120, 133], [132, 241]]),
+    # 'ci_cz': np.array([-5.0, -0.5, 0.0, 0.5]),
+    # 'cf_cz': np.array([-0.5, 0.0, 0.5, 5.0]),
+    # 'group_bounds_cz': np.array([[0, 109], [108, 121], [120, 133], [132, 241]])
     'num_groups_cx': 4,
-    'num_groups_cy': 4,
-    'num_groups_cz': 4,
+    'num_groups_cy': 1,
+    'num_groups_cz': 1,
     'ci_cx': np.array([-5.0, -0.5, 0.0, 0.5]),
     'cf_cx': np.array([-0.5, 0.0, 0.5, 5.0]),
     'group_bounds_cx': np.array([[0, 109], [108, 121], [120, 133], [132, 241]]),
-    'ci_cy': np.array([-5.0, -0.5, 0.0, 0.5]),
-    'cf_cy': np.array([-0.5, 0.0, 0.5, 5.0]),
-    'group_bounds_cy': np.array([[0, 109], [108, 121], [120, 133], [132, 241]]),
-    'ci_cz': np.array([-5.0, -0.5, 0.0, 0.5]),
-    'cf_cz': np.array([-0.5, 0.0, 0.5, 5.0]),
-    'group_bounds_cz': np.array([[0, 109], [108, 121], [120, 133], [132, 241]])
-    # 'num_groups_cx': 2,
-    # 'num_groups_cy': 1,
-    # 'num_groups_cz': 1,
-    # 'ci_cx': np.array([-3.0, 0.0]),
-    # 'cf_cx': np.array([0.0, 3.0]),
-    # 'group_bounds_cx': np.array([[0, 121], [120, 241]]),
-    # 'ci_cy': np.array([-3.0]),
-    # 'cf_cy': np.array([3.0]),
-    # 'group_bounds_cy': np.array([[0, 241]]),
-    # 'ci_cz': np.array([-3.0]),
-    # 'cf_cz': np.array([3.0]),
-    # 'group_bounds_cz': np.array([[0, 241]])
+    'ci_cy': np.array([-5.0]),
+    'cf_cy': np.array([5.0]),
+    'group_bounds_cy': np.array([[0, 241]]),
+    'ci_cz': np.array([-5.0]),
+    'cf_cz': np.array([5.0]),
+    'group_bounds_cz': np.array([[0, 241]])
 }
 
 # AMR parameters
@@ -56,9 +56,9 @@ LOOKUP_TABLE = {
 }
 
 SAMPLING_PARAMS = {
-    'n_samples_x': 48,
-    'n_samples_y': 48,
-    'n_samples_z': 48
+    'n_samples_x': 20,
+    'n_samples_y': 20,
+    'n_samples_z': 20
 }
 
 # Helper function to get velocity space grid

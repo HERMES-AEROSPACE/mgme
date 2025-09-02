@@ -48,8 +48,8 @@ def run_simulation():
     print('Running AMR to get initial groups...\n')
 
     # Choose between using custom groups or AMR to get initial groups.
-    # custom_groups(f0, cx, cy, cz, cx_vec, cy_vec, cz_vec, root, GROUP_PARAMS)
-    refine_init(f0, cx, cy, cz, cx_vec, cy_vec, cz_vec, root, 4)
+    custom_groups(f0, cx, cy, cz, cx_vec, cy_vec, cz_vec, root, GROUP_PARAMS)
+    # refine_init(f0, cx, cy, cz, cx_vec, cy_vec, cz_vec, root, 4)
     curr_groups = get_current_groups(root)
     n_groups = len(curr_groups)
     print('# of groups:', n_groups)
@@ -76,7 +76,8 @@ def run_simulation():
 
     # Set up array for entropy calculation and outputting.
     entropy_list = np.zeros(COLLISION_PARAMS['n_t'] + 1)
-    entropy_list[0] = calculate_entropy(weights, volume_elements, sample_loc_x, sample_loc_y, sample_loc_z)
+    entropy_list[0] = calculate_entropy(weights, volume_elements, sample_loc_x, sample_loc_y, sample_loc_z, SAMPLING_PARAMS['n_samples_x'], SAMPLING_PARAMS['n_samples_y'], SAMPLING_PARAMS['n_samples_z'])
+    print(entropy_list[0])
 
     # MAIN SIMULATION LOOP.
     for t in range(1, COLLISION_PARAMS['n_t'] + 1):
@@ -102,7 +103,7 @@ def run_simulation():
 
         # Update weights for next simulation step. Update entropy.
         weights, _ = generate_regular_samples(n_samples, x_sample, y_sample, z_sample, curr_groups)
-        entropy_list[t] = calculate_entropy(weights, volume_elements, sample_loc_x, sample_loc_y, sample_loc_z)
+        entropy_list[t] = calculate_entropy(weights, volume_elements, sample_loc_x, sample_loc_y, sample_loc_z, SAMPLING_PARAMS['n_samples_x'], SAMPLING_PARAMS['n_samples_y'], SAMPLING_PARAMS['n_samples_z'])
 
     # Save final state.
     save_simulation_data(COLLISION_PARAMS['n_t'], curr_groups_list, entropy_list)
