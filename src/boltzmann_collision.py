@@ -8,17 +8,15 @@ from .config import (
     GROUP_PARAMS, 
     AMR,
     COLLISION_PARAMS, 
-    SAMPLING_PARAMS,
-    calculate_velocity_grid
+    SAMPLING_PARAMS
 )
-from .moment_utils import moment_eq, calculate_group_moments, invert, calc_moment
-from .sampling import generate_regular_samples, generate_grid, calculate_volume_elements, calculate_entropy
+from .moment_utils import calc_moment
+from .sampling import generate_regular_samples, generate_grid, calculate_volume_elements, calculate_entropy, calculate_velocity_grid
 from .virtual_collisions import collide
 from .data_utils import save_simulation_data
 from .banner import print_banner
-from .amr import calculate_hellinger_distance, GroupNode, refine_init, print_tree_structure, get_current_groups, custom_groups
+from .amr import calculate_hellinger_distance, GroupNode, refine_init, get_current_groups, custom_groups
 import copy
-from .working_virtual_coll import work_collide
 import sys
 
 

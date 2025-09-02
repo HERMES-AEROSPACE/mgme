@@ -60,12 +60,3 @@ SAMPLING_PARAMS = {
     'n_samples_y': 20,
     'n_samples_z': 20
 }
-
-# Helper function to get velocity space grid
-def calculate_velocity_grid():
-    cx_vec = np.linspace(*VELOCITY_SPACE['cx_range'], VELOCITY_SPACE['num_cx'])
-    cy_vec = np.linspace(*VELOCITY_SPACE['cy_range'], VELOCITY_SPACE['num_cy'])
-    cz_vec = np.linspace(*VELOCITY_SPACE['cz_range'], VELOCITY_SPACE['num_cz'])
-    cx, cy, cz = np.meshgrid(cx_vec, cy_vec, cz_vec, indexing='ij')
-
-    return cx_vec, cy_vec, cz_vec, cx, cy, cz 

@@ -8,6 +8,16 @@ import cvxpy as cp
 
 
 @jit(nopython=True)
+def calculate_velocity_grid():
+    # Helper function to get velocity space grid
+    cx_vec = np.linspace(*VELOCITY_SPACE['cx_range'], VELOCITY_SPACE['num_cx'])
+    cy_vec = np.linspace(*VELOCITY_SPACE['cy_range'], VELOCITY_SPACE['num_cy'])
+    cz_vec = np.linspace(*VELOCITY_SPACE['cz_range'], VELOCITY_SPACE['num_cz'])
+    cx, cy, cz = np.meshgrid(cx_vec, cy_vec, cz_vec, indexing='ij')
+
+    return cx_vec, cy_vec, cz_vec, cx, cy, cz 
+
+@jit(nopython=True)
 def f(x, y, z, A, b, wx, wy, wz):
     return A * np.exp(-b * ((x - wx)**2 + (y - wy)**2 + (z - wz)**2))
 
