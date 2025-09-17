@@ -62,10 +62,10 @@ def calculate_entropy(weights, volume_elements, sample_loc_x, sample_loc_y, samp
     return np.trapezoid(np.trapezoid(np.trapezoid(-f * logf, sample_loc_z), sample_loc_y), sample_loc_x)
 
 def generate_grid(n_samples_x, n_samples_y, n_samples_z):
-    num1 = 6
-    num2 = 4
-    sample_loc_x_neg = np.append(np.linspace(-3.2, -0.55, num1), np.linspace(-0.45, -1e-5, num2))
-    sample_loc_x_pos = -1 * np.append(np.linspace(-0.45, -1e-5, num2)[::-1], np.linspace(-3.2, -0.55, num1)[::-1])
+    num1 = 10
+    num2 = 7
+    sample_loc_x_neg = np.append(np.linspace(-3.0, -0.51, num1), np.linspace(-0.49, 0.0, num2, endpoint=False))
+    sample_loc_x_pos = -1 * np.append(np.linspace(-0.49, 0.0, num2, endpoint=False)[::-1], np.linspace(-3.0, -0.51, num1)[::-1])
 
     sample_loc_x = np.append(sample_loc_x_neg, sample_loc_x_pos)
     sample_loc_y = sample_loc_x
@@ -153,7 +153,7 @@ def generate_regular_samples(n_samples, x_sample, y_sample, z_sample, curr_group
         ci_cy, cf_cy = group.group_bounds['ci_cy'], group.group_bounds['cf_cy']
         ci_cz, cf_cz = group.group_bounds['ci_cz'], group.group_bounds['cf_cz']
 
-        Ak, bk, wxk, wyk, wzk = group.A, group.b, group.wx, group.wy, group.wz
+        # Ak, bk, wxk, wyk, wzk = group.A, group.b, group.wx, group.wy, group.wz
         mu = group.mu
         # n_group_sample, group_weights, mask = generate_regular_samples_helper(mu, x_sample, y_sample, z_sample, \
                                                                                     #    ci_cx, cf_cx, ci_cy, cf_cy, ci_cz, cf_cz, Ak, bk, wxk, wyk, wzk)
