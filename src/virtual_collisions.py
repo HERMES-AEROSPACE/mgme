@@ -1,26 +1,71 @@
 import numpy as np
-from .config import GROUP_PARAMS, VELOCITY_SPACE
+from .config import GROUP_PARAMS, VELOCITY_SPACE, COLLISION_PARAMS
+from numba import jit, types
+from numba.typed import Dict
+import sys
+from matplotlib import pyplot as plt
 
 
-def collide(x_sample, y_sample, z_sample, weights, num_group_sample, n_samples, n_coll):
-    group_n = np.zeros((GROUP_PARAMS['num_groups_cx'], GROUP_PARAMS['num_groups_cy'], GROUP_PARAMS['num_groups_cz']))
-    group_px = np.zeros((GROUP_PARAMS['num_groups_cx'], GROUP_PARAMS['num_groups_cy'], GROUP_PARAMS['num_groups_cz']))
-    group_py = np.zeros((GROUP_PARAMS['num_groups_cx'], GROUP_PARAMS['num_groups_cy'], GROUP_PARAMS['num_groups_cz']))
-    group_pz = np.zeros((GROUP_PARAMS['num_groups_cx'], GROUP_PARAMS['num_groups_cy'], GROUP_PARAMS['num_groups_cz']))
-    group_e = np.zeros((GROUP_PARAMS['num_groups_cx'], GROUP_PARAMS['num_groups_cy'], GROUP_PARAMS['num_groups_cz']))
+CX_LB, CX_UB = VELOCITY_SPACE['cx_range']
+CY_LB, CY_UB = VELOCITY_SPACE['cy_range']
+CZ_LB, CZ_UB = VELOCITY_SPACE['cz_range']
 
-    for i in range(0, n_coll):
-        # Draw random depletion velocities.
-        depl_idx1 = int(np.floor(np.random.uniform(0, n_samples)))
-        depl_idx2 = int(np.floor(np.random.uniform(0, n_samples)))
-        if depl_idx1 == depl_idx2: continue
+n_coll = COLLISION_PARAMS['n_coll']
 
-        vx1 = x_sample[depl_idx1]
-        vy1 = y_sample[depl_idx1]
-        vz1 = z_sample[depl_idx1]
-        vx2 = x_sample[depl_idx2]
-        vy2 = y_sample[depl_idx2]
-        vz2 = z_sample[depl_idx2]
+key_type = types.UniTuple(types.int64, 2)
+
+
+@jit(nopython=True)
+def collide(x_sample, y_sample, z_sample, weights, num_group_sample, bounds_list, n_groups, Rf1, Rf2, depl_idx1, depl_idx2):
+    group_n = np.zeros(n_groups)
+    group_px = np.zeros(n_groups)
+    group_py = np.zeros(n_groups)
+    group_pz = np.zeros(n_groups)
+    group_e = np.zeros(n_groups)
+
+    mask = depl_idx1 != depl_idx2
+
+    depl_idx1 = depl_idx1[mask]
+    depl_idx2 = depl_idx2[mask]
+
+    # Group the prospective collisions into which group they end up in.
+    depl_tracker = Dict.empty(key_type=key_type, \
+                              value_type=types.int64)
+    
+    ci_cx = bounds_list[:, 0]
+    cf_cx = bounds_list[:, 1]
+    ci_cy = bounds_list[:, 2]
+    cf_cy = bounds_list[:, 3]
+    ci_cz = bounds_list[:, 4]
+    cf_cz = bounds_list[:, 5]
+    
+    for i in range(0, depl_idx1.size):
+        x_valid = (x_sample[depl_idx1[i]] >= ci_cx) & (x_sample[depl_idx1[i]] <= cf_cx)
+        y_valid = (y_sample[depl_idx1[i]] >= ci_cy) & (y_sample[depl_idx1[i]] <= cf_cy)
+        z_valid = (z_sample[depl_idx1[i]] >= ci_cz) & (z_sample[depl_idx1[i]] <= cf_cz)
+        depl_group1 = np.argmax(x_valid & y_valid & z_valid)
+
+        x_valid = (x_sample[depl_idx2[i]] >= ci_cx) & (x_sample[depl_idx2[i]] <= cf_cx)
+        y_valid = (y_sample[depl_idx2[i]] >= ci_cy) & (y_sample[depl_idx2[i]] <= cf_cy)
+        z_valid = (z_sample[depl_idx2[i]] >= ci_cz) & (z_sample[depl_idx2[i]] <= cf_cz)
+        depl_group2 = np.argmax(x_valid & y_valid & z_valid)
+
+        if depl_group1 < depl_group2: key = (depl_group1, depl_group2)
+        else: key = (depl_group2, depl_group1)
+
+        if key in depl_tracker: depl_tracker[key] += 1
+        else: depl_tracker[key] = 1
+
+    for i in range(0, depl_idx1.size):
+        d_idx1 = depl_idx1[i]
+        d_idx2 = depl_idx2[i]
+
+        vx1 = x_sample[d_idx1]
+        vy1 = y_sample[d_idx1]
+        vz1 = z_sample[d_idx1]
+        vx2 = x_sample[d_idx2]
+        vy2 = y_sample[d_idx2]
+        vz2 = z_sample[d_idx2]
 
         # Simulate virtual collisions.
         gx = np.abs(vx2 - vx1)
@@ -28,9 +73,9 @@ def collide(x_sample, y_sample, z_sample, weights, num_group_sample, n_samples, 
         gz = np.abs(vz2 - vz1)
         g = np.sqrt(gx**2 + gy**2 + gz**2)
 
-        Rf = np.random.uniform(0.0, 1.0)
+        Rf = Rf1[i]
         phi = 2 * np.pi * Rf
-        Rf = np.random.uniform(0.0, 1.0)
+        Rf = Rf2[i]
         cos_theta = 2 * Rf - 1
         sin_theta = np.sqrt(1 - cos_theta**2)
 
@@ -49,61 +94,65 @@ def collide(x_sample, y_sample, z_sample, weights, num_group_sample, n_samples, 
         vy2p = V_y + gy_p
         vz2p = V_z + gz_p
 
-        # Calculate loss rate for mass, momentum, and energy.
-        group_idx1_x = np.argmax(np.logical_and(vx1 >= GROUP_PARAMS['ci_cx'], vx1 <= GROUP_PARAMS['cf_cx']))
-        group_idx1_y = np.argmax(np.logical_and(vy1 >= GROUP_PARAMS['ci_cy'], vy1 <= GROUP_PARAMS['cf_cy']))
-        group_idx1_z = np.argmax(np.logical_and(vz1 >= GROUP_PARAMS['ci_cz'], vz1 <= GROUP_PARAMS['cf_cz']))
-        group_idx2_x = np.argmax(np.logical_and(vx2 >= GROUP_PARAMS['ci_cx'], vx2 <= GROUP_PARAMS['cf_cx']))
-        group_idx2_y = np.argmax(np.logical_and(vy2 >= GROUP_PARAMS['ci_cy'], vy2 <= GROUP_PARAMS['cf_cy']))
-        group_idx2_z = np.argmax(np.logical_and(vz2 >= GROUP_PARAMS['ci_cz'], vz2 <= GROUP_PARAMS['cf_cz']))
 
-        Li = weights[depl_idx1] * weights[depl_idx2] * num_group_sample[group_idx1_x, group_idx1_y, group_idx1_z] * num_group_sample[group_idx2_x, group_idx2_y, group_idx2_z] / n_coll
-        group_n[group_idx1_x, group_idx1_y, group_idx1_z] -= Li
-        group_px[group_idx1_x, group_idx1_y, group_idx1_z] -= Li * vx1
-        group_py[group_idx1_x, group_idx1_y, group_idx1_z] -= Li * vy1
-        group_pz[group_idx1_x, group_idx1_y, group_idx1_z] -= Li * vz1
-        group_e[group_idx1_x, group_idx1_y, group_idx1_z] -= Li * (vx1**2 + vy1**2 + vz1**2)
-        
-        group_n[group_idx2_x, group_idx2_y, group_idx2_z] -= Li
-        group_px[group_idx2_x, group_idx2_y, group_idx2_z] -= Li * vx2
-        group_py[group_idx2_x, group_idx2_y, group_idx2_z] -= Li * vy2
-        group_pz[group_idx2_x, group_idx2_y, group_idx2_z] -= Li * vz2
-        group_e[group_idx2_x, group_idx2_y, group_idx2_z] -= Li * (vx2**2 + vy2**2 + vz2**2)
+        # Calculate loss rate for mass, momentum, and energy.
+        x_valid = (vx1 >= ci_cx) & (vx1 <= cf_cx)
+        y_valid = (vy1 >= ci_cy) & (vy1 <= cf_cy)
+        z_valid = (vz1 >= ci_cz) & (vz1 <= cf_cz)
+        group_idx1 = np.argmax(x_valid & y_valid & z_valid)
+
+        x_valid = (vx2 >= ci_cx) & (vx2 <= cf_cx)
+        y_valid = (vy2 >= ci_cy) & (vy2 <= cf_cy)
+        z_valid = (vz2 >= ci_cz) & (vz2 <= cf_cz)
+        group_idx2 = np.argmax(x_valid & y_valid & z_valid)
 
         # Calculate gain rate for mass, momentum, and energy.
-        group_idx1_x = np.argmax(np.logical_and(vx1p >= GROUP_PARAMS['ci_cx'], vx1p <= GROUP_PARAMS['cf_cx']))
-        group_idx1_y = np.argmax(np.logical_and(vy1p >= GROUP_PARAMS['ci_cy'], vy1p <= GROUP_PARAMS['cf_cy']))
-        group_idx1_z = np.argmax(np.logical_and(vz1p >= GROUP_PARAMS['ci_cz'], vz1p <= GROUP_PARAMS['cf_cz']))
-        group_idx2_x = np.argmax(np.logical_and(vx2p >= GROUP_PARAMS['ci_cx'], vx2p <= GROUP_PARAMS['cf_cx']))
-        group_idx2_y = np.argmax(np.logical_and(vy2p >= GROUP_PARAMS['ci_cy'], vy2p <= GROUP_PARAMS['cf_cy']))
-        group_idx2_z = np.argmax(np.logical_and(vz2p >= GROUP_PARAMS['ci_cz'], vz2p <= GROUP_PARAMS['cf_cz']))
+        vx1p_clamped = np.minimum(np.maximum(vx1p, CX_LB), CX_UB)
+        vy1p_clamped = np.minimum(np.maximum(vy1p, CY_LB), CY_UB)
+        vz1p_clamped = np.minimum(np.maximum(vz1p, CZ_LB), CZ_UB)
+        x_valid = (vx1p_clamped >= ci_cx) & (vx1p_clamped <= cf_cx)
+        y_valid = (vy1p_clamped >= ci_cy) & (vy1p_clamped <= cf_cy)
+        z_valid = (vz1p_clamped >= ci_cz) & (vz1p_clamped <= cf_cz)
+        if np.count_nonzero(x_valid & y_valid & z_valid) != 1: print("uho h")
+        group_idx1r = np.argmax(x_valid & y_valid & z_valid)
 
-        if vx1p > VELOCITY_SPACE['cx_range'][1]:
-            group_idx1_x = GROUP_PARAMS['num_groups_cx'] - 1
-        if vx2p > VELOCITY_SPACE['cx_range'][1]:
-            group_idx2_x = GROUP_PARAMS['num_groups_cx'] - 1
+        vx2p_clamped = np.minimum(np.maximum(vx2p, CX_LB), CX_UB)
+        vy2p_clamped = np.minimum(np.maximum(vy2p, CY_LB), CY_UB)
+        vz2p_clamped = np.minimum(np.maximum(vz2p, CZ_LB), CZ_UB)
+        x_valid = (vx2p_clamped >= ci_cx) & (vx2p_clamped <= cf_cx)
+        y_valid = (vy2p_clamped >= ci_cy) & (vy2p_clamped <= cf_cy)
+        z_valid = (vz2p_clamped >= ci_cz) & (vz2p_clamped <= cf_cz)
+        if np.count_nonzero(x_valid & y_valid & z_valid) != 1: print("uho h")
+        group_idx2r = np.argmax(x_valid & y_valid & z_valid)
 
-        if vy1p > VELOCITY_SPACE['cy_range'][1]:
-            group_idx1_y = GROUP_PARAMS['num_groups_cy'] - 1
-        if vy2p > VELOCITY_SPACE['cy_range'][1]:
-            group_idx2_y = GROUP_PARAMS['num_groups_cy'] - 1
+        if group_idx1 < group_idx2: key = (group_idx1, group_idx2)
+        else: key = (group_idx2, group_idx1)
+        n_coll_group = depl_tracker[key]
 
-        if vz1p > VELOCITY_SPACE['cz_range'][1]:
-            group_idx1_z = GROUP_PARAMS['num_groups_cz'] - 1
-        if vz2p > VELOCITY_SPACE['cz_range'][1]:
-            group_idx2_z = GROUP_PARAMS['num_groups_cz'] - 1
+        Li = weights[d_idx1] * weights[d_idx2] * num_group_sample[group_idx1] * num_group_sample[group_idx2] / n_coll_group
+        group_n[group_idx1] -= Li
+        group_px[group_idx1] -= Li * vx1
+        group_py[group_idx1] -= Li * vy1
+        group_pz[group_idx1] -= Li * vz1
+        group_e[group_idx1] -= Li * (vx1**2 + vy1**2 + vz1**2)
+        
+        group_n[group_idx2] -= Li
+        group_px[group_idx2] -= Li * vx2
+        group_py[group_idx2] -= Li * vy2
+        group_pz[group_idx2] -= Li * vz2
+        group_e[group_idx2] -= Li * (vx2**2 + vy2**2 + vz2**2)
 
-        Gi = weights[depl_idx1] *  weights[depl_idx2] * num_group_sample[group_idx1_x, group_idx1_y, group_idx1_z] * num_group_sample[group_idx2_x, group_idx2_y, group_idx2_z] / n_coll
-        group_n[group_idx1_x, group_idx1_y, group_idx1_z] += Gi
-        group_px[group_idx1_x, group_idx1_y, group_idx1_z] += Gi * vx1p
-        group_py[group_idx1_x, group_idx1_y, group_idx1_z] += Gi * vy1p
-        group_pz[group_idx1_x, group_idx1_y, group_idx1_z] += Gi * vz1p
-        group_e[group_idx1_x, group_idx1_y, group_idx1_z] += Gi * (vx1p**2 + vy1p**2 + vz1p**2)
+        Gi = Li
+        group_n[group_idx1r] += Gi
+        group_px[group_idx1r] += Gi * vx1p
+        group_py[group_idx1r] += Gi * vy1p
+        group_pz[group_idx1r] += Gi * vz1p
+        group_e[group_idx1r] += Gi * (vx1p**2 + vy1p**2 + vz1p**2)
 
-        group_n[group_idx2_x, group_idx2_y, group_idx2_z] += Gi
-        group_px[group_idx2_x, group_idx2_y, group_idx2_z] += Gi * vx2p
-        group_py[group_idx2_x, group_idx2_y, group_idx2_z] += Gi * vy2p
-        group_pz[group_idx2_x, group_idx2_y, group_idx2_z] += Gi * vz2p
-        group_e[group_idx2_x, group_idx2_y, group_idx2_z] += Gi * (vx2p**2 + vy2p**2 + vz2p**2)
-
+        group_n[group_idx2r] += Gi
+        group_px[group_idx2r] += Gi * vx2p
+        group_py[group_idx2r] += Gi * vy2p
+        group_pz[group_idx2r] += Gi * vz2p
+        group_e[group_idx2r] += Gi * (vx2p**2 + vy2p**2 + vz2p**2)
+    
     return group_n, group_px, group_py, group_pz, group_e
