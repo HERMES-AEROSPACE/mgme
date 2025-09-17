@@ -7,7 +7,6 @@ from matplotlib import pyplot as plt
 import cvxpy as cp
 
 
-@jit(nopython=True)
 def calculate_velocity_grid():
     # Helper function to get velocity space grid
     cx_vec = np.linspace(*VELOCITY_SPACE['cx_range'], VELOCITY_SPACE['num_cx'])
