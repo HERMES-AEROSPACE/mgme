@@ -183,44 +183,38 @@ def invert(mu, initial_guess, group_bounds=GROUP_PARAMS):
     cf_cz = group_bounds['cf_cz']
     method = 'hybr'
 
-    try:
-        sol = optimize.root(moment_eq, initial_guess, \
-                                        args=(mu[1] / mu[0], mu[2] / mu[0], \
-                                                mu[3] / mu[0], mu[4] / mu[0], \
-                                                ci_cx, cf_cx, ci_cy, cf_cy, ci_cz, cf_cz), method=method)
+    # try:
+        # sol = optimize.root(moment_eq, initial_guess, \
+        #                                 args=(mu[1] / mu[0], mu[2] / mu[0], \
+        #                                         mu[3] / mu[0], mu[4] / mu[0], \
+        #                                         ci_cx, cf_cx, ci_cy, cf_cy, ci_cz, cf_cz), method=method)
 
-        if sol.success:
-            b = sol.x[0]
-            wx = sol.x[1]
-            wy = sol.x[2]
-            wz = sol.x[3]
+        # if sol.success:
+        #     b = sol.x[0]
+        #     wx = sol.x[1]
+        #     wy = sol.x[2]
+        #     wz = sol.x[3]
         
-        if sol.success == False: raise RuntimeError
+        # if sol.success == False: raise RuntimeError
         # if VELOCITY_SPACE['cx_range'][0] > wx or VELOCITY_SPACE['cx_range'][1] < wx: raise RuntimeError
         # if VELOCITY_SPACE['cy_range'][0] > wy or VELOCITY_SPACE['cy_range'][1] < wy: raise RuntimeError
         # if VELOCITY_SPACE['cz_range'][0] > wz or VELOCITY_SPACE['cz_range'][1] < wz: raise RuntimeError
-    except RuntimeError:
-        guesses = grid_search(group_bounds, mu[1] / mu[0], mu[2] / mu[0], \
-                                                mu[3] / mu[0], mu[4] / mu[0])
+    # except RuntimeError:
+        # guesses = grid_search(group_bounds, mu[1] / mu[0], mu[2] / mu[0], \
+                                                # mu[3] / mu[0], mu[4] / mu[0])
 
-        for guess in guesses:
+        # for guess in guesses:
             # if guess[1] > 1e-4:
-            sol = optimize.least_squares(moment_eq, guess[0], args=(mu[1] / mu[0], mu[2] / mu[0], \
-                                            mu[3] / mu[0], mu[4] / mu[0], \
-                                            ci_cx, cf_cx, ci_cy, cf_cy, ci_cz, cf_cz), \
-                                                bounds=([0.0, ci_cx, ci_cy, ci_cz], [np.inf, cf_cx, cf_cy, cf_cz]), method='trf', loss='soft_l1')
+    sol = optimize.least_squares(moment_eq, initial_guess, args=(mu[1] / mu[0], mu[2] / mu[0], \
+                                    mu[3] / mu[0], mu[4] / mu[0], \
+                                    ci_cx, cf_cx, ci_cy, cf_cy, ci_cz, cf_cz), \
+                                        bounds=([0.0, -10, -10, -10], [np.inf, 10, 10, 10]), method='trf', loss='soft_l1')
 
-            if sol.success:
-                b = sol.x[0]
-                wx = sol.x[1]
-                wy = sol.x[2]
-                wz = sol.x[3]
-                break
-            # else:
-            #     b = guess[0][0]
-            #     wx = guess[0][1]
-            #     wy = guess[0][2]
-            #     wz = guess[0][3]
+    if sol.success:
+        b = sol.x[0]
+        wx = sol.x[1]
+        wy = sol.x[2]
+        wz = sol.x[3]
     
     I0x = np.sqrt(np.pi / (4 * b)) * (special.erf(np.sqrt(b) * (group_bounds['cf_cx'] - wx)) - special.erf(np.sqrt(b) * (group_bounds['ci_cx'] - wx)))
     I0y = np.sqrt(np.pi / (4 * b)) * (special.erf(np.sqrt(b) * (group_bounds['cf_cy'] - wy)) - special.erf(np.sqrt(b) * (group_bounds['ci_cy'] - wy)))

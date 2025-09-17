@@ -42,7 +42,7 @@ class GroupNode:
         self.mu[4] += dt * de
 
         if self.mu[0] > 1e-4:
-            self._update_group_dist_params([1.0, 0.0, 0.0, 0.0])
+            self._update_group_dist_params([self.b, self.wx, self.wy, self.wz])
     
     def _update_group_dist_params(self, initial_guess):
         self.A, self.b, self.wx, self.wy, self.wz = invert(self.mu, initial_guess, self.group_bounds)

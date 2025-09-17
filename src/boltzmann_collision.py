@@ -72,7 +72,7 @@ def run_simulation():
     print('Weights generated. Starting simulation...\n')
 
     group_collector = np.zeros((n_groups, 5))
-    np.random.seed(34957293)
+    # np.random.seed(34957293)
     for t in range(1, COLLISION_PARAMS['n_t'] + 1):
         if t % 10 == 0:
             print('Time step: ', t)
