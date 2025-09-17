@@ -12,7 +12,7 @@ from .config import (
     calculate_velocity_grid
 )
 from .moment_utils import moment_eq, calculate_group_moments, invert, calc_moment
-from .sampling import generate_regular_samples, generate_grid
+from .sampling import generate_regular_samples, generate_grid, calculate_volume_elements
 from .virtual_collisions import collide
 from .data_utils import save_simulation_data
 from .banner import print_banner
@@ -63,8 +63,9 @@ def run_simulation():
     curr_groups_list[0] = copy.deepcopy(curr_groups)
 
     n_samples = SAMPLING_PARAMS['n_samples_x'] * SAMPLING_PARAMS['n_samples_y'] * SAMPLING_PARAMS['n_samples_z']
-    x_sample, y_sample, z_sample = generate_grid(SAMPLING_PARAMS['n_samples_x'], SAMPLING_PARAMS['n_samples_y'], SAMPLING_PARAMS['n_samples_z'])
-    weights, num_group_sample = generate_regular_samples(n_samples, x_sample, y_sample, z_sample, curr_groups)
+    x_sample, y_sample, z_sample, sample_loc_x, sample_loc_y, sample_loc_z = generate_grid(SAMPLING_PARAMS['n_samples_x'], SAMPLING_PARAMS['n_samples_y'], SAMPLING_PARAMS['n_samples_z'])
+    vol_elem = calculate_volume_elements(sample_loc_x, sample_loc_y, sample_loc_z)
+    weights, num_group_sample = generate_regular_samples(n_samples, x_sample, y_sample, z_sample, curr_groups, vol_elem)
     print('Reweighting samples...\n')
 
     # reweighted_weights = reweight_samples(x_sample, y_sample, z_sample, weights, num_group_sample, mu)
@@ -72,7 +73,7 @@ def run_simulation():
     print('Weights generated. Starting simulation...\n')
 
     group_collector = np.zeros((n_groups, 5))
-    # np.random.seed(34957293)
+
     for t in range(1, COLLISION_PARAMS['n_t'] + 1):
         if t % 10 == 0:
             print('Time step: ', t)
@@ -93,7 +94,7 @@ def run_simulation():
         curr_groups_list[t] = copy.deepcopy(curr_groups)
 
         # Update weights for next simulation step.
-        weights, _ = generate_regular_samples(n_samples, x_sample, y_sample, z_sample, curr_groups)
+        weights, _ = generate_regular_samples(n_samples, x_sample, y_sample, z_sample, curr_groups, vol_elem)
         # reweighted_weights = reweight_samples(x_sample, y_sample, z_sample, weights, num_group_sample, mu)
 
     # Save final state
