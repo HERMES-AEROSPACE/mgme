@@ -67,8 +67,11 @@ def run_simulation():
     # Generate regular samples on a grid. Generate initial weights on grid.
     n_samples = SAMPLING_PARAMS['n_samples_x'] * SAMPLING_PARAMS['n_samples_y'] * SAMPLING_PARAMS['n_samples_z']
     x_sample, y_sample, z_sample, sample_loc_x, sample_loc_y, sample_loc_z = generate_grid(SAMPLING_PARAMS['n_samples_x'], SAMPLING_PARAMS['n_samples_y'], SAMPLING_PARAMS['n_samples_z'])
-    weights, num_group_sample = generate_regular_samples(n_samples, x_sample, y_sample, z_sample, curr_groups)
-    volume_elements = calculate_volume_elements(sample_loc_x, sample_loc_y, sample_loc_z)
+    vol_elem = calculate_volume_elements(sample_loc_x, sample_loc_y, sample_loc_z)
+    weights, num_group_sample = generate_regular_samples(n_samples, x_sample, y_sample, z_sample, curr_groups, vol_elem)
+    print('Reweighting samples...\n')
+
+    # reweighted_weights = reweight_samples(x_sample, y_sample, z_sample, weights, num_group_sample, mu)
 
     print('Weights generated. Starting simulation...\n')
 

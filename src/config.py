@@ -31,12 +31,24 @@ GROUP_PARAMS = {
     # 'ci_cx': np.array([-3.0, -0.5, 0.0, 0.5]),
     # 'cf_cx': np.array([-0.5, 0.0, 0.5, 3.0]),
     # 'group_bounds_cx': np.array([[0, 101], [100, 121], [120, 141], [140, 241]]),
-    # 'ci_cy': np.array([-3.0]),
-    # 'cf_cy': np.array([3.0]),
-    # 'group_bounds_cy': np.array([[0, 241]]),
-    # 'ci_cz': np.array([-3.0]),
-    # 'cf_cz': np.array([3.0]),
-    # 'group_bounds_cz': np.array([[0, 241]])
+    # 'ci_cy': np.array([-3.0, -0.5, 0.0, 0.5]),
+    # 'cf_cy': np.array([-0.5, 0.0, 0.5, 3.0]),
+    # 'group_bounds_cy': np.array([[0, 101], [100, 121], [120, 141], [140, 241]]),
+    # 'ci_cz': np.array([-3.0, -0.5, 0.0, 0.5]),
+    # 'cf_cz': np.array([-0.5, 0.0, 0.5, 3.0]),
+    # 'group_bounds_cz': np.array([[0, 101], [100, 121], [120, 141], [140, 241]])
+    'num_groups_cx': 4,
+    'num_groups_cy': 4,
+    'num_groups_cz': 4,
+    'ci_cx': np.array([-3.0, -1.0, 0.0, 1.0]),
+    'cf_cx': np.array([-1.0, 0.0, 1.0, 3.0]),
+    'group_bounds_cx': np.array([[0, 81], [80, 121], [120, 161], [160, 241]]),
+    'ci_cy': np.array([-3.0, -1.0, 0.0, 1.0]),
+    'cf_cy': np.array([-1.0, 0.0, 1.0, 3.0]),
+    'group_bounds_cy': np.array([[0, 81], [80, 121], [120, 161], [160, 241]]),
+    'ci_cz': np.array([-3.0, -1.0, 0.0, 1.0]),
+    'cf_cz': np.array([-1.0, 0.0, 1.0, 3.0]),
+    'group_bounds_cz': np.array([[0, 81], [80, 121], [120, 161], [160, 241]])
 }
 
 # AMR parameters
@@ -46,9 +58,9 @@ AMR = {
 
 # Collision parameters
 COLLISION_PARAMS = {
-    'n_coll': 200000,
+    'n_coll': 500000,
     'dt': 0.2,
-    'n_t': 100
+    'n_t': 30
 }
 
 LOOKUP_TABLE = {
@@ -56,7 +68,7 @@ LOOKUP_TABLE = {
 }
 
 SAMPLING_PARAMS = {
-    'n_samples_x': 34,
-    'n_samples_y': 34,
-    'n_samples_z': 34
+    'n_samples_x': 20,
+    'n_samples_y': 20,
+    'n_samples_z': 20
 }

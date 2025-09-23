@@ -28,38 +28,54 @@ def calculate_volume_elements(x_centers, y_centers, z_centers):
     Calculate volume elements for discretization with given center points.
     Boundary points get full spacing to neighbors (extending past centers).
     """
-    def get_spacings(centers):
+    def get_spacings(centers, boundary_positions):
         # Calculate spacings between adjacent centers
         center_spacings = centers[1:] - centers[:-1]
         
         spacings = np.zeros_like(centers)
-        
+
         # Interior points: average of adjacent spacings
         spacings[1:-1] = (center_spacings[:-1] + center_spacings[1:]) / 2
-        
+
         # Boundary points: full spacing to neighbor
         spacings[0] = center_spacings[0]   # Full distance to next center
         spacings[-1] = center_spacings[-1]  # Full distance to previous center
+
+        for boundary in boundary_positions:
+            left_of_boundary = centers < boundary
+            right_of_boundary = centers > boundary
+
+            if np.any(left_of_boundary) and np.any(right_of_boundary):
+                # Find the indices of points closest to boundary on each side
+                left_boundary_idx = np.where(left_of_boundary)[0][-1]  # rightmost point left of boundary
+                right_boundary_idx = np.where(right_of_boundary)[0][0]  # leftmost point right of boundary
+                
+                # Adjust spacing for point just left of boundary
+                distance_to_boundary = boundary - centers[left_boundary_idx]
+                if left_boundary_idx > 0:
+                    spacings[left_boundary_idx] = center_spacings[left_boundary_idx-1]/2 + distance_to_boundary
+                else:
+                    spacings[left_boundary_idx] = distance_to_boundary
+                    
+                # Adjust spacing for point just right of boundary  
+                distance_from_boundary = centers[right_boundary_idx] - boundary
+                if right_boundary_idx < len(centers) - 1:
+                    spacings[right_boundary_idx] = distance_from_boundary + center_spacings[right_boundary_idx]/2
+                else:
+                    spacings[right_boundary_idx] = distance_from_boundary
         
         return spacings
     
-    dx = get_spacings(x_centers)
-    dy = get_spacings(y_centers) 
-    dz = get_spacings(z_centers)
+    dx = get_spacings(x_centers, [-1, 0, 1])
+    dy = get_spacings(y_centers, [-1, 0, 1]) 
+    dz = get_spacings(z_centers, [-1, 0, 1])
     print(dx)
     
     # Create 3D mesh of volume elements
     DX, DY, DZ = np.meshgrid(dx, dy, dz, indexing='ij')
     volume_elements = DX * DY * DZ
     
-    return volume_elements
-
-@jit(nopython=True)
-def calculate_entropy(weights, volume_elements, sample_loc_x, sample_loc_y, sample_loc_z, n_samples_x, n_samples_y, n_samples_z):
-    f = np.reshape(weights, (n_samples_x, n_samples_y, n_samples_z)) / volume_elements
-    logf = np.where(f > 0, np.log(f), 0)
-
-    return np.trapezoid(np.trapezoid(np.trapezoid(-f * logf, sample_loc_z), sample_loc_y), sample_loc_x)
+    return volume_elements.flatten()
 
 def generate_grid(n_samples_x, n_samples_y, n_samples_z):
     num1 = 10
@@ -81,7 +97,7 @@ def generate_grid(n_samples_x, n_samples_y, n_samples_z):
     return x_sample, y_sample, z_sample, sample_loc_x, sample_loc_y, sample_loc_z
 
 @jit(nopython=True)
-def generate_regular_samples_helper(mu, x_sample, y_sample, z_sample, ci_cx, cf_cx, ci_cy, cf_cy, ci_cz, cf_cz, Ak, bk, wxk, wyk, wzk):
+def generate_regular_samples_helper(mu, x_sample, y_sample, z_sample, vol_elem, ci_cx, cf_cx, ci_cy, cf_cy, ci_cz, cf_cz, Ak, bk, wxk, wyk, wzk):
     mask = (x_sample >= ci_cx) & (x_sample <= cf_cx) & \
     (y_sample >= ci_cy) & (y_sample <= cf_cy) & \
     (z_sample >= ci_cz) & (z_sample <= cf_cz)
@@ -90,12 +106,12 @@ def generate_regular_samples_helper(mu, x_sample, y_sample, z_sample, ci_cx, cf_
     y_sample_slice = y_sample[mask]
     z_sample_slice = z_sample[mask]
 
-    sum_f_group = np.sum(f(x_sample_slice, y_sample_slice, z_sample_slice, Ak, bk, wxk, wyk, wzk))
-    num_sample_group = len(x_sample_slice)
+    sum_f_group = np.sum(f(x_sample_slice, y_sample_slice, z_sample_slice, Ak, bk, wxk, wyk, wzk) * vol_elem[mask])
+    num_group_sample = len(x_sample_slice)
     if Ak == 0.0 and bk == 0.0  and wxk == 0.0 and wyk == 0.0 and wzk == 0.0:
         weights = np.zeros(len(x_sample_slice))
     else:
-        weights = mu[0] * f(x_sample_slice, y_sample_slice, z_sample_slice, Ak, bk, wxk, wyk, wzk) / sum_f_group
+        weights = mu[0] * f(x_sample_slice, y_sample_slice, z_sample_slice, Ak, bk, wxk, wyk, wzk) * vol_elem[mask] / sum_f_group
 
     return num_sample_group, weights, mask
 
@@ -144,7 +160,7 @@ def generate_convex_helper(mu, x_sample, y_sample, z_sample, ci_cx, cf_cx, ci_cy
 
     return num_sample_group, weights, mask
 
-def generate_regular_samples(n_samples, x_sample, y_sample, z_sample, curr_groups):
+def generate_regular_samples(n_samples, x_sample, y_sample, z_sample, curr_groups, vol_elem):
     weights = np.zeros(n_samples)
     num_sample_group = np.zeros(len(curr_groups))
 
