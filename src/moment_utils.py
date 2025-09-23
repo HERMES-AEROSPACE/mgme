@@ -5,19 +5,7 @@ from .config import GROUP_PARAMS, LOOKUP_TABLE, VELOCITY_SPACE
 from matplotlib import pyplot as plt
 
         
-def moments(beta, wx, wy, wz, ci_cx, cf_cx, ci_cy, cf_cy, ci_cz, cf_cz, ux, uy, uz, e):
-    """
-    Calculate moments for given beta and w parameters.
-    
-    Args:
-        beta: Beta parameter
-        w: W parameter
-        ci: Lower bound
-        cf: Upper bound
-    
-    Returns:
-        Tuple of (I1x + w*I0x)/I0x and (I2x + I0x*w**2 + 2*w*I1x + I0x/beta)/I0x
-    """
+def moments(beta, wx, wy, wz, ci_cx, cf_cx, ci_cy, cf_cy, ci_cz, cf_cz):
     I0x = np.sqrt(np.pi / (4 * beta)) * (special.erf(np.sqrt(beta) * (cf_cx - wx)) - special.erf(np.sqrt(beta) * (ci_cx - wx)))
     I0y = np.sqrt(np.pi / (4 * beta)) * (special.erf(np.sqrt(beta) * (cf_cy - wy)) - special.erf(np.sqrt(beta) * (ci_cy - wy)))
     I0z = np.sqrt(np.pi / (4 * beta)) * (special.erf(np.sqrt(beta) * (cf_cz - wz)) - special.erf(np.sqrt(beta) * (ci_cz - wz)))
@@ -51,8 +39,8 @@ def moments(beta, wx, wy, wz, ci_cx, cf_cx, ci_cy, cf_cy, ci_cz, cf_cz, ux, uy, 
             row = np.where(row > 1e-12, row, np.nan)
             I0z[i, :] = row
 
-    return [(I1x + wx*I0x) / I0x - ux, (I1y + wy*I0y) / I0y - uy, (I1z + wz*I0z) / I0z - uz, \
-            (I2x + 2 * wx * I1x + wx**2 * I0x) / I0x + (I2y + 2 * wy * I1y + wy**2 * I0y) / I0y + (I2z + 2 * wz * I1z + wz**2 * I0z) / I0z - e]
+    return [(I1x + wx*I0x) / I0x, (I1y + wy*I0y) / I0y, (I1z + wz*I0z) / I0z, \
+            (I2x + 2 * wx * I1x + wx**2 * I0x) / I0x + (I2y + 2 * wy * I1y + wy**2 * I0y) / I0y + (I2z + 2 * wz * I1z + wz**2 * I0z) / I0z]
 
 def moment_eq(x, ux, uy, uz, e, ci_cx, cf_cx, ci_cy, cf_cy, ci_cz, cf_cz):
     """
@@ -159,7 +147,7 @@ def grid_search(group_bounds, ux, uy, uz, e):
 
     abs_sum = np.sum(np.abs(f_values), axis=-1)
 
-    n_guess = 3
+    n_guess = 1
     flat_idx = np.argpartition(abs_sum.flatten(), n_guess)[:n_guess]
     best_idx = np.unravel_index(flat_idx, abs_sum.shape)
 
@@ -181,35 +169,36 @@ def invert(mu, initial_guess, group_bounds=GROUP_PARAMS):
     cf_cy = group_bounds['cf_cy']
     ci_cz = group_bounds['ci_cz']
     cf_cz = group_bounds['cf_cz']
-    method = 'hybr'
 
     # try:
-        # sol = optimize.root(moment_eq, initial_guess, \
-        #                                 args=(mu[1] / mu[0], mu[2] / mu[0], \
-        #                                         mu[3] / mu[0], mu[4] / mu[0], \
-        #                                         ci_cx, cf_cx, ci_cy, cf_cy, ci_cz, cf_cz), method=method)
+    # sol = optimize.root(moment_eq, initial_guess, args=(mu[1] / mu[0], mu[2] / mu[0], \
+    #                                                     mu[3] / mu[0], mu[4] / mu[0], \
+    #                             ci_cx, cf_cx, ci_cy, cf_cy, ci_cz, cf_cz), method='lm', options={'maxiter':1000})
 
-        # if sol.success:
-        #     b = sol.x[0]
-        #     wx = sol.x[1]
-        #     wy = sol.x[2]
-        #     wz = sol.x[3]
+    #     if sol.success:
+    #         b = sol.x[0]
+    #         wx = sol.x[1]
+    #         wy = sol.x[2]
+    #         wz = sol.x[3]
         
-        # if sol.success == False: raise RuntimeError
-        # if VELOCITY_SPACE['cx_range'][0] > wx or VELOCITY_SPACE['cx_range'][1] < wx: raise RuntimeError
-        # if VELOCITY_SPACE['cy_range'][0] > wy or VELOCITY_SPACE['cy_range'][1] < wy: raise RuntimeError
-        # if VELOCITY_SPACE['cz_range'][0] > wz or VELOCITY_SPACE['cz_range'][1] < wz: raise RuntimeError
+    #     if sol.success == False: raise RuntimeError
+    #     # if VELOCITY_SPACE['cx_range'][0] > wx or VELOCITY_SPACE['cx_range'][1] < wx: raise RuntimeError
+    #     # if VELOCITY_SPACE['cy_range'][0] > wy or VELOCITY_SPACE['cy_range'][1] < wy: raise RuntimeError
+    #     # if VELOCITY_SPACE['cz_range'][0] > wz or VELOCITY_SPACE['cz_range'][1] < wz: raise RuntimeError
     # except RuntimeError:
-        # guesses = grid_search(group_bounds, mu[1] / mu[0], mu[2] / mu[0], \
-                                                # mu[3] / mu[0], mu[4] / mu[0])
-
-        # for guess in guesses:
-            # if guess[1] > 1e-4:
+    # guess = grid_search(group_bounds, mu[1] / mu[0], mu[2] / mu[0], \
+    #                                         mu[3] / mu[0], mu[4] / mu[0])[0]
+    
     sol = optimize.least_squares(moment_eq, initial_guess, args=(mu[1] / mu[0], mu[2] / mu[0], \
                                     mu[3] / mu[0], mu[4] / mu[0], \
                                     ci_cx, cf_cx, ci_cy, cf_cy, ci_cz, cf_cz), \
                                         bounds=([0.0, -10, -10, -10], [np.inf, 10, 10, 10]), method='trf', loss='soft_l1')
-
+    # print(sol)
+    # print('residual:', np.linalg.norm(sol.fun))
+    
+    # sol = optimize.root(moment_eq, initial_guess, args=(mu[1] / mu[0], mu[2] / mu[0], \
+    #                                 mu[3] / mu[0], mu[4] / mu[0], \
+    #                                     ci_cx, cf_cx, ci_cy, cf_cy, ci_cz, cf_cz), method='lm')
     if sol.success:
         b = sol.x[0]
         wx = sol.x[1]

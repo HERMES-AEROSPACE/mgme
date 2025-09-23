@@ -4,7 +4,17 @@ from numba import jit
 from scipy import optimize
 import sys
 from matplotlib import pyplot as plt
+import cvxpy as cp
 
+
+def calculate_velocity_grid():
+    # Helper function to get velocity space grid
+    cx_vec = np.linspace(*VELOCITY_SPACE['cx_range'], VELOCITY_SPACE['num_cx'])
+    cy_vec = np.linspace(*VELOCITY_SPACE['cy_range'], VELOCITY_SPACE['num_cy'])
+    cz_vec = np.linspace(*VELOCITY_SPACE['cz_range'], VELOCITY_SPACE['num_cz'])
+    cx, cy, cz = np.meshgrid(cx_vec, cy_vec, cz_vec, indexing='ij')
+
+    return cx_vec, cy_vec, cz_vec, cx, cy, cz 
 
 @jit(nopython=True)
 def f(x, y, z, A, b, wx, wy, wz):
@@ -68,11 +78,16 @@ def calculate_volume_elements(x_centers, y_centers, z_centers):
     return volume_elements.flatten()
 
 def generate_grid(n_samples_x, n_samples_y, n_samples_z):
-    sample_loc_x = np.linspace(*VELOCITY_SPACE['cx_range'], n_samples_x)
-    sample_loc_y = np.linspace(*VELOCITY_SPACE['cy_range'], n_samples_y)
-    sample_loc_z = np.linspace(*VELOCITY_SPACE['cz_range'], n_samples_z)
-    print(sample_loc_x)
+    num1 = 10
+    num2 = 7
+    sample_loc_x_neg = np.append(np.linspace(-3.0, -0.51, num1), np.linspace(-0.49, 0.0, num2, endpoint=False))
+    sample_loc_x_pos = -1 * np.append(np.linspace(-0.49, 0.0, num2, endpoint=False)[::-1], np.linspace(-3.0, -0.51, num1)[::-1])
 
+    sample_loc_x = np.append(sample_loc_x_neg, sample_loc_x_pos)
+    sample_loc_y = sample_loc_x
+    sample_loc_z = sample_loc_x
+    print(sample_loc_x)
+    
     [xgrid, ygrid, zgrid] = np.meshgrid(sample_loc_x, sample_loc_y, sample_loc_z, indexing='ij')
 
     x_sample = xgrid.flatten()
@@ -98,54 +113,68 @@ def generate_regular_samples_helper(mu, x_sample, y_sample, z_sample, vol_elem, 
     else:
         weights = mu[0] * f(x_sample_slice, y_sample_slice, z_sample_slice, Ak, bk, wxk, wyk, wzk) * vol_elem[mask] / sum_f_group
 
-    return num_group_sample, weights, mask
+    return num_sample_group, weights, mask
+
+def generate_convex_helper(mu, x_sample, y_sample, z_sample, ci_cx, cf_cx, ci_cy, cf_cy, ci_cz, cf_cz):
+    mask = (x_sample >= ci_cx) & (x_sample <= cf_cx) & \
+    (y_sample >= ci_cy) & (y_sample <= cf_cy) & \
+    (z_sample >= ci_cz) & (z_sample <= cf_cz)
+
+    x_sample_slice = x_sample[mask]
+    y_sample_slice = y_sample[mask]
+    z_sample_slice = z_sample[mask]
+
+    num_sample_group = len(x_sample_slice)
+
+    if mu[0] < 1e-4: # wonder what a good threshold is.
+        A = np.zeros((5, num_sample_group))
+        b = np.zeros(5)
+        A[0, :] = 1
+        A[1, :] = x_sample_slice
+        A[2, :] = y_sample_slice
+        A[3, :] = z_sample_slice
+        A[4, :] = x_sample_slice**2 + y_sample_slice**2 + z_sample_slice**2
+        b[0] = mu[0]
+        b[1] = mu[1]
+        b[2] = mu[2]
+        b[3] = mu[3]
+        b[4] = mu[4]
+
+        x = cp.Variable(shape=num_sample_group, nonneg=True)
+        cost = cp.sum_squares(A @ x - b)
+        prob = cp.Problem(cp.Minimize(cost))
+        prob.solve()
+
+        weights = x.value
+    else:
+        x = cp.Variable(shape=num_sample_group, nonneg=True)
+        obj = cp.Maximize(cp.sum(cp.entr(x)))
+
+        constraints = [cp.sum(x) == mu[0], cp.sum(cp.multiply(x_sample_slice, x)) == mu[1], \
+                    cp.sum(cp.multiply(y_sample_slice, x)) == mu[2], cp.sum(cp.multiply(z_sample_slice, x)) == mu[3], \
+                    cp.sum(cp.multiply(x_sample_slice**2 + y_sample_slice**2 + z_sample_slice**2, x)) == mu[4]]
+        prob = cp.Problem(obj, constraints)
+        prob.solve()
+        
+        weights = x.value
+
+    return num_sample_group, weights, mask
 
 def generate_regular_samples(n_samples, x_sample, y_sample, z_sample, curr_groups, vol_elem):
     weights = np.zeros(n_samples)
-    num_group_sample = np.zeros(len(curr_groups))
+    num_sample_group = np.zeros(len(curr_groups))
 
     for i, group in enumerate(curr_groups):
         ci_cx, cf_cx = group.group_bounds['ci_cx'], group.group_bounds['cf_cx']
         ci_cy, cf_cy = group.group_bounds['ci_cy'], group.group_bounds['cf_cy']
         ci_cz, cf_cz = group.group_bounds['ci_cz'], group.group_bounds['cf_cz']
 
-        Ak, bk, wxk, wyk, wzk = group.A, group.b, group.wx, group.wy, group.wz
+        # Ak, bk, wxk, wyk, wzk = group.A, group.b, group.wx, group.wy, group.wz
         mu = group.mu
-        n_group_sample, group_weights, mask = generate_regular_samples_helper(mu, x_sample, y_sample, z_sample, vol_elem, \
-                                                                                       ci_cx, cf_cx, ci_cy, cf_cy, ci_cz, cf_cz, Ak, bk, wxk, wyk, wzk)
-        
-        num_group_sample[i] = n_group_sample
+        # n_group_sample, group_weights, mask = generate_regular_samples_helper(mu, x_sample, y_sample, z_sample, \
+                                                                                    #    ci_cx, cf_cx, ci_cy, cf_cy, ci_cz, cf_cz, Ak, bk, wxk, wyk, wzk)
+        n_group_sample, group_weights, mask = generate_convex_helper(mu, x_sample, y_sample, z_sample, ci_cx, cf_cx, ci_cy, cf_cy, ci_cz, cf_cz)
+        num_sample_group[i] = n_group_sample
         weights[mask] = group_weights
 
-    return weights, num_group_sample
-
-# def reweight_samples(x_sample, y_sample, z_sample, weights, num_group_sample, mu):
-#     new_weights = np.zeros(int(np.sum(num_group_sample)))
-
-#     for i in range(0, NUM_GROUPS_CX):
-#         for j in range(0, NUM_GROUPS_CY):
-#             for k in range(0, NUM_GROUPS_CZ):
-#                 M = np.zeros((5, int(num_group_sample[i, j, k])))
-#                 Q = np.zeros((5,))
-
-#                 x_mask = np.asarray(np.logical_and(x_sample >= CI_CX[i], x_sample <= CF_CX[i])).nonzero()
-#                 y_mask = np.asarray(np.logical_and(y_sample >= CI_CY[j], y_sample <= CF_CY[j])).nonzero()
-#                 z_mask = np.asarray(np.logical_and(z_sample >= CI_CZ[k], z_sample <= CF_CZ[k])).nonzero()
-#                 mask = np.array(list(set(x_mask[0].flatten()) & set(y_mask[0].flatten()) & set(z_mask[0].flatten())))
-
-#                 M[0, :] = 1
-#                 M[1, :] = x_sample[mask]
-#                 M[2, :] = y_sample[mask]
-#                 M[3, :] = z_sample[mask]
-#                 M[4, :] = (x_sample[mask]**2 + y_sample[mask]**2 + z_sample[mask]**2)
-
-#                 Q[0] = mu[i, j, k, 0]
-#                 Q[1] = mu[i, j, k, 1]
-#                 Q[2] = mu[i, j, k, 2]
-#                 Q[3] = mu[i, j, k, 3]
-#                 Q[4] = mu[i, j, k, 4]
-                
-#                 sol = optimize.least_squares(func, weights[mask], args=(M, Q), bounds=(0.0, 1.0), loss='soft_l1')
-#                 new_weights[mask] = sol.x
-
-#     return new_weights
+    return weights, num_sample_group
