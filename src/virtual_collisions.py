@@ -94,7 +94,6 @@ def collide(x_sample, y_sample, z_sample, weights, num_group_sample, bounds_list
         vy2p = V_y + gy_p
         vz2p = V_z + gz_p
 
-
         # Calculate loss rate for mass, momentum, and energy.
         x_valid = (vx1 >= ci_cx) & (vx1 <= cf_cx)
         y_valid = (vy1 >= ci_cy) & (vy1 <= cf_cy)
@@ -154,5 +153,5 @@ def collide(x_sample, y_sample, z_sample, weights, num_group_sample, bounds_list
         group_py[group_idx2r] += Gi * vy2p
         group_pz[group_idx2r] += Gi * vz2p
         group_e[group_idx2r] += Gi * (vx2p**2 + vy2p**2 + vz2p**2)
-    
+
     return group_n, group_px, group_py, group_pz, group_e

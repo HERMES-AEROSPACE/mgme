@@ -284,7 +284,7 @@ def custom_groups(f0, cx, cy, cz, cx_vec, cy_vec, cz_vec, root, group_params):
         child.set_mu(mu)
             
         if mu[0] > 1e-4:
-            A, b, wx, wy, wz = invert(mu, [1.0, 0.0, 0.0, 0.0], child.group_bounds)
+            A, b, wx, wy, wz = invert(mu, [0.1, mu[1], mu[2], mu[3]], child.group_bounds)
             # print(A, b, wx, wy, wz)
             child.set_dist_param(A, b, wx, wy, wz)
         

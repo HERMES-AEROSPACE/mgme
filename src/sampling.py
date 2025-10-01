@@ -66,9 +66,9 @@ def calculate_volume_elements(x_centers, y_centers, z_centers):
         
         return spacings
     
-    dx = get_spacings(x_centers, [-1, 0, 1])
-    dy = get_spacings(y_centers, [-1, 0, 1]) 
-    dz = get_spacings(z_centers, [-1, 0, 1])
+    dx = get_spacings(x_centers, [])
+    dy = get_spacings(y_centers, []) 
+    dz = get_spacings(z_centers, [])
     print(dx)
     
     # Create 3D mesh of volume elements
@@ -78,15 +78,15 @@ def calculate_volume_elements(x_centers, y_centers, z_centers):
     return volume_elements.flatten()
 
 def generate_grid(n_samples_x, n_samples_y, n_samples_z):
-    num1 = 10
-    num2 = 7
-    sample_loc_x_neg = np.append(np.linspace(-3.0, -0.51, num1), np.linspace(-0.49, 0.0, num2, endpoint=False))
-    sample_loc_x_pos = -1 * np.append(np.linspace(-0.49, 0.0, num2, endpoint=False)[::-1], np.linspace(-3.0, -0.51, num1)[::-1])
+    # sample_loc_x_neg = np.append(np.linspace(-3.0, -1.01, 6), np.linspace(-0.95, 0.0, 6, endpoint=False))
+    # sample_loc_x_pos = -1 * np.append(np.linspace(-0.95, 0.0, 6, endpoint=False)[::-1], np.linspace(-3.0, -1.01, 6)[::-1])
 
-    sample_loc_x = np.append(sample_loc_x_neg, sample_loc_x_pos)
-    sample_loc_y = sample_loc_x
-    sample_loc_z = sample_loc_x
-    print(sample_loc_x)
+    # sample_loc_x = np.append(sample_loc_x_neg, sample_loc_x_pos)
+    # 
+    sample_loc_x = np.append(np.linspace(-20, -1e-5, 8), np.append(np.linspace(1e-5, 6.65, 8), np.linspace(6.67, 20, 8))) #np.append(np.linspace(-3, -1.1, 6), np.append(np.linspace(-0.9, 0.9, 14), np.linspace(1.1, 3, 6)))
+    sample_loc_y = np.linspace(-14, 14, 16)
+    sample_loc_z = sample_loc_y
+    # print(sample_loc_x)
     
     [xgrid, ygrid, zgrid] = np.meshgrid(sample_loc_x, sample_loc_y, sample_loc_z, indexing='ij')
 
@@ -106,12 +106,12 @@ def generate_regular_samples_helper(mu, x_sample, y_sample, z_sample, vol_elem, 
     y_sample_slice = y_sample[mask]
     z_sample_slice = z_sample[mask]
 
-    sum_f_group = np.sum(f(x_sample_slice, y_sample_slice, z_sample_slice, Ak, bk, wxk, wyk, wzk) * vol_elem[mask])
-    num_group_sample = len(x_sample_slice)
+    sum_f_group = np.sum(f(x_sample_slice, y_sample_slice, z_sample_slice, Ak, bk, wxk, wyk, wzk))
+    num_sample_group = len(x_sample_slice)
     if Ak == 0.0 and bk == 0.0  and wxk == 0.0 and wyk == 0.0 and wzk == 0.0:
         weights = np.zeros(len(x_sample_slice))
     else:
-        weights = mu[0] * f(x_sample_slice, y_sample_slice, z_sample_slice, Ak, bk, wxk, wyk, wzk) * vol_elem[mask] / sum_f_group
+        weights = mu[0] * f(x_sample_slice, y_sample_slice, z_sample_slice, Ak, bk, wxk, wyk, wzk) / sum_f_group
 
     return num_sample_group, weights, mask
 
@@ -155,7 +155,7 @@ def generate_convex_helper(mu, x_sample, y_sample, z_sample, ci_cx, cf_cx, ci_cy
                     cp.sum(cp.multiply(x_sample_slice**2 + y_sample_slice**2 + z_sample_slice**2, x)) == mu[4]]
         prob = cp.Problem(obj, constraints)
         prob.solve()
-        
+
         weights = x.value
 
     return num_sample_group, weights, mask
@@ -169,9 +169,9 @@ def generate_regular_samples(n_samples, x_sample, y_sample, z_sample, curr_group
         ci_cy, cf_cy = group.group_bounds['ci_cy'], group.group_bounds['cf_cy']
         ci_cz, cf_cz = group.group_bounds['ci_cz'], group.group_bounds['cf_cz']
 
-        # Ak, bk, wxk, wyk, wzk = group.A, group.b, group.wx, group.wy, group.wz
+        Ak, bk, wxk, wyk, wzk = group.A, group.b, group.wx, group.wy, group.wz
         mu = group.mu
-        # n_group_sample, group_weights, mask = generate_regular_samples_helper(mu, x_sample, y_sample, z_sample, \
+        # n_group_sample, group_weights, mask = generate_regular_samples_helper(mu, x_sample, y_sample, z_sample, vol_elem, \
                                                                                     #    ci_cx, cf_cx, ci_cy, cf_cy, ci_cz, cf_cz, Ak, bk, wxk, wyk, wzk)
         n_group_sample, group_weights, mask = generate_convex_helper(mu, x_sample, y_sample, z_sample, ci_cx, cf_cx, ci_cy, cf_cy, ci_cz, cf_cz)
         num_sample_group[i] = n_group_sample
