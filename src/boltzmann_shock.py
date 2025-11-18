@@ -82,7 +82,8 @@ def run_simulation():
     U0, _ = ic(cx, cy, cz, dcx, dcy, dcz, n_val, u_val, T_val, VELOCITY_SPACE['num_cx'], VELOCITY_SPACE['num_cy'], VELOCITY_SPACE['num_cz'], \
         numXj, num_groups, combinations)
     if restart:
-        data = np.load('simulation_data/U109.npy')
+        data = np.load('simulation_data/U7.npy')
+        print('Restarting from...')
         U_list = data
     else:
         U_list = U0.copy()
@@ -111,11 +112,11 @@ def run_simulation():
         bounds_list[i] = np.array([ci_combo[i, 0], cf_combo[i, 0], ci_combo[i, 1], cf_combo[i, 1], ci_combo[i, 2], cf_combo[i, 2]])
 
     n_samples = SAMPLING_PARAMS['n_samples_x'] * SAMPLING_PARAMS['n_samples_y'] * SAMPLING_PARAMS['n_samples_z']
-    x_sample, y_sample, z_sample, _, _, _ = generate_grid(SAMPLING_PARAMS['n_samples_x'], SAMPLING_PARAMS['n_samples_y'], SAMPLING_PARAMS['n_samples_z'])
+    x_sample, y_sample, z_sample, cx_loc, cy_loc, cz_loc = generate_grid(SAMPLING_PARAMS['n_samples_x'], SAMPLING_PARAMS['n_samples_y'], SAMPLING_PARAMS['n_samples_z'])
 
     print("-------------------------BEGIN SIMULATION-------------------------")
     t_end = 30.0
-    dt = 0.004
+    dt = 0.001
     profiler = cProfile.Profile()
     for t in range(0, int(np.ceil(int(t_end / dt) / 100) * 100) + 1):
         # Inversion and calculate flux. 
@@ -124,9 +125,9 @@ def run_simulation():
         # stats = pstats.Stats(profiler)
         # stats.sort_stats('cumulative')
         # stats.print_stats(20)
-        Ak, bk, wxk, wyk, wzk = invert(U_list, numXj, num_groups, bounds_list, interpolater_list)
-        I0x, I0y, I0z, I1x, I1y, I1z, I2x, I2y, I2z, I3x, I3y, I3z = calc_integral(bk, wxk, wyk, wzk, bounds_list, numXj, num_groups)
-        F_list = calc_flux(Ak, bk, wxk, wyk, wzk, I0x, I0y, I0z, I1x, I1y, I1z, I2x, I2y, I2z, I3x, I3y, I3z, numXj, num_groups)
+        # Ak, bk, wxk, wyk, wzk = invert(U_list, numXj, num_groups, bounds_list, interpolater_list)
+        # I0x, I0y, I0z, I1x, I1y, I1z, I2x, I2y, I2z, I3x, I3y, I3z = calc_integral(bk, wxk, wyk, wzk, bounds_list, numXj, num_groups)
+        # F_list = calc_flux(Ak, bk, wxk, wyk, wzk, I0x, I0y, I0z, I1x, I1y, I1z, I2x, I2y, I2z, I3x, I3y, I3z, numXj, num_groups)
         
         # Boundary conditions.
         U_list[0, :] = U0[0, :]
@@ -137,64 +138,47 @@ def run_simulation():
         k2 = np.zeros((numXj, num_groups, 5))
         k1_c = np.zeros((numXj, num_groups, 5))
         k2_c = np.zeros((numXj, num_groups, 5))
-
-        k1 = RK_LF(U_list, F_list, numXj, num_groups, dx, dt)
  
         def process_iter(i, n_samples, x_sample, y_sample, z_sample, U_i, bounds_list, num_groups, COLLISION_PARAMS, dt):
-            weights, num_group_sample = generate_regular_samples(
+            weights, num_group_sample, masks = generate_regular_samples(
                 n_samples, x_sample, y_sample, z_sample, U_i, bounds_list, num_groups
             )
 
-            # calc_flux_int(weights, masks, dcx, dcy, dcz, cx, cy, cz, cx_vec, cy_vec, cz_vec)
+            flux = calc_flux_int(num_groups, weights, masks, bounds_list, cx_loc, cy_loc, cz_loc)
             
             group_n, group_px, group_py, group_pz, group_e = coll_source(
                 x_sample, y_sample, z_sample, weights, num_group_sample, 
                 num_groups, n_samples, bounds_list, COLLISION_PARAMS
             )
-            return i, group_n * dt, group_px * dt, group_py * dt, group_pz * dt, group_e * dt
+            return i, group_n * dt, group_px * dt, group_py * dt, group_pz * dt, group_e * dt, flux
 
-        # res = Parallel(n_jobs=8)(
-        #     delayed(process_iter)(i, n_samples, x_sample, y_sample, z_sample, U_list[i], bounds_list, num_groups, COLLISION_PARAMS, dt) 
-        #     for i in range(1, numXj - 1)
-        # )
-        # for i, n, px, py, pz, e, in res:
-        #     k1_c[i, :, 0] = n
-        #     k1_c[i, :, 1] = px
-        #     k1_c[i, :, 2] = py
-        #     k1_c[i, :, 3] = pz
-        #     k1_c[i, :, 4] = e
+        res = Parallel(n_jobs=8)(
+            delayed(process_iter)(i, n_samples, x_sample, y_sample, z_sample, U_list[i], bounds_list, num_groups, COLLISION_PARAMS, dt) 
+            for i in range(0, numXj)
+        )
 
-        for i in range(1, numXj - 1):
-            weights, num_group_sample = generate_regular_samples(n_samples, x_sample, y_sample, z_sample, \
-                U_list[i], bounds_list, num_groups)
+        for i, n, px, py, pz, e, flux in res:
+            F_list[i] = flux
+            k1_c[i, :, 0] = n
+            k1_c[i, :, 1] = px
+            k1_c[i, :, 2] = py
+            k1_c[i, :, 3] = pz
+            k1_c[i, :, 4] = e
 
-            group_n, group_px, group_py, group_pz, group_e = \
-                coll_source(x_sample, y_sample, z_sample, weights, num_group_sample, num_groups, n_samples, bounds_list, COLLISION_PARAMS)
-            
-            k1_c[i, :, 0] = group_n * dt
-            k1_c[i, :, 1] = group_px * dt
-            k1_c[i, :, 2] = group_py * dt
-            k1_c[i, :, 3] = group_pz * dt
-            k1_c[i, :, 4] = group_e * dt
+        k1 = RK_LF(U_list, F_list, numXj, num_groups, dx, dt)
 
-        # F_list_step2 = np.zeros((numXj, num_groups, 5))
-        # Ak, bk, wxk, wyk, wzk = invert(U_list + k1, numXj, num_groups, bounds_list, inouts)
-        # I0x, I0y, I0z, I1x, I1y, I1z, I2x, I2y, I2z, I3x, I3y, I3z = calc_integral(bk, wxk, wyk, wzk, bounds_list, numXj, num_groups)
-        # F_list_step2 = calc_flux(Ak, bk, wxk, wyk, wzk, I0x, I0y, I0z, I1x, I1y, I1z, I2x, I2y, I2z, I3x, I3y, I3z, numXj, num_groups)
-        
-        # k2 = RK_LF(U_list + k1, F_list_step2, numXj, num_groups, dx, dt) 
-        # for i in range(numXj):
+        # for i in range(1, numXj - 1):
         #     weights, num_group_sample = generate_regular_samples(n_samples, x_sample, y_sample, z_sample, \
-        #         (U_list + k1)[i], bounds_list, num_groups)
+        #         U_list[i], bounds_list, num_groups)
 
         #     group_n, group_px, group_py, group_pz, group_e = \
         #         coll_source(x_sample, y_sample, z_sample, weights, num_group_sample, num_groups, n_samples, bounds_list, COLLISION_PARAMS)
-        #     k2_c[i, :, 0] = group_n * dt
-        #     k2_c[i, :, 1] = group_px * dt
-        #     k2_c[i, :, 2] = group_py * dt
-        #     k2_c[i, :, 3] = group_pz * dt
-        #     k2_c[i, :, 4] = group_e * dt
-            # print(i)
+            
+        #     k1_c[i, :, 0] = group_n * dt
+        #     k1_c[i, :, 1] = group_px * dt
+        #     k1_c[i, :, 2] = group_py * dt
+        #     k1_c[i, :, 3] = group_pz * dt
+        #     k1_c[i, :, 4] = group_e * dt
 
         dU = 1.0 * (k1_c + k1)
         U_list += dU

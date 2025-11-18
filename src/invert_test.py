@@ -6,18 +6,18 @@ from .sampling import calculate_velocity_grid
 from scipy import optimize, special
 
 
-sol = optimize.least_squares(moment_eq, [0.27589075599575336, 3.598356344275178, -1.7102274992290973, 1.7054816195116538], args=(0.0070341124913311836, 0.6402750574510462, -0.6410232590766655, 2.090761964678449, \
-     -7.0, 0.4666666666666668, 0.0, 7.0, -7.0, 0.0), \
-                                                bounds=([0.0, -20, -20, -20], [100.0, 20, 20, 20]), method='trf', loss='soft_l1')
+sol = optimize.least_squares(moment_eq, [0.01, -1.0, -1.0, 0.0], args=(-0.07781224965889887, -0.6134569726632962, 0.6158573426598, 1.7276316918440353, \
+     -7.0, 0.4666666666666668, -7.0, 0.0, 0.0, 7.0), \
+                                                bounds=([0.0, -7, -7, 0], [np.inf, 0.5, 0, 7]), method='trf', loss='soft_l1')
 print(sol.x, np.linalg.norm(sol.fun))
 b = sol.x[0]
 wx = sol.x[1]
 wy = sol.x[2]
 wz = sol.x[3]
-I0x = np.sqrt(np.pi / (4 * b)) * (special.erf(np.sqrt(b) * (7.0 - wx)) - special.erf(np.sqrt(b) * (2.0999999999999996 - wx)))
+I0x = np.sqrt(np.pi / (4 * b)) * (special.erf(np.sqrt(b) * (0.4666666666666668 - wx)) - special.erf(np.sqrt(b) * (-7.0 - wx)))
 I0y = np.sqrt(np.pi / (4 * b)) * (special.erf(np.sqrt(b) * (0.0 - wy)) - special.erf(np.sqrt(b) * (-7.0 - wy)))
 I0z = np.sqrt(np.pi / (4 * b)) * (special.erf(np.sqrt(b) * (7.0 - wz)) - special.erf(np.sqrt(b) * (0.0 - wz)))
-A = 0.020356526229492456 / (I0x * I0y * I0z)
+A = 0.01688446754551784 / (I0x * I0y * I0z)
 print(A, b, wx, wy, wz)
 
 cx_vec, cy_vec, cz_vec, cx, cy, cz = calculate_velocity_grid()

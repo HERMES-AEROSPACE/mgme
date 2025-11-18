@@ -86,21 +86,22 @@ ici = 100
 icf = 121
 mu1 = calc_moment(f0[ici:icf, 0:121, 0:121], cx_s[ici:icf, 0:121, 0:121], cy_s[ici:icf, 0:121, 0:121], cz_s[ici:icf, 0:121, 0:121], \
     cx_vec_smooth[ici:icf], cy_vec_smooth[0:121], cz_vec_smooth[0:121])
-print(cx_vec_smooth[100])
-num_cx = 16
-num_cy = 16
-num_cz = 16
 
-bounds = {'ci_cx': -0.8333333333333339, 'cf_cx': 0.0, \
-        'ci_cy': -5.0, 'cf_cy': 0.0,\
-        'ci_cz': -5.0, 'cf_cz': 0.0}
+mu1 = np.array([0.00733863, 0.0014623, -0.00411905, -0.00412854, 0.00807311])
+num_cx = 10
+num_cy = 8
+num_cz = 8
 
-# cx_vec = np.linspace(bounds['ci_cx'], bounds['cf_cx'], num_cx, endpoint=False) + (bounds['cf_cx'] - bounds['ci_cx']) / (2 * num_cx)
-# cy_vec = np.linspace(bounds['ci_cy'], bounds['cf_cy'], num_cy, endpoint=False) + (bounds['cf_cy'] - bounds['ci_cy']) / (2 * num_cy)
-# cz_vec = np.linspace(bounds['ci_cz'], bounds['cf_cz'], num_cz, endpoint=False) + (bounds['cf_cz'] - bounds['ci_cz']) / (2 * num_cz)
-cx_vec = np.linspace(bounds['ci_cx'], bounds['cf_cx'], num_cx)
-cy_vec = np.linspace(bounds['ci_cy'], bounds['cf_cy'], num_cy)
-cz_vec = np.linspace(bounds['ci_cz'], bounds['cf_cz'], num_cz)
+bounds = {'ci_cx': -3.3, 'cf_cx': 0.4666666666666668, \
+        'ci_cy': -4.0, 'cf_cy': 0.0,\
+        'ci_cz': -4.0, 'cf_cz': 0.0}
+
+cx_vec = np.linspace(bounds['ci_cx'], bounds['cf_cx'], num_cx, endpoint=False) + (bounds['cf_cx'] - bounds['ci_cx']) / (2 * num_cx)
+cy_vec = np.linspace(bounds['ci_cy'], bounds['cf_cy'], num_cy, endpoint=False) + (bounds['cf_cy'] - bounds['ci_cy']) / (2 * num_cy)
+cz_vec = np.linspace(bounds['ci_cz'], bounds['cf_cz'], num_cz, endpoint=False) + (bounds['cf_cz'] - bounds['ci_cz']) / (2 * num_cz)
+# cx_vec = np.linspace(bounds['ci_cx'], bounds['cf_cx'], num_cx)
+# cy_vec = np.linspace(bounds['ci_cy'], bounds['cf_cy'], num_cy)
+# cz_vec = np.linspace(bounds['ci_cz'], bounds['cf_cz'], num_cz)
 dx = cx_vec[1] - cx_vec[0]
 dy = cy_vec[1] - cy_vec[0]
 dz = cz_vec[1] - cz_vec[0]
@@ -155,7 +156,7 @@ constraints = [cp.sum(x) == mu1[0], cp.sum(cp.multiply(x_sample, x)) == mu1[1], 
                cp.sum(cp.multiply(y_sample, x)) == mu1[2], cp.sum(cp.multiply(z_sample, x)) == mu1[3], \
                cp.sum(cp.multiply(x_sample**2 + y_sample**2 + z_sample**2, x)) == mu1[4]]
 prob = cp.Problem(obj, constraints)
-prob.solve()
+prob.solve(verbose=True)
 
 real_weight = x.value
 
@@ -184,7 +185,7 @@ bin_edges = np.array([cx_vec[0] - half_width] +
 
 counts, ed = np.histogram(x_sample, weights=real_weight / dx, bins=bin_edges)
 
-shape_weights = np.reshape(real_weight / (dx*dy*dz), (16, 16, 16))
+shape_weights = np.reshape(real_weight / (dx*dy*dz), (10, 8, 8))
 f1 = np.trapezoid(np.trapezoid(np.trapezoid(cx * shape_weights, cz_vec, axis=2), cy_vec, axis=1), cx_vec, axis=0)
 f2 = np.trapezoid(np.trapezoid(np.trapezoid(cx**2 * shape_weights, cz_vec, axis=2), cy_vec, axis=1), cx_vec, axis=0)
 ccTc = cx**3 + cy**2 * cx + cz**2 * cx

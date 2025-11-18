@@ -63,7 +63,7 @@ LOOKUP_TABLE = {
 }
 
 SAMPLING_PARAMS = {
-    'n_samples_x': 16,
+    'n_samples_x': 20,
     'n_samples_y': 16,
     'n_samples_z': 16
 }

@@ -152,7 +152,7 @@ def invert(U_list, numXj, numGroups, bounds_list, interpolater_list):
                                             uz / n, e / n, ci_cx, cf_cx, ci_cy, cf_cy, ci_cz, cf_cz), \
                                                 bounds=([0.0, -20, -20, -20], [100.0, 20, 20, 20]), method='trf', loss='soft_l1')
                 if np.linalg.norm(sol.fun) > 1e-6:
-                    print('residual:', np.linalg.norm(sol.fun), point, i)
+                    print('residual:', np.linalg.norm(sol.fun), point, i, sol.x)
                     print(n, ux / n, uy / n, uz / n, e / n, ci_cx, cf_cx, ci_cy, cf_cy, ci_cz, cf_cz, initial_guess)
 
                 if sol.success:
@@ -264,15 +264,51 @@ def calc_flux(Ak, bk, wxk, wyk, wzk, I0x, I0y, I0z, I1x, I1y, I1z, I2x, I2y, I2z
 
     return F
 
-def calc_flux_int(weights, masks, dx, dy, dz, cx, cy, cz, cx_vec, cy_vec, cz_vec):
-    F = np.zeros(5)
+def calc_flux_int(num_groups, weights, masks, bounds_list, cx_loc, cy_loc, cz_loc):
+    F = np.zeros((num_groups, 5))
 
-    for i in range(0, len(masks)):
-        shape_weights = np.reshape(weights[masks[i]] / (dx*dy*dz), (8, 8, 8))
-        F[0] = np.trapezoid(np.trapezoid(np.trapezoid(cx * shape_weights, cz_vec, axis=2), cy_vec, axis=1), cx_vec, axis=0)
-        F[1] = np.trapezoid(np.trapezoid(np.trapezoid(cx**2 * shape_weights, cz_vec, axis=2), cy_vec, axis=1), cx_vec, axis=0)
+    for i in range(0, num_groups):
+        mask = masks[i]
+        ci_cx = bounds_list[i, 0]
+        cf_cx = bounds_list[i, 1]
+        ci_cy = bounds_list[i, 2]
+        cf_cy = bounds_list[i, 3]
+        ci_cz = bounds_list[i, 4]
+        cf_cz = bounds_list[i, 5]
+
+        cx_vec = cx_loc[(cx_loc > ci_cx) & (cx_loc < cf_cx)]
+        cy_vec = cy_loc[(cy_loc > ci_cy) & (cy_loc < cf_cy)]
+        cz_vec = cz_loc[(cz_loc > ci_cz) & (cz_loc < cf_cz)]
+        dx = np.abs(cx_vec[1] - cx_vec[0])
+        dy = np.abs(cy_vec[1] - cy_vec[0])
+        dz = np.abs(cz_vec[1] - cz_vec[0])
+
+        shape_weights = np.reshape(weights[mask] / (dx*dy*dz), (cx_vec.size, cy_vec.size, cz_vec.size))
+
+        # Extend ci_vec and shape_weights to include the extrapolated points. 
+        cx_vec_ext = np.concatenate([[cx_vec[0] - dx / 2], cx_vec, [cx_vec[-1] + dx / 2]])
+        cy_vec_ext = np.concatenate([[cy_vec[0] - dy / 2], cy_vec, [cy_vec[-1] + dy / 2]])
+        cz_vec_ext = np.concatenate([[cz_vec[0] - dz / 2], cz_vec, [cz_vec[-1] + dz / 2]])
+        nx_ext, ny_ext, nz_ext = len(cx_vec_ext), len(cy_vec_ext), len(cz_vec_ext)
+        weights_ext = np.zeros((nx_ext, ny_ext, nz_ext))
+
+        weights_ext[1:-1, 1:-1, 1:-1] = shape_weights
+
+        weights_ext[0, 1:-1, 1:-1] = 2 * shape_weights[0, :, :] - shape_weights[1, :, :]      # x_min face
+        weights_ext[-1, 1:-1, 1:-1] = 2 * shape_weights[-1, :, :] - shape_weights[-2, :, :]   # x_max face
+        
+        weights_ext[:, 0, 1:-1] = 2 * weights_ext[:, 1, 1:-1] - weights_ext[:, 2, 1:-1]    # y_min face
+        weights_ext[:, -1, 1:-1] = 2 * weights_ext[:, -2, 1:-1] - weights_ext[:, -3, 1:-1]  # y_max face
+        
+        weights_ext[:, :, 0] = 2 * weights_ext[:, :, 1] - weights_ext[:, :, 2]      # z_min face
+        weights_ext[:, :, -1] = 2 * weights_ext[:, :, -2] - weights_ext[:, :, -3]   # z_max face
+
+        cx, cy, cz = np.meshgrid(cx_vec_ext, cy_vec_ext, cz_vec_ext, indexing='ij')
+        
+        F[i, 0] = np.trapezoid(np.trapezoid(np.trapezoid(cx * weights_ext, cz_vec_ext, axis=2), cy_vec_ext, axis=1), cx_vec_ext, axis=0)
+        F[i, 1] = np.trapezoid(np.trapezoid(np.trapezoid(cx**2 * weights_ext, cz_vec_ext, axis=2), cy_vec_ext, axis=1), cx_vec_ext, axis=0)
         ccTc = cx**3 + cy**2 * cx + cz**2 * cx
-        F[2] = np.trapezoid(np.trapezoid(np.trapezoid(ccTc * shape_weights, cz_vec, axis=2), cy_vec, axis=1), cx_vec, axis=0)
+        F[i, 4] = np.trapezoid(np.trapezoid(np.trapezoid(ccTc * weights_ext, cz_vec_ext, axis=2), cy_vec_ext, axis=1), cx_vec_ext, axis=0)
 
     return F
 
@@ -280,7 +316,6 @@ def RK_LF(U_list, F_list, numXj, n_groups, dx, delta_t):
     k = np.zeros((numXj, n_groups, 5))
 
     p = np.arange(1, numXj - 1, 1)
-
     for i in range(0, n_groups):
         # Lax-Freidrichs intercell flux.
         f_left = 0.5 * (F_list[p - 1, i] + F_list[p, i]) + dx / (2 * delta_t) * (U_list[p - 1, i] - U_list[p, i])
@@ -289,57 +324,10 @@ def RK_LF(U_list, F_list, numXj, n_groups, dx, delta_t):
 
     return k
 
-def generate_convex_helper(mu, x_sample, y_sample, z_sample, ci_cx, cf_cx, ci_cy, cf_cy, ci_cz, cf_cz):
-    mask = (x_sample >= ci_cx) & (x_sample <= cf_cx) & \
-    (y_sample >= ci_cy) & (y_sample <= cf_cy) & \
-    (z_sample >= ci_cz) & (z_sample <= cf_cz)
-
-    x_sample_slice = x_sample[mask]
-    y_sample_slice = y_sample[mask]
-    z_sample_slice = z_sample[mask]
-
-    num_sample_group = len(x_sample_slice)
-
-    if mu[0] < 1e-4: # wonder what a good threshold is.
-        A = np.zeros((5, num_sample_group))
-        b = np.zeros(5)
-        A[0, :] = 1
-        A[1, :] = x_sample_slice
-        A[2, :] = y_sample_slice
-        A[3, :] = z_sample_slice
-        A[4, :] = x_sample_slice**2 + y_sample_slice**2 + z_sample_slice**2
-        b[0] = mu[0]
-        b[1] = mu[1]
-        b[2] = mu[2]
-        b[3] = mu[3]
-        b[4] = mu[4]
-
-        x = cp.Variable(shape=num_sample_group, nonneg=True)
-        cost = cp.sum_squares(A @ x - b)
-        prob = cp.Problem(cp.Minimize(cost))
-        prob.solve()
-
-        weights = x.value
-    else:
-        x = cp.Variable(shape=num_sample_group, nonneg=True)
-        obj = cp.Maximize(cp.sum(cp.entr(x)))
-
-        constraints = [cp.sum(x) == mu[0], cp.sum(cp.multiply(x_sample_slice, x)) == mu[1], \
-                    cp.sum(cp.multiply(y_sample_slice, x)) == mu[2], cp.sum(cp.multiply(z_sample_slice, x)) == mu[3], \
-                    cp.sum(cp.multiply(x_sample_slice**2 + y_sample_slice**2 + z_sample_slice**2, x)) == mu[4]]
-        prob = cp.Problem(obj, constraints)
-        prob.solve(verbose=True)
-        # if prob.status == cp.OPTIMAL_INACCURATE:
-            # prob.solve(verbose=True)  
-            # sys.exit()
-        
-        weights = x.value
-
-    return num_sample_group, weights, mask
-
 def generate_regular_samples(n_samples, x_sample, y_sample, z_sample, mu, bounds_list, num_groups):
     weights = np.zeros(n_samples)
-    num_sample_group = np.zeros(num_groups)
+    n_sample_group = np.zeros(num_groups)
+    masks = []
 
     for i in range(num_groups):
         ci_cx = bounds_list[i, 0]
@@ -349,13 +337,53 @@ def generate_regular_samples(n_samples, x_sample, y_sample, z_sample, mu, bounds
         ci_cz = bounds_list[i, 4]
         cf_cz = bounds_list[i, 5]
 
-        n_group_sample, group_weights, mask = generate_convex_helper(mu[i], x_sample, y_sample, z_sample, \
-                                                                                       ci_cx, cf_cx, ci_cy, cf_cy, ci_cz, cf_cz)
+        mask = (x_sample >= ci_cx) & (x_sample <= cf_cx) & \
+        (y_sample >= ci_cy) & (y_sample <= cf_cy) & \
+        (z_sample >= ci_cz) & (z_sample <= cf_cz)
 
-        num_sample_group[i] = n_group_sample
-        weights[mask] = group_weights
+        x_sample_slice = x_sample[mask]
+        y_sample_slice = y_sample[mask]
+        z_sample_slice = z_sample[mask]
+        masks.append(mask)
 
-    return weights, num_sample_group
+        num_sample_group = len(x_sample_slice)
+
+        if mu[i, 0] < 1e-4: # wonder what a good threshold is.
+            A = np.zeros((5, num_sample_group))
+            b = np.zeros(5)
+            A[0, :] = 1
+            A[1, :] = x_sample_slice
+            A[2, :] = y_sample_slice
+            A[3, :] = z_sample_slice
+            A[4, :] = x_sample_slice**2 + y_sample_slice**2 + z_sample_slice**2
+            b[0] = mu[i, 0]
+            b[1] = mu[i, 1]
+            b[2] = mu[i, 2]
+            b[3] = mu[i, 3]
+            b[4] = mu[i, 4]
+
+            x = cp.Variable(shape=num_sample_group, nonneg=True)
+            cost = cp.sum_squares(A @ x - b)
+            prob = cp.Problem(cp.Minimize(cost))
+            prob.solve()
+
+            weights = x.value
+        else:
+            x = cp.Variable(shape=num_sample_group, nonneg=True)
+            obj = cp.Maximize(cp.sum(cp.entr(x)))
+
+            constraints = [cp.sum(x) == mu[i, 0], cp.sum(cp.multiply(x_sample_slice, x)) == mu[i, 1], \
+                        cp.sum(cp.multiply(y_sample_slice, x)) == mu[i, 2], cp.sum(cp.multiply(z_sample_slice, x)) == mu[i, 3], \
+                        cp.sum(cp.multiply(x_sample_slice**2 + y_sample_slice**2 + z_sample_slice**2, x)) == mu[i, 4]]
+            prob = cp.Problem(obj, constraints)
+            prob.solve()
+            if prob.status == cp.OPTIMAL_INACCURATE:
+                print(ci_cx, cf_cx, ci_cy, cf_cy, ci_cz, cf_cz)
+
+            n_sample_group[i] = num_sample_group
+            weights[mask] = x.value
+
+    return weights, n_sample_group, masks
 
 def coll_source(x_sample, y_sample, z_sample, weights, num_group_sample, n_groups, n_samples, bounds_list, COLLISION_PARAMS):
     # Input: distribution parameters, bounds
