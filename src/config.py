@@ -6,14 +6,14 @@ VELOCITY_SPACE = {
     'num_cx': 121,
     'num_cy': 121,
     'num_cz': 121,
-    'cx_range': (-20.0, 20.0),
-    'cy_range': (-20.0, 20.0),
-    'cz_range': (-20.0, 20.0)
+    'cx_range': (-7.0, 7.0),
+    'cy_range': (-7.0, 7.0),
+    'cz_range': (-7.0, 7.0)
 }
 
 PHYS_SPACE = {
-    'num_xj': 101,
-    'xj_range': [-30, 20]
+    'num_xj': 201,
+    'xj_range': [-14, 10]
 }
 
 # Group parameters
@@ -27,15 +27,15 @@ GROUP_PARAMS = {
     # 'ci_cz': np.array([-5.0, -0.5, 0.0, 0.5]),
     # 'cf_cz': np.array([-0.5, 0.0, 0.5, 5.0]),
     # 'group_bounds_cz': np.array([[0, 109], [108, 121], [120, 133], [132, 241]])
-    'ci_cx': np.array([-20, 0.0, 6.666666666666664]),
-    'cf_cx': np.array([0.0, 6.666666666666664, 20.0]),
-    'group_bounds_cx': np.array([[0, 61], [60, 81], [80, 121]]),
-    'ci_cy': np.array([-20.0, 0.0]),
-    'cf_cy': np.array([0.0, 20.0]),
+    'ci_cx': np.array([-7, 0.4666666666666668]),
+    'cf_cx': np.array([0.4666666666666668, 7.0]),
+    'group_bounds_cx': np.array([[0, 65], [64, 121]]),
+    'ci_cy': np.array([-7.0, 0.0]),
+    'cf_cy': np.array([0.0, 7.0]),
     'group_bounds_cy': np.array([[0, 61], [60, 121]]),
-    'ci_cz': np.array([-20.0, 0.0]),
-    'cf_cz': np.array([0.0, 20.0]),
-    'group_bounds_cz': np.array([[0, 61], [60,121]])
+    'ci_cz': np.array([-7.0, 0.0]),
+    'cf_cz': np.array([0.0, 7.0]),
+    'group_bounds_cz': np.array([[0, 61], [60, 121]])
     # 'ci_cx': np.array([-3, -1.0, 0.0, 1.0]),
     # 'cf_cx': np.array([-1.0, 0.0, 1.0, 3.0]),
     # 'group_bounds_cx': np.array([[0, 81], [80, 121], [120, 161], [160, 241]]),
@@ -55,8 +55,7 @@ AMR = {
 # Collision parameters
 COLLISION_PARAMS = {
     'n_coll': 100000,
-    'dt': 0.1,
-    'n_t': 60
+    'n_t': 100
 }
 
 LOOKUP_TABLE = {
@@ -64,7 +63,7 @@ LOOKUP_TABLE = {
 }
 
 SAMPLING_PARAMS = {
-    'n_samples_x': 24,
+    'n_samples_x': 16,
     'n_samples_y': 16,
     'n_samples_z': 16
 }
@@ -79,6 +78,6 @@ CONSTANTS = {
 
 FREESTREAM_PARAMS = {
     'T1': 300, 
-    'P1': 6.6667,
-    'Ma1': 10
+    'P1': 0.415,
+    'Ma1': 2
 }

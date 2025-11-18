@@ -25,6 +25,9 @@ def run_simulation():
     
     # Get velocity space grid.
     cx_vec, cy_vec, cz_vec, cx, cy, cz = calculate_velocity_grid()
+    dx = cx_vec[1] - cx_vec[0]
+    dy = cy_vec[1] - cy_vec[0]
+    dz = cz_vec[1] - cz_vec[0]
 
     # Initial distribution function. Still have to uncomment the correct one.
     Ak = 0.00384934
@@ -34,9 +37,9 @@ def run_simulation():
     wzk = 0.0
     # K = 1 - 0.4 * np.exp(-0/6)
     # f0 = 1 / (2 * K * (np.pi * K)**1.5) * (5 * K - 3 + 2 * (1 - K) / K * (cx**2 + cy**2 + cz**2)) * np.exp(-(cx**2 + cy**2 + cz**2) / K)
-    # f0 = 1 / (np.pi**1.5) * np.exp(-1 * (cx**2 + cy**2 + cz**2))
+    f0 = 1 / (np.pi**1.5) * np.exp(-1 * (cx**2 + cy**2 + cz**2))
     # f0 = 0.5 * (3 / np.pi)**1.5 * (np.exp(-3.0 * (cx - 1)**2) + np.exp(-3.0 * (cx + 1)**2)) * np.exp(-3 * (cy**2 + cz**2))
-    f0 = Ak * np.exp(-bk * ((cx - wxk)**2 + (cy - wyk)**2 + (cz - wzk)**2))
+    # f0 = Ak * np.exp(-bk * ((cx - wxk)**2 + (cy - wyk)**2 + (cz - wzk)**2))
 
     # Create the root node of the AMR tree.
     root = GroupNode({'ci_cx': VELOCITY_SPACE['cx_range'][0], 'cf_cx': VELOCITY_SPACE['cx_range'][1], 'group_bounds_cx': np.array([0, VELOCITY_SPACE['num_cx']]),
@@ -46,7 +49,7 @@ def run_simulation():
     root.set_mu(mu)
     root._update_group_dist_params([1.0, 0.0, 0.0, 0.0])
     root_f = root.A * np.exp(-root.b * ((cx - root.wx)**2 + (cy - root.wy)**2 + (cz - root.wz)**2))
-    dist = calculate_hellinger_distance(f0, root_f, cx_vec, cy_vec, cz_vec, root.group_bounds)
+    dist = calculate_hellinger_distance(f0, root_f, cx_vec, cy_vec, cz_vec)
     root.set_hellinger_distance(dist)
 
     print('Running AMR to get initial groups...\n')
@@ -77,19 +80,22 @@ def run_simulation():
     weights, num_group_sample = generate_regular_samples(n_samples, x_sample, y_sample, z_sample, curr_groups, vol_elem)
     print('Reweighting samples...\n')
     
-    plt.rcParams['font.family'] = "serif"
-    fig, ax = plt.subplots(3, 1, figsize=(8, 10))
-    ax[0].plot(cx_vec, np.trapz(np.trapz(f0, cz_vec, axis=2), cy_vec, axis=1))
-    ax[0].plot(sample_loc_x, np.sum(np.reshape(weights, (24, 16, 16)), axis=(1, 2)), '--o', color='black')
-    ax[1].plot(cy_vec, np.trapz(np.trapz(f0, cz_vec, axis=2), cx_vec, axis=0))
-    ax[1].plot(sample_loc_y, np.sum(np.reshape(weights, (24, 16, 16)), axis=(0, 2)), '--o', color='black')
-    ax[2].plot(cz_vec, np.trapz(np.trapz(f0, cy_vec, axis=1), cx_vec, axis=0))
-    ax[2].plot(sample_loc_z, np.sum(np.reshape(weights, (24, 16, 16)), axis=(0, 1)), '--o', color='black')
-    ax[0].set_xlabel('Cx', fontsize=20)
-    ax[1].set_xlabel('Cy', fontsize=20)
-    ax[2].set_xlabel('Cz', fontsize=20)
-    plt.tight_layout()
-    plt.show()
+    # plt.rcParams['font.family'] = "serif"
+    # fig, ax = plt.subplots(3, 1, figsize=(8, 10))
+    # ax[0].plot(cx_vec, np.trapz(np.trapz(f0, cz_vec, axis=2), cy_vec, axis=1))
+    # ax[0].plot(sample_loc_x, np.sum(np.reshape(weights, (24, 20, 20)) / 2, axis=(1, 2)), '--o', color='black')
+    # ax[0].hist(x_sample, weights=weights / dx, bins=24)
+    # ax[1].plot(cy_vec, np.trapz(np.trapz(f0, cz_vec, axis=2), cx_vec, axis=0))
+    # ax[1].plot(sample_loc_y, np.sum(np.reshape(weights, (24, 20, 20)), axis=(0, 2)), '--o', color='black')
+    # ax[1].hist(y_sample, weights=weights, bins=12)
+    # ax[2].plot(cz_vec, np.trapz(np.trapz(f0, cy_vec, axis=1), cx_vec, axis=0))
+    # ax[2].hist(z_sample, weights=weights, bins=12)
+    # ax[2].plot(sample_loc_z, np.sum(np.reshape(weights, (24, 20, 20)), axis=(0, 1)), '--o', color='black')
+    # ax[0].set_xlabel('Cx', fontsize=20)
+    # ax[1].set_xlabel('Cy', fontsize=20)
+    # ax[2].set_xlabel('Cz', fontsize=20)
+    # plt.tight_layout()
+    # plt.show()
 
     # reweighted_weights = reweight_samples(x_sample, y_sample, z_sample, weights, num_group_sample, mu)
 

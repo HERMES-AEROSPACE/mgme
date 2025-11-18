@@ -4,11 +4,31 @@ from scipy import optimize, special, interpolate
 from .virtual_collisions import collide
 import math
 import cvxpy as cp
+import sys
 
 
 @jit(nopython=True)
-def f(x, y, z, A, b, wx, wy, wz):
-    return A * np.exp(-b * ((x - wx)**2 + (y - wy)**2 + (z - wz)**2))
+def moments(beta, wx, wy, wz, ci_cx, cf_cx, ci_cy, cf_cy, ci_cz, cf_cz):
+    I0x = np.sqrt(np.pi / (4 * beta)) * (math.erf(np.sqrt(beta) * (cf_cx - wx)) - math.erf(np.sqrt(beta) * (ci_cx - wx)))
+    I0y = np.sqrt(np.pi / (4 * beta)) * (math.erf(np.sqrt(beta) * (cf_cy - wy)) - math.erf(np.sqrt(beta) * (ci_cy - wy)))
+    I0z = np.sqrt(np.pi / (4 * beta)) * (math.erf(np.sqrt(beta) * (cf_cz - wz)) - math.erf(np.sqrt(beta) * (ci_cz - wz)))
+
+    I1x = (np.exp(-beta * (ci_cx - wx)**2) - np.exp(-beta * (cf_cx - wx)**2)) / (2 * beta)
+    I1y = (np.exp(-beta * (ci_cy - wy)**2) - np.exp(-beta * (cf_cy - wy)**2)) / (2 * beta)
+    I1z = (np.exp(-beta * (ci_cz - wz)**2) - np.exp(-beta * (cf_cz - wz)**2)) / (2 * beta)
+
+    I2x = -np.sqrt(np.pi) / (2 * np.sqrt(beta)) * \
+        ((np.exp(-beta * (cf_cx - wx)**2) * (cf_cx - wx))/np.sqrt(np.pi * beta) - (np.exp(-beta * (ci_cx - wx)**2) * (ci_cx - wx))/np.sqrt(np.pi * beta)) + \
+            np.sqrt(np.pi)/(4 * np.sqrt(beta**3)) * (math.erf(np.sqrt(beta) * (cf_cx - wx)) - math.erf(np.sqrt(beta) * (ci_cx - wx)))
+    I2y = -np.sqrt(np.pi) / (2 * np.sqrt(beta)) * \
+        ((np.exp(-beta * (cf_cy - wy)**2) * (cf_cy - wy))/np.sqrt(np.pi * beta) - (np.exp(-beta * (ci_cy - wy)**2) * (ci_cy - wy))/np.sqrt(np.pi * beta)) + \
+            np.sqrt(np.pi)/(4 * np.sqrt(beta**3)) * (math.erf(np.sqrt(beta) * (cf_cy - wy)) - math.erf(np.sqrt(beta) * (ci_cy - wy)))
+    I2z = -np.sqrt(np.pi) / (2 * np.sqrt(beta)) * \
+        ((np.exp(-beta * (cf_cz - wz)**2) * (cf_cz - wz))/np.sqrt(np.pi * beta) - (np.exp(-beta * (ci_cz - wz)**2) * (ci_cz - wz))/np.sqrt(np.pi * beta)) + \
+            np.sqrt(np.pi)/(4 * np.sqrt(beta**3)) * (math.erf(np.sqrt(beta) * (cf_cz - wz)) - math.erf(np.sqrt(beta) * (ci_cz - wz)))
+
+    return [(I1x + wx*I0x) / I0x, (I1y + wy*I0y) / I0y, (I1z + wz*I0z) / I0z, \
+            (I2x + 2 * wx * I1x + wx**2 * I0x) / I0x + (I2y + 2 * wy * I1y + wy**2 * I0y) / I0y + (I2z + 2 * wz * I1z + wz**2 * I0z) / I0z]
 
 def moment_eq(x, ux, uy, uz, e, ci_cx, cf_cx, ci_cy, cf_cy, ci_cz, cf_cz):
     """
@@ -45,7 +65,6 @@ def moment_eq(x, ux, uy, uz, e, ci_cx, cf_cx, ci_cy, cf_cy, ci_cz, cf_cz):
     return [(I1x + x[1] * I0x) / I0x - ux, (I1y + x[2] * I0y) / I0y - uy, (I1z + x[3] * I0z) / I0z - uz, \
             (I2x + 2 * x[1] * I1x + x[1]**2 * I0x) / (I0x) + (I2y + 2 * x[2] * I1y + x[2]**2 * I0y) / (I0y) + (I2z + 2 * x[3] * I1z + x[3]**2 * I0z) / (I0z) - e]
 
-@jit(nopython=True)
 def initialize_maxwellian(m_hat, T_hat, v_hat, cx, cy, cz):
     A = (m_hat / (np.pi * T_hat))**1.5
     beta = m_hat / T_hat
@@ -53,47 +72,58 @@ def initialize_maxwellian(m_hat, T_hat, v_hat, cx, cy, cz):
 
     return dist
 
-@jit(nopython=True)
 def calc_moment(f, n, cx, cy, cz, dcx, dcy, dcz):
     mu = np.zeros(5)
 
-    tmp1 = np.trapz(np.trapz(n * f, dx=dcz), dx=dcy)
-    mu[0] = np.trapz(tmp1, dx=dcx)
+    mu[0] = np.trapz(np.trapz(np.trapz(n * f, dx=dcz), dx=dcy), dx=dcx)
 
-    uk = cx * n * f
-    mu[1] = np.trapz(np.trapz(np.trapz(uk, dx=dcz), dx=dcy), dx=dcx)
+    mu[1] = np.trapz(np.trapz(np.trapz(cx * n * f, dx=dcz), dx=dcy), dx=dcx)
+    mu[2] = np.trapz(np.trapz(np.trapz(cy * n * f, dx=dcz), dx=dcy), dx=dcx)
+    mu[3] = np.trapz(np.trapz(np.trapz(cz * n * f, dx=dcz), dx=dcy), dx=dcx)
 
-    uk = cy * n * f
-    mu[2] = np.trapz(np.trapz(np.trapz(uk, dx=dcz), dx=dcy), dx=dcx)
-
-    uk = cz * n * f
-    mu[3] = np.trapz(np.trapz(np.trapz(uk, dx=dcz), dx=dcy), dx=dcx)
-
-    c2 = cx**2 + cy**2 + cz**2
-    ek = c2 * n * f
-    mu[4] = np.trapz(np.trapz(np.trapz(ek, dx=dcz), dx=dcy), dx=dcx)
+    mu[4] = np.trapz(np.trapz(np.trapz((cx**2 + cy**2 + cz**2) * n * f, dx=dcz), dx=dcy), dx=dcx)
 
     return mu
 
-@jit(nopython=True)
-def ic(cx, cy, cz, dcx, dcy, dcz, n_val, u_val, T_val, numCx, numCy, numCz, numXj, numGroups, group_bounds):
+def ic(cx, cy, cz, dcx, dcy, dcz, n_val, u_val, T_val, numCx, numCy, numCz, numXj, num_groups, group_bounds):
     f = np.zeros((numXj, numCx, numCy, numCz))
-    U0 = np.zeros((numXj, numGroups, 5))
+    U0 = np.zeros((numXj, num_groups, 5))
 
     for point in range(0, numXj):
         m_hat = 1.0
         f[point] = initialize_maxwellian(m_hat, T_val[point], u_val[point], cx, cy, cz)
 
-        for i in range(0, numGroups):
-            lbound = group_bounds[i][0]
-            ubound = group_bounds[i][1]
+        for i in range(0, num_groups):
+            lb_cx = group_bounds[i, 0, 0]
+            ub_cx = group_bounds[i, 0, 1]
+            lb_cy = group_bounds[i, 1, 0]
+            ub_cy = group_bounds[i, 1, 1]
+            lb_cz = group_bounds[i, 2, 0]
+            ub_cz = group_bounds[i, 2, 1]
 
-            U0[point, i] = calc_moment(f[point, lbound:ubound, :, :], n_val[point], \
-            cx[lbound:ubound, :, :], cy[lbound:ubound, :, :], cz[lbound:ubound, :, :], dcx, dcy, dcz)
+            U0[point, i] = calc_moment(f[point, lb_cx:ub_cx, lb_cy:ub_cy, lb_cz:ub_cz], n_val[point], \
+                cx[lb_cx:ub_cx, lb_cy:ub_cy, lb_cz:ub_cz], cy[lb_cx:ub_cx, lb_cy:ub_cy, lb_cz:ub_cz], cz[lb_cx:ub_cx, lb_cy:ub_cy, lb_cz:ub_cz], dcx, dcy, dcz)
 
     return (U0, f)
 
-def invert(U_list, numXj, numGroups, group_bounds, input_list, output_list, input_list2, output_list2, input_list1, output_list1):
+@jit(nopython=True)
+def lookup_table(b_range, wx_range, wy_range, wz_range, ci_cx, cf_cx, ci_cy, cf_cy, ci_cz, cf_cz):
+    list1 = []
+    list2 = []
+
+    for b in b_range:
+        for wx in wx_range:
+            for wy in wy_range:
+                for wz in wz_range:
+                    ux, uy, uz, e = moments(b, wx, wy, wz, ci_cx, cf_cx, ci_cy, cf_cy, ci_cz, cf_cz)
+
+                    if np.all(np.isfinite(np.array([ux, uy, uz, e]))):
+                        list1.append([b, wx, wy, wz])
+                        list2.append([ux, uy, uz, e])
+
+    return np.array(list1), np.array(list2)
+
+def invert(U_list, numXj, numGroups, bounds_list, interpolater_list):
     Ak = np.zeros((numXj, numGroups))
     bk = np.zeros((numXj, numGroups))
     wxk = np.zeros((numXj, numGroups))
@@ -109,41 +139,21 @@ def invert(U_list, numXj, numGroups, group_bounds, input_list, output_list, inpu
                 uz = U_list[point, i, 3]
                 e = U_list[point, i, 4]
 
-                ci_cx = group_bounds['ci_cx'][i]
-                cf_cx = group_bounds['cf_cx'][i]
-                ci_cy = group_bounds['ci_cy'][0]
-                cf_cy = group_bounds['cf_cy'][0]
-                ci_cz = group_bounds['ci_cz'][0]
-                cf_cz = group_bounds['cf_cz'][0]
+                ci_cx = bounds_list[i, 0]
+                cf_cx = bounds_list[i, 1]
+                ci_cy = bounds_list[i, 2]
+                cf_cy = bounds_list[i, 3]
+                ci_cz = bounds_list[i, 4]
+                cf_cz = bounds_list[i, 5]
 
                 target_point = np.array([ux / n, uy / n, uz / n, e / n])
-                if i == 1:
-                    interp = interpolate.griddata(
-                                points=output_list,
-                                values=input_list,
-                                xi=target_point.reshape(1, -1),
-                                method='nearest'
-                            )
-                elif i == 2:
-                    interp = interpolate.griddata(
-                                points=output_list2,
-                                values=input_list2,
-                                xi=target_point.reshape(1, -1),
-                                method='nearest'
-                            )
-                else:
-                    interp = interpolate.griddata(
-                                points=output_list1,
-                                values=input_list1,
-                                xi=target_point.reshape(1, -1),
-                                method='nearest'
-                            )
-                # print(interp[0])
-                sol = optimize.least_squares(moment_eq, interp[0], args=(ux / n, uy / n, \
+                initial_guess = interpolater_list[i](target_point)[0]
+                sol = optimize.least_squares(moment_eq, initial_guess, args=(ux / n, uy / n, \
                                             uz / n, e / n, ci_cx, cf_cx, ci_cy, cf_cy, ci_cz, cf_cz), \
-                                                bounds=([0.0, -20, -20, -20], [10.0, 20, 20, 20]), method='trf', loss='soft_l1')
+                                                bounds=([0.0, -20, -20, -20], [100.0, 20, 20, 20]), method='trf', loss='soft_l1')
                 if np.linalg.norm(sol.fun) > 1e-6:
                     print('residual:', np.linalg.norm(sol.fun), point, i)
+                    print(n, ux / n, uy / n, uz / n, e / n, ci_cx, cf_cx, ci_cy, cf_cy, ci_cz, cf_cz, initial_guess)
 
                 if sol.success:
                     b = sol.x[0]
@@ -151,9 +161,9 @@ def invert(U_list, numXj, numGroups, group_bounds, input_list, output_list, inpu
                     wy = sol.x[2]
                     wz = sol.x[3]
 
-                I0x = np.sqrt(np.pi / (4 * b)) * (special.erf(np.sqrt(b) * (group_bounds['cf_cx'][i] - wx)) - special.erf(np.sqrt(b) * (group_bounds['ci_cx'][i] - wx)))
-                I0y = np.sqrt(np.pi / (4 * b)) * (special.erf(np.sqrt(b) * (group_bounds['cf_cy'][0] - wy)) - special.erf(np.sqrt(b) * (group_bounds['ci_cy'][0] - wy)))
-                I0z = np.sqrt(np.pi / (4 * b)) * (special.erf(np.sqrt(b) * (group_bounds['cf_cz'][0] - wz)) - special.erf(np.sqrt(b) * (group_bounds['ci_cz'][0] - wz)))
+                I0x = np.sqrt(np.pi / (4 * b)) * (special.erf(np.sqrt(b) * (bounds_list[i, 1] - wx)) - special.erf(np.sqrt(b) * (bounds_list[i, 0] - wx)))
+                I0y = np.sqrt(np.pi / (4 * b)) * (special.erf(np.sqrt(b) * (bounds_list[i, 3] - wy)) - special.erf(np.sqrt(b) * (bounds_list[i, 2] - wy)))
+                I0z = np.sqrt(np.pi / (4 * b)) * (special.erf(np.sqrt(b) * (bounds_list[i, 5] - wz)) - special.erf(np.sqrt(b) * (bounds_list[i, 4] - wz)))
                 A = n / (I0x * I0y * I0z)
 
                 Ak[point, i] = A
@@ -164,8 +174,7 @@ def invert(U_list, numXj, numGroups, group_bounds, input_list, output_list, inpu
 
     return Ak, bk, wxk, wyk, wzk
 
-# @jit(nopython=True)
-def calc_integral(bk, wxk, wyk, wzk, group_bounds, numXj, numGroups):
+def calc_integral(bk, wxk, wyk, wzk, bounds_list, numXj, numGroups):
     I0x, I0y, I0z = np.zeros((numXj, numGroups)), np.zeros((numXj, numGroups)), np.zeros((numXj, numGroups))
     I1x, I1y, I1z = np.zeros((numXj, numGroups)), np.zeros((numXj, numGroups)), np.zeros((numXj, numGroups))
     I2x, I2y, I2z = np.zeros((numXj, numGroups)), np.zeros((numXj, numGroups)), np.zeros((numXj, numGroups))
@@ -179,12 +188,12 @@ def calc_integral(bk, wxk, wyk, wzk, group_bounds, numXj, numGroups):
                 wy = wyk[point, i]
                 wz = wzk[point, i]
 
-                ci_cx = group_bounds['ci_cx'][i]
-                cf_cx = group_bounds['cf_cx'][i]
-                ci_cy = group_bounds['ci_cy'][0]
-                cf_cy = group_bounds['cf_cy'][0]
-                ci_cz = group_bounds['ci_cz'][0]
-                cf_cz = group_bounds['cf_cz'][0]
+                ci_cx = bounds_list[i, 0]
+                cf_cx = bounds_list[i, 1]
+                ci_cy = bounds_list[i, 2]
+                cf_cy = bounds_list[i, 3]
+                ci_cz = bounds_list[i, 4]
+                cf_cz = bounds_list[i, 5]
 
                 I0x[point, i] = np.sqrt(np.pi / (4 * b)) * (special.erf(np.sqrt(b) * (cf_cx - wx)) - special.erf(np.sqrt(b) * (ci_cx - wx)))
                 I0y[point, i] = np.sqrt(np.pi / (4 * b)) * (special.erf(np.sqrt(b) * (cf_cy - wy)) - special.erf(np.sqrt(b) * (ci_cy - wy)))
@@ -230,7 +239,6 @@ def calc_integral(bk, wxk, wyk, wzk, group_bounds, numXj, numGroups):
         
     return [I0x, I0y, I0z, I1x, I1y, I1z, I2x, I2y, I2z, I3x, I3y, I3z]
 
-@jit(nopython=True)
 def calc_flux(Ak, bk, wxk, wyk, wzk, I0x, I0y, I0z, I1x, I1y, I1z, I2x, I2y, I2z, I3x, I3y, I3z, numXj, numGroups):
     F = np.zeros((numXj, numGroups, 5))
 
@@ -248,20 +256,32 @@ def calc_flux(Ak, bk, wxk, wyk, wzk, I0x, I0y, I0z, I1x, I1y, I1z, I2x, I2y, I2z
                 # F2y = A * (I1x[point, i] + wx * I0x[point, is]) * (I1y[point, i] + wy * I0y[point, i]) * I0z[point, i]
                 F3 = A * ((I3x[point, i] + I0x[point, i] * wx**3 + 3 * I1x[point, i] * wx**2 + 3 * I2x[point, i] * wx) * I0y[point, i] * I0z[point, i] \
                      + (I2y[point, i] + 2 * wy * I1y[point, i] + wy**2 * I0y[point, i]) * (I1x[point, i] + wx * I0x[point, i]) * I0z[point, i] + \
-                        (I2z[point, i] + 2 * wz * I1z[point, i] + wz**2 + I0z[point, i]) * (I1x[point, i] + wx * I0x[point, i]) * I0y[point, i])
+                        (I2z[point, i] + 2 * wz * I1z[point, i] + wz**2 * I0z[point, i]) * (I1x[point, i] + wx * I0x[point, i]) * I0y[point, i])
+
                 F[point, i] = np.array([F1, F2x, 0.0, 0.0, F3])
             else:
                 F[point, i] = np.array([0.0, 0.0, 0.0, 0.0, 0.0])
 
     return F
 
-@jit(nopython=True)
-def RK_LF(U_list, F_list, numXj, numGroups, dx, delta_t):
-    k = np.zeros((numXj, numGroups, 5))
+def calc_flux_int(weights, masks, dx, dy, dz, cx, cy, cz, cx_vec, cy_vec, cz_vec):
+    F = np.zeros(5)
+
+    for i in range(0, len(masks)):
+        shape_weights = np.reshape(weights[masks[i]] / (dx*dy*dz), (8, 8, 8))
+        F[0] = np.trapezoid(np.trapezoid(np.trapezoid(cx * shape_weights, cz_vec, axis=2), cy_vec, axis=1), cx_vec, axis=0)
+        F[1] = np.trapezoid(np.trapezoid(np.trapezoid(cx**2 * shape_weights, cz_vec, axis=2), cy_vec, axis=1), cx_vec, axis=0)
+        ccTc = cx**3 + cy**2 * cx + cz**2 * cx
+        F[2] = np.trapezoid(np.trapezoid(np.trapezoid(ccTc * shape_weights, cz_vec, axis=2), cy_vec, axis=1), cx_vec, axis=0)
+
+    return F
+
+def RK_LF(U_list, F_list, numXj, n_groups, dx, delta_t):
+    k = np.zeros((numXj, n_groups, 5))
 
     p = np.arange(1, numXj - 1, 1)
 
-    for i in range(0, numGroups):
+    for i in range(0, n_groups):
         # Lax-Freidrichs intercell flux.
         f_left = 0.5 * (F_list[p - 1, i] + F_list[p, i]) + dx / (2 * delta_t) * (U_list[p - 1, i] - U_list[p, i])
         f_right = 0.5 * (F_list[p, i] + F_list[p + 1, i]) + dx / (2 * delta_t) * (U_list[p, i] - U_list[p + 1, i])
@@ -280,7 +300,7 @@ def generate_convex_helper(mu, x_sample, y_sample, z_sample, ci_cx, cf_cx, ci_cy
 
     num_sample_group = len(x_sample_slice)
 
-    if mu[0] < 1e-2: # wonder what a good threshold is.
+    if mu[0] < 1e-4: # wonder what a good threshold is.
         A = np.zeros((5, num_sample_group))
         b = np.zeros(5)
         A[0, :] = 1
@@ -308,24 +328,27 @@ def generate_convex_helper(mu, x_sample, y_sample, z_sample, ci_cx, cf_cx, ci_cy
                     cp.sum(cp.multiply(y_sample_slice, x)) == mu[2], cp.sum(cp.multiply(z_sample_slice, x)) == mu[3], \
                     cp.sum(cp.multiply(x_sample_slice**2 + y_sample_slice**2 + z_sample_slice**2, x)) == mu[4]]
         prob = cp.Problem(obj, constraints)
-        prob.solve()
+        prob.solve(verbose=True)
+        # if prob.status == cp.OPTIMAL_INACCURATE:
+            # prob.solve(verbose=True)  
+            # sys.exit()
         
         weights = x.value
 
     return num_sample_group, weights, mask
 
-def generate_regular_samples(n_samples, x_sample, y_sample, z_sample, mu, GROUP_PARAMS, num_groups):
+def generate_regular_samples(n_samples, x_sample, y_sample, z_sample, mu, bounds_list, num_groups):
     weights = np.zeros(n_samples)
     num_sample_group = np.zeros(num_groups)
 
     for i in range(num_groups):
-        ci_cx = GROUP_PARAMS['ci_cx'][i]
-        cf_cx = GROUP_PARAMS['cf_cx'][i]
-        ci_cy = GROUP_PARAMS['ci_cy'][0]
-        cf_cy = GROUP_PARAMS['cf_cy'][0]
-        ci_cz = GROUP_PARAMS['ci_cz'][0]
-        cf_cz = GROUP_PARAMS['cf_cz'][0]
-        
+        ci_cx = bounds_list[i, 0]
+        cf_cx = bounds_list[i, 1]
+        ci_cy = bounds_list[i, 2]
+        cf_cy = bounds_list[i, 3]
+        ci_cz = bounds_list[i, 4]
+        cf_cz = bounds_list[i, 5]
+
         n_group_sample, group_weights, mask = generate_convex_helper(mu[i], x_sample, y_sample, z_sample, \
                                                                                        ci_cx, cf_cx, ci_cy, cf_cy, ci_cz, cf_cz)
 

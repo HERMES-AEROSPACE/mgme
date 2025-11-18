@@ -69,7 +69,7 @@ def calculate_volume_elements(x_centers, y_centers, z_centers):
     dx = get_spacings(x_centers, [])
     dy = get_spacings(y_centers, []) 
     dz = get_spacings(z_centers, [])
-    print(dx)
+    # print(dx, dy, dz)
     
     # Create 3D mesh of volume elements
     DX, DY, DZ = np.meshgrid(dx, dy, dz, indexing='ij')
@@ -78,15 +78,20 @@ def calculate_volume_elements(x_centers, y_centers, z_centers):
     return volume_elements.flatten()
 
 def generate_grid(n_samples_x, n_samples_y, n_samples_z):
-    # sample_loc_x_neg = np.append(np.linspace(-3.0, -1.01, 6), np.linspace(-0.95, 0.0, 6, endpoint=False))
-    # sample_loc_x_pos = -1 * np.append(np.linspace(-0.95, 0.0, 6, endpoint=False)[::-1], np.linspace(-3.0, -1.01, 6)[::-1])
+    def gen_group_sample(a, b, n):
+        return np.linspace(a, b, n, endpoint=False) + (b - a) / (2 * n)
+    
+    g1 = gen_group_sample(-3.3, 0.4666666666666668, 8)
+    # g2 = gen_group_sample(0, 2.0999999999999996, 6)
+    g3 = gen_group_sample(0.4666666666666668, 4.5, 8)
+    g4 = gen_group_sample(-4, 0, 8)
 
     # sample_loc_x = np.append(sample_loc_x_neg, sample_loc_x_pos)
-    # 
-    sample_loc_x = np.append(np.linspace(-20, -1e-5, 8), np.append(np.linspace(1e-5, 6.65, 8), np.linspace(6.67, 20, 8))) #np.append(np.linspace(-3, -1.1, 6), np.append(np.linspace(-0.9, 0.9, 14), np.linspace(1.1, 3, 6)))
-    sample_loc_y = np.linspace(-14, 14, 16)
+    # np.append(np.linspace(-20, -1e-5, 8), np.append(np.linspace(1e-5, 6.65, 8), np.linspace(6.67, 20, 8))) 
+    sample_loc_x = np.concatenate([g1, g3])
+    sample_loc_y = np.concatenate([g4, -g4[::-1]])
     sample_loc_z = sample_loc_y
-    # print(sample_loc_x)
+    print(sample_loc_x)
     
     [xgrid, ygrid, zgrid] = np.meshgrid(sample_loc_x, sample_loc_y, sample_loc_z, indexing='ij')
 
