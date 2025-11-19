@@ -167,20 +167,22 @@ def run_simulation():
 
         k1 = RK_LF(U_list, F_list, numXj, num_groups, dx, dt)
 
-        # for i in range(1, numXj - 1):
-        #     weights, num_group_sample = generate_regular_samples(n_samples, x_sample, y_sample, z_sample, \
-        #         U_list[i], bounds_list, num_groups)
+        # res2 = Parallel(n_jobs=10)(
+        #     delayed(process_iter)(i, n_samples, x_sample, y_sample, z_sample, U_list[i] + k1, bounds_list, num_groups, COLLISION_PARAMS, VELOCITY_SPACE, cx_loc, cy_loc, cz_loc, dt) 
+        #     for i in range(0, numXj)
+        # )
 
-        #     group_n, group_px, group_py, group_pz, group_e = \
-        #         coll_source(x_sample, y_sample, z_sample, weights, num_group_sample, num_groups, n_samples, bounds_list, COLLISION_PARAMS)
-            
-        #     k1_c[i, :, 0] = group_n * dt
-        #     k1_c[i, :, 1] = group_px * dt
-        #     k1_c[i, :, 2] = group_py * dt
-        #     k1_c[i, :, 3] = group_pz * dt
-        #     k1_c[i, :, 4] = group_e * dt
+        # for i, n, px, py, pz, e, flux in res:
+        #     F_list[i] = flux
+        #     k1_c[i, :, 0] = n
+        #     k1_c[i, :, 1] = px
+        #     k1_c[i, :, 2] = py
+        #     k1_c[i, :, 3] = pz
+        #     k1_c[i, :, 4] = e
 
-        dU = 1.0 * (k1_c + k1)
+        # k2 = RK_LF(U_list, F_list, numXj, num_groups, dx, dt)
+
+        dU = 0.5 * (k1 + k2 + k1_c + k2_c)
         U_list += dU
 
         # if t % 10 == 0:

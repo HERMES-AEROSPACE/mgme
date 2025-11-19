@@ -12,7 +12,7 @@ VELOCITY_SPACE = {
 }
 
 PHYS_SPACE = {
-    'num_xj': 471,
+    'num_xj': 401,
     'xj_range': [-14, 10]
 }
 
