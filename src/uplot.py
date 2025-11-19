@@ -4,7 +4,7 @@ from matplotlib import pyplot as plt
 
 # data = np.load('simulation_data/U20.npy')
 data1 = np.load('simulation_data/U0.npy')
-data2 = np.load('simulation_data/U12.npy')
+data2 = np.load('simulation_data/U565.npy')
 dsmc = np.loadtxt('src/dsmc.txt')
 
 # plt.plot([1, 2, 4, 8, 14], [65.3/65.3, 65.3/37.7, 65.3/24.8, 65.3/22.1, 65.3/19.9], '^-', color='black')
@@ -12,7 +12,7 @@ dsmc = np.loadtxt('src/dsmc.txt')
 # plt.ylabel('Relative speedup', fontsize=16)
 # plt.show()
 
-x = np.linspace(-14, 10, 201)
+x = np.linspace(-14, 10, 471)
 x_scale = (x - x.min()) / (x.max() - x.min())
 
 # y = np.sum(data, axis=1)[:, 0]
@@ -56,5 +56,5 @@ ax2.plot(x_scale, (np.sum(data2, axis=1)[:, 0] - np.sum(data1, axis=1)[:, 0]), c
 ax2.set_xlabel(r'$X_j$', fontsize=20)
 ax2.set_ylabel(r'Density difference', fontsize=20)
 ax2.tick_params(axis='both',labelsize=16)
-plt.tight_layout()
+plt.tight_layout() 
 plt.show()

@@ -12,7 +12,7 @@ VELOCITY_SPACE = {
 }
 
 PHYS_SPACE = {
-    'num_xj': 201,
+    'num_xj': 471,
     'xj_range': [-14, 10]
 }
 
@@ -54,7 +54,7 @@ AMR = {
 
 # Collision parameters
 COLLISION_PARAMS = {
-    'n_coll': 100000,
+    'n_coll': 200000,
     'n_t': 100
 }
 
@@ -63,9 +63,9 @@ LOOKUP_TABLE = {
 }
 
 SAMPLING_PARAMS = {
-    'n_samples_x': 20,
-    'n_samples_y': 16,
-    'n_samples_z': 16
+    'n_samples_x': 19,
+    'n_samples_y': 14,
+    'n_samples_z': 14
 }
 
 CONSTANTS = {

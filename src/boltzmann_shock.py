@@ -78,11 +78,11 @@ def run_simulation():
     cf_combo = np.array(list(itertools.product(cf_cx, cf_cy, cf_cz)))
     num_groups = combinations.shape[0]
 
-    restart = 1
+    restart = 0
     U0, _ = ic(cx, cy, cz, dcx, dcy, dcz, n_val, u_val, T_val, VELOCITY_SPACE['num_cx'], VELOCITY_SPACE['num_cy'], VELOCITY_SPACE['num_cz'], \
         numXj, num_groups, combinations)
     if restart:
-        data = np.load('simulation_data/U7.npy')
+        data = np.load('simulation_data/U666.npy')
         print('Restarting from...')
         U_list = data
     else:
@@ -115,8 +115,8 @@ def run_simulation():
     x_sample, y_sample, z_sample, cx_loc, cy_loc, cz_loc = generate_grid(SAMPLING_PARAMS['n_samples_x'], SAMPLING_PARAMS['n_samples_y'], SAMPLING_PARAMS['n_samples_z'])
 
     print("-------------------------BEGIN SIMULATION-------------------------")
-    t_end = 30.0
-    dt = 0.001
+    t_end = 10.0
+    dt = 0.005
     profiler = cProfile.Profile()
     for t in range(0, int(np.ceil(int(t_end / dt) / 100) * 100) + 1):
         # Inversion and calculate flux. 
@@ -139,21 +139,21 @@ def run_simulation():
         k1_c = np.zeros((numXj, num_groups, 5))
         k2_c = np.zeros((numXj, num_groups, 5))
  
-        def process_iter(i, n_samples, x_sample, y_sample, z_sample, U_i, bounds_list, num_groups, COLLISION_PARAMS, dt):
+        def process_iter(i, n_samples, x_sample, y_sample, z_sample, U_i, bounds_list, num_groups, COLLISION_PARAMS, VELOCITY_SPACE, cx_loc, cy_loc, cz_loc, dt):
             weights, num_group_sample, masks = generate_regular_samples(
-                n_samples, x_sample, y_sample, z_sample, U_i, bounds_list, num_groups
+                i, n_samples, x_sample, y_sample, z_sample, U_i, bounds_list, num_groups
             )
 
             flux = calc_flux_int(num_groups, weights, masks, bounds_list, cx_loc, cy_loc, cz_loc)
             
             group_n, group_px, group_py, group_pz, group_e = coll_source(
                 x_sample, y_sample, z_sample, weights, num_group_sample, 
-                num_groups, n_samples, bounds_list, COLLISION_PARAMS
+                num_groups, n_samples, bounds_list, COLLISION_PARAMS, VELOCITY_SPACE
             )
             return i, group_n * dt, group_px * dt, group_py * dt, group_pz * dt, group_e * dt, flux
 
-        res = Parallel(n_jobs=8)(
-            delayed(process_iter)(i, n_samples, x_sample, y_sample, z_sample, U_list[i], bounds_list, num_groups, COLLISION_PARAMS, dt) 
+        res = Parallel(n_jobs=10)(
+            delayed(process_iter)(i, n_samples, x_sample, y_sample, z_sample, U_list[i], bounds_list, num_groups, COLLISION_PARAMS, VELOCITY_SPACE, cx_loc, cy_loc, cz_loc, dt) 
             for i in range(0, numXj)
         )
 
@@ -189,7 +189,7 @@ def run_simulation():
         with open(f1, 'wb') as file:
             np.save(file, U_list)
 
-        print(t * dt, t)
+        print(t * dt,  t)
 
 if __name__ == '__main__':
     run_simulation()

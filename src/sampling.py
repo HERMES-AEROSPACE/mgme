@@ -81,10 +81,10 @@ def generate_grid(n_samples_x, n_samples_y, n_samples_z):
     def gen_group_sample(a, b, n):
         return np.linspace(a, b, n, endpoint=False) + (b - a) / (2 * n)
     
-    g1 = gen_group_sample(-3.3, 0.4666666666666668, 10)
+    g1 = gen_group_sample(-3.5, 0.4666666666666668, 10)
     # g2 = gen_group_sample(0, 2.0999999999999996, 6)
-    g3 = gen_group_sample(0.4666666666666668, 4.5, 10)
-    g4 = gen_group_sample(-4, 0, 8)
+    g3 = gen_group_sample(0.4666666666666668, 4.5, 9)
+    g4 = gen_group_sample(-4, 0, 7)
 
     # sample_loc_x = np.append(sample_loc_x_neg, sample_loc_x_pos)
     # np.append(np.linspace(-20, -1e-5, 8), np.append(np.linspace(1e-5, 6.65, 8), np.linspace(6.67, 20, 8))) 
