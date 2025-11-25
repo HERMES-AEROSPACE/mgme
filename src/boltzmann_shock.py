@@ -138,7 +138,9 @@ def run_simulation():
         k2 = np.zeros((numXj, num_groups, 5))
         k1_c = np.zeros((numXj, num_groups, 5))
         k2_c = np.zeros((numXj, num_groups, 5))
- 
+
+        # To do RK2 integration of the flux and collision term, need to rewrite this so it takes two different U_i values
+        # However, the first iteration of the stepping uses the same U_i.
         def process_iter(i, n_samples, x_sample, y_sample, z_sample, U_i, bounds_list, num_groups, COLLISION_PARAMS, VELOCITY_SPACE, cx_loc, cy_loc, cz_loc, dt):
             weights, num_group_sample, masks = generate_regular_samples(
                 i, n_samples, x_sample, y_sample, z_sample, U_i, bounds_list, num_groups
