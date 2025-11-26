@@ -72,6 +72,7 @@ def initialize_maxwellian(m_hat, T_hat, v_hat, cx, cy, cz):
 
     return dist
 
+# TODO: check if dx works the same as cx_vec
 def calc_moment(f, n, cx, cy, cz, dcx, dcy, dcz):
     mu = np.zeros(5)
 
@@ -264,6 +265,7 @@ def calc_flux(Ak, bk, wxk, wyk, wzk, I0x, I0y, I0z, I1x, I1y, I1z, I2x, I2y, I2z
 
     return F
 
+@jit(nopython=True)
 def calc_flux_int(num_groups, weights, masks, bounds_list, cx_loc, cy_loc, cz_loc):
     F = np.zeros((num_groups, 5))
 
@@ -285,10 +287,21 @@ def calc_flux_int(num_groups, weights, masks, bounds_list, cx_loc, cy_loc, cz_lo
 
         shape_weights = np.reshape(weights[mask] / (dx*dy*dz), (cx_vec.size, cy_vec.size, cz_vec.size))
 
-        # Extend ci_vec and shape_weights to include the extrapolated points. 
-        cx_vec_ext = np.concatenate([[cx_vec[0] - dx / 2], cx_vec, [cx_vec[-1] + dx / 2]])
-        cy_vec_ext = np.concatenate([[cy_vec[0] - dy / 2], cy_vec, [cy_vec[-1] + dy / 2]])
-        cz_vec_ext = np.concatenate([[cz_vec[0] - dz / 2], cz_vec, [cz_vec[-1] + dz / 2]])
+        # Extend ci_vec and shape_weights to include the extrapolated points.
+        cx_vec_ext = np.empty(len(cx_vec) + 2)
+        cy_vec_ext = np.empty(len(cy_vec) + 2)
+        cz_vec_ext = np.empty(len(cz_vec) + 2)
+
+        cx_vec_ext[0] = cx_vec[0] - dx / 2
+        cx_vec_ext[1:-1] = cx_vec
+        cx_vec_ext[-1] = cx_vec[-1] + dx / 2
+        cy_vec_ext[0] = cy_vec[0] - dy / 2
+        cy_vec_ext[1:-1] = cy_vec
+        cy_vec_ext[-1] = cy_vec[-1] + dy / 2
+        cz_vec_ext[0] = cz_vec[0] - dz / 2
+        cz_vec_ext[1:-1] = cz_vec
+        cz_vec_ext[-1] = cz_vec[-1] + dz / 2
+
         nx_ext, ny_ext, nz_ext = len(cx_vec_ext), len(cy_vec_ext), len(cz_vec_ext)
         weights_ext = np.zeros((nx_ext, ny_ext, nz_ext))
 
@@ -303,12 +316,24 @@ def calc_flux_int(num_groups, weights, masks, bounds_list, cx_loc, cy_loc, cz_lo
         weights_ext[:, :, 0] = 2 * weights_ext[:, :, 1] - weights_ext[:, :, 2]      # z_min face
         weights_ext[:, :, -1] = 2 * weights_ext[:, :, -2] - weights_ext[:, :, -3]   # z_max face
 
-        cx, cy, cz = np.meshgrid(cx_vec_ext, cy_vec_ext, cz_vec_ext, indexing='ij')
+        # Create meshgrid. (Friendly with Numba).
+        cx = np.empty((nx_ext, ny_ext, nz_ext))
+        cy = np.empty((nx_ext, ny_ext, nz_ext))
+        cz = np.empty((nx_ext, ny_ext, nz_ext))
+        for x in range(nx_ext):
+            cx[x, :, :] = cx_vec_ext[x]
+
+        for y in range(ny_ext):
+            cy[:, y, :] = cy_vec_ext[y]
         
-        F[i, 0] = np.trapezoid(np.trapezoid(np.trapezoid(cx * weights_ext, cz_vec_ext, axis=2), cy_vec_ext, axis=1), cx_vec_ext, axis=0)
-        F[i, 1] = np.trapezoid(np.trapezoid(np.trapezoid(cx**2 * weights_ext, cz_vec_ext, axis=2), cy_vec_ext, axis=1), cx_vec_ext, axis=0)
+        for z in range(nz_ext):
+            cz[:, :, z] = cz_vec_ext[z]
+
+        # Integrate to get flux. 
+        F[i, 0] = np.trapezoid(np.trapezoid(np.trapezoid(cx * weights_ext, cz_vec_ext), cy_vec_ext), cx_vec_ext)
+        F[i, 1] = np.trapezoid(np.trapezoid(np.trapezoid(cx**2 * weights_ext, cz_vec_ext), cy_vec_ext), cx_vec_ext)
         ccTc = cx**3 + cy**2 * cx + cz**2 * cx
-        F[i, 4] = np.trapezoid(np.trapezoid(np.trapezoid(ccTc * weights_ext, cz_vec_ext, axis=2), cy_vec_ext, axis=1), cx_vec_ext, axis=0)
+        F[i, 4] = np.trapezoid(np.trapezoid(np.trapezoid(ccTc * weights_ext, cz_vec_ext), cy_vec_ext), cx_vec_ext)
 
     return F
 

@@ -8,7 +8,7 @@ import itertools
 import cProfile, pstats
 from scipy import interpolate
 from joblib import Parallel, delayed
-import time
+import timeit, sys
 
 
 def run_simulation():
@@ -78,11 +78,11 @@ def run_simulation():
     cf_combo = np.array(list(itertools.product(cf_cx, cf_cy, cf_cz)))
     num_groups = combinations.shape[0]
 
-    restart = 0
+    restart = 1
     U0, _ = ic(cx, cy, cz, dcx, dcy, dcz, n_val, u_val, T_val, VELOCITY_SPACE['num_cx'], VELOCITY_SPACE['num_cy'], VELOCITY_SPACE['num_cz'], \
         numXj, num_groups, combinations)
     if restart:
-        data = np.load('simulation_data/U666.npy')
+        data = np.load('simulation_data/U793.npy')
         print('Restarting from...')
         U_list = data
     else:
@@ -98,6 +98,7 @@ def run_simulation():
     # plt.show()
     
     F_list = np.zeros((numXj, num_groups, 5))
+    F_list2 = np.zeros((numXj, num_groups, 5))
 
     b_range = np.logspace(-8, 1, 20, endpoint=True)
     interpolater_list = []
@@ -116,15 +117,10 @@ def run_simulation():
 
     print("-------------------------BEGIN SIMULATION-------------------------")
     t_end = 10.0
-    dt = 0.005
+    dt = 0.01
     profiler = cProfile.Profile()
     for t in range(0, int(np.ceil(int(t_end / dt) / 100) * 100) + 1):
-        # Inversion and calculate flux. 
-        # profiler.enable()
-        # profiler.disable()
-        # stats = pstats.Stats(profiler)
-        # stats.sort_stats('cumulative')
-        # stats.print_stats(20)
+        # Inversion and calculate flux.
         # Ak, bk, wxk, wyk, wzk = invert(U_list, numXj, num_groups, bounds_list, interpolater_list)
         # I0x, I0y, I0z, I1x, I1y, I1z, I2x, I2y, I2z, I3x, I3y, I3z = calc_integral(bk, wxk, wyk, wzk, bounds_list, numXj, num_groups)
         # F_list = calc_flux(Ak, bk, wxk, wyk, wzk, I0x, I0y, I0z, I1x, I1y, I1z, I2x, I2y, I2z, I3x, I3y, I3z, numXj, num_groups)
@@ -141,24 +137,42 @@ def run_simulation():
 
         # To do RK2 integration of the flux and collision term, need to rewrite this so it takes two different U_i values
         # However, the first iteration of the stepping uses the same U_i.
-        def process_iter(i, n_samples, x_sample, y_sample, z_sample, U_i, bounds_list, num_groups, COLLISION_PARAMS, VELOCITY_SPACE, cx_loc, cy_loc, cz_loc, dt):
+        def step1(i, n_samples, x_sample, y_sample, z_sample, U_i, bounds_list, num_groups, COLLISION_PARAMS, VELOCITY_SPACE, cx_loc, cy_loc, cz_loc, dt):
             weights, num_group_sample, masks = generate_regular_samples(
                 i, n_samples, x_sample, y_sample, z_sample, U_i, bounds_list, num_groups
             )
 
-            flux = calc_flux_int(num_groups, weights, masks, bounds_list, cx_loc, cy_loc, cz_loc)
-            
             group_n, group_px, group_py, group_pz, group_e = coll_source(
                 x_sample, y_sample, z_sample, weights, num_group_sample, 
                 num_groups, n_samples, bounds_list, COLLISION_PARAMS, VELOCITY_SPACE
             )
+            flux = calc_flux_int(num_groups, weights, masks, bounds_list, cx_loc, cy_loc, cz_loc)
+
             return i, group_n * dt, group_px * dt, group_py * dt, group_pz * dt, group_e * dt, flux
 
+        def step2(i, n_samples, x_sample, y_sample, z_sample, U_i_kc, U_i_k, bounds_list, num_groups, COLLISION_PARAMS, VELOCITY_SPACE, cx_loc, cy_loc, cz_loc, dt):
+            # Step the collision term forward.
+            weights, num_group_sample, _ = generate_regular_samples(
+                i, n_samples, x_sample, y_sample, z_sample, U_i_kc, bounds_list, num_groups
+            )
+            group_n, group_px, group_py, group_pz, group_e = coll_source(
+                x_sample, y_sample, z_sample, weights, num_group_sample, 
+                num_groups, n_samples, bounds_list, COLLISION_PARAMS, VELOCITY_SPACE
+            )
+
+            # Step the flux term forward.
+            weights_f, _, masks_f = generate_regular_samples(
+                i, n_samples, x_sample, y_sample, z_sample, U_i_k, bounds_list, num_groups
+            )
+            flux = calc_flux_int(num_groups, weights_f, masks_f, bounds_list, cx_loc, cy_loc, cz_loc)
+            
+            return i, group_n * dt, group_px * dt, group_py * dt, group_pz * dt, group_e * dt, flux
+
+        # Solve for the first intermediate step.
         res = Parallel(n_jobs=10)(
-            delayed(process_iter)(i, n_samples, x_sample, y_sample, z_sample, U_list[i], bounds_list, num_groups, COLLISION_PARAMS, VELOCITY_SPACE, cx_loc, cy_loc, cz_loc, dt) 
+            delayed(step1)(i, n_samples, x_sample, y_sample, z_sample, U_list[i], bounds_list, num_groups, COLLISION_PARAMS, VELOCITY_SPACE, cx_loc, cy_loc, cz_loc, dt) 
             for i in range(0, numXj)
         )
-
         for i, n, px, py, pz, e, flux in res:
             F_list[i] = flux
             k1_c[i, :, 0] = n
@@ -166,30 +180,28 @@ def run_simulation():
             k1_c[i, :, 2] = py
             k1_c[i, :, 3] = pz
             k1_c[i, :, 4] = e
-
         k1 = RK_LF(U_list, F_list, numXj, num_groups, dx, dt)
 
-        # res2 = Parallel(n_jobs=10)(
-        #     delayed(process_iter)(i, n_samples, x_sample, y_sample, z_sample, U_list[i] + k1, bounds_list, num_groups, COLLISION_PARAMS, VELOCITY_SPACE, cx_loc, cy_loc, cz_loc, dt) 
-        #     for i in range(0, numXj)
-        # )
+        # Advance to next time step.
+        res2 = Parallel(n_jobs=10)(
+            delayed(step2)(i, n_samples, x_sample, y_sample, z_sample, U_list[i] + k1_c[i], U_list[i] + k1[i], bounds_list, num_groups, COLLISION_PARAMS, VELOCITY_SPACE, cx_loc, cy_loc, cz_loc, dt) 
+            for i in range(0, numXj)
+        )
+        for i, n, px, py, pz, e, flux in res2:
+            F_list2[i] = flux
+            k2_c[i, :, 0] = n
+            k2_c[i, :, 1] = px
+            k2_c[i, :, 2] = py
+            k2_c[i, :, 3] = pz
+            k2_c[i, :, 4] = e
+        k2 = RK_LF(U_list + k1_c, F_list2, numXj, num_groups, dx, dt)
 
-        # for i, n, px, py, pz, e, flux in res:
-        #     F_list[i] = flux
-        #     k1_c[i, :, 0] = n
-        #     k1_c[i, :, 1] = px
-        #     k1_c[i, :, 2] = py
-        #     k1_c[i, :, 3] = pz
-        #     k1_c[i, :, 4] = e
-
-        # k2 = RK_LF(U_list, F_list, numXj, num_groups, dx, dt)
-
+        # Update solution.
         dU = 0.5 * (k1 + k2 + k1_c + k2_c)
         U_list += dU
 
-        # if t % 10 == 0:
+        # Save solution.
         f1 = 'simulation_data/U{}.npy'.format(t)
-
         with open(f1, 'wb') as file:
             np.save(file, U_list)
 
