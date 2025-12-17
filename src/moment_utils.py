@@ -188,7 +188,7 @@ def invert(mu, initial_guess, group_bounds=GROUP_PARAMS):
     # except RuntimeError:
     # guess = grid_search(group_bounds, mu[1] / mu[0], mu[2] / mu[0], \
     #                                         mu[3] / mu[0], mu[4] / mu[0])[0]
-    
+
     sol = optimize.least_squares(moment_eq, initial_guess, args=(mu[1] / mu[0], mu[2] / mu[0], \
                                     mu[3] / mu[0], mu[4] / mu[0], \
                                     ci_cx, cf_cx, ci_cy, cf_cy, ci_cz, cf_cz), \

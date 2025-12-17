@@ -7,6 +7,39 @@ import cvxpy as cp
 import sys
 
 
+def calculate_velocity_grid(velocity_space):
+    # Helper function to get velocity space grid
+    cx_vec = np.linspace(*velocity_space['cx_range'], velocity_space['num_cx'])
+    cy_vec = np.linspace(*velocity_space['cy_range'], velocity_space['num_cy'])
+    cz_vec = np.linspace(*velocity_space['cz_range'], velocity_space['num_cz'])
+    cx, cy, cz = np.meshgrid(cx_vec, cy_vec, cz_vec, indexing='ij')
+
+    return cx_vec, cy_vec, cz_vec, cx, cy, cz 
+
+def generate_grid(n_samples_x, n_samples_y, n_samples_z):
+    def gen_group_sample(a, b, n):
+        return np.linspace(a, b, n, endpoint=False) + (b - a) / (2 * n)
+    
+    g1 = gen_group_sample(-2.5, 0.4666666666666668, 10)
+    # g2 = gen_group_sample(0, 2.0999999999999996, 6)
+    g3 = gen_group_sample(0.4666666666666668, 4.0, 10)
+    g4 = gen_group_sample(-3.5, 3.5, 10)
+
+    # sample_loc_x = np.append(sample_loc_x_neg, sample_loc_x_pos)
+    # np.append(np.linspace(-20, -1e-5, 8), np.append(np.linspace(1e-5, 6.65, 8), np.linspace(6.67, 20, 8))) 
+    sample_loc_x = np.concatenate([g1, g3])
+    sample_loc_y = np.concatenate([g4])
+    sample_loc_z = sample_loc_y
+    print(sample_loc_x)
+    
+    [xgrid, ygrid, zgrid] = np.meshgrid(sample_loc_x, sample_loc_y, sample_loc_z, indexing='ij')
+
+    x_sample = xgrid.flatten()
+    y_sample = ygrid.flatten()
+    z_sample = zgrid.flatten()
+
+    return x_sample, y_sample, z_sample, sample_loc_x, sample_loc_y, sample_loc_z
+
 @jit(nopython=True)
 def moments(beta, wx, wy, wz, ci_cx, cf_cx, ci_cy, cf_cy, ci_cz, cf_cz):
     I0x = np.sqrt(np.pi / (4 * beta)) * (math.erf(np.sqrt(beta) * (cf_cx - wx)) - math.erf(np.sqrt(beta) * (ci_cx - wx)))
@@ -65,34 +98,33 @@ def moment_eq(x, ux, uy, uz, e, ci_cx, cf_cx, ci_cy, cf_cy, ci_cz, cf_cz):
     return [(I1x + x[1] * I0x) / I0x - ux, (I1y + x[2] * I0y) / I0y - uy, (I1z + x[3] * I0z) / I0z - uz, \
             (I2x + 2 * x[1] * I1x + x[1]**2 * I0x) / (I0x) + (I2y + 2 * x[2] * I1y + x[2]**2 * I0y) / (I0y) + (I2z + 2 * x[3] * I1z + x[3]**2 * I0z) / (I0z) - e]
 
-def initialize_maxwellian(m_hat, T_hat, v_hat, cx, cy, cz):
-    A = (m_hat / (np.pi * T_hat))**1.5
+def initialize_maxwellian(m_hat, n_hat, T_hat, v_hat, cx, cy, cz):
+    A = n_hat * (m_hat / (np.pi * T_hat))**1.5
     beta = m_hat / T_hat
     dist = A * np.exp(-beta * ((cx - v_hat)**2 + cy**2 + cz**2))
 
     return dist
 
-# TODO: check if dx works the same as cx_vec
-def calc_moment(f, n, cx, cy, cz, dcx, dcy, dcz):
+def calc_moment(f, cx, cy, cz, cx_vec, cy_vec, cz_vec):
     mu = np.zeros(5)
 
-    mu[0] = np.trapz(np.trapz(np.trapz(n * f, dx=dcz), dx=dcy), dx=dcx)
+    mu[0] = np.trapezoid(np.trapezoid(np.trapezoid(f, cz_vec), cy_vec), cx_vec)
 
-    mu[1] = np.trapz(np.trapz(np.trapz(cx * n * f, dx=dcz), dx=dcy), dx=dcx)
-    mu[2] = np.trapz(np.trapz(np.trapz(cy * n * f, dx=dcz), dx=dcy), dx=dcx)
-    mu[3] = np.trapz(np.trapz(np.trapz(cz * n * f, dx=dcz), dx=dcy), dx=dcx)
+    mu[1] = np.trapezoid(np.trapezoid(np.trapezoid(cx * f, cz_vec), cy_vec), cx_vec)
+    mu[2] = np.trapezoid(np.trapezoid(np.trapezoid(cy * f, cz_vec), cy_vec), cx_vec)
+    mu[3] = np.trapezoid(np.trapezoid(np.trapezoid(cz * f, cz_vec), cy_vec), cx_vec)
 
-    mu[4] = np.trapz(np.trapz(np.trapz((cx**2 + cy**2 + cz**2) * n * f, dx=dcz), dx=dcy), dx=dcx)
+    mu[4] = np.trapezoid(np.trapezoid(np.trapezoid((cx**2 + cy**2 + cz**2) * f, cz_vec), cy_vec), cx_vec)
 
     return mu
 
-def ic(cx, cy, cz, dcx, dcy, dcz, n_val, u_val, T_val, numCx, numCy, numCz, numXj, num_groups, group_bounds):
+def ic(cx, cy, cz, cx_vec, cy_vec, cz_vec, n_val, u_val, T_val, numCx, numCy, numCz, numXj, num_groups, group_bounds):
     f = np.zeros((numXj, numCx, numCy, numCz))
     U0 = np.zeros((numXj, num_groups, 5))
 
     for point in range(0, numXj):
         m_hat = 1.0
-        f[point] = initialize_maxwellian(m_hat, T_val[point], u_val[point], cx, cy, cz)
+        f[point] = initialize_maxwellian(m_hat, n_val[point], T_val[point], u_val[point], cx, cy, cz)
 
         for i in range(0, num_groups):
             lb_cx = group_bounds[i, 0, 0]
@@ -102,8 +134,9 @@ def ic(cx, cy, cz, dcx, dcy, dcz, n_val, u_val, T_val, numCx, numCy, numCz, numX
             lb_cz = group_bounds[i, 2, 0]
             ub_cz = group_bounds[i, 2, 1]
 
-            U0[point, i] = calc_moment(f[point, lb_cx:ub_cx, lb_cy:ub_cy, lb_cz:ub_cz], n_val[point], \
-                cx[lb_cx:ub_cx, lb_cy:ub_cy, lb_cz:ub_cz], cy[lb_cx:ub_cx, lb_cy:ub_cy, lb_cz:ub_cz], cz[lb_cx:ub_cx, lb_cy:ub_cy, lb_cz:ub_cz], dcx, dcy, dcz)
+            U0[point, i] = calc_moment(f[point, lb_cx:ub_cx, lb_cy:ub_cy, lb_cz:ub_cz], \
+                cx[lb_cx:ub_cx, lb_cy:ub_cy, lb_cz:ub_cz], cy[lb_cx:ub_cx, lb_cy:ub_cy, lb_cz:ub_cz], cz[lb_cx:ub_cx, lb_cy:ub_cy, lb_cz:ub_cz], \
+                cx_vec[lb_cx:ub_cx], cy_vec[lb_cy:ub_cy], cz_vec[lb_cz:ub_cz])
 
     return (U0, f)
 
@@ -217,6 +250,8 @@ def calc_integral(bk, wxk, wyk, wzk, bounds_list, numXj, numGroups):
                 I3x[point, i] = 1/b * I1x[point, i] + 1 / (2 * b) * ((ci_cx - wx)**2 * np.exp(-b * (ci_cx - wx)**2) - (cf_cx - wx)**2 * np.exp(-b * (cf_cx - wx)**2))
                 I3y[point, i] = 1/b * I1y[point, i] + 1 / (2 * b) * ((ci_cy - wy)**2 * np.exp(-b * (ci_cy - wy)**2) - (cf_cy - wy)**2 * np.exp(-b * (cf_cy - wy)**2))
                 I3z[point, i] = 1/b * I1z[point, i] + 1 / (2 * b) * ((ci_cz - wz)**2 * np.exp(-b * (ci_cz - wz)**2) - (cf_cz - wz)**2 * np.exp(-b * (cf_cz - wz)**2))
+
+                print(I1x * I1x)
                 # I0x[point, i] = np.sqrt(np.pi/(4 * b)) * (math.erf(np.sqrt(b) * (cf - w)) - math.erf(np.sqrt(b) * (ci - w)))
                 # I1x[point, i] = (np.exp(-b * (ci - w)**2) - np.exp(-b * (cf - w)**2))/(2 * b)
                 # I2x[point, i] = -np.sqrt(np.pi)/(2 * np.sqrt(b)) * \
@@ -337,15 +372,75 @@ def calc_flux_int(num_groups, weights, masks, bounds_list, cx_loc, cy_loc, cz_lo
 
     return F
 
-def RK_LF(U_list, F_list, numXj, n_groups, dx, delta_t):
+# Flux limiter function.
+def minmod3(a, b, c):  
+    all_positive = (a > 0) & (b > 0) & (c > 0)
+    all_negative = (a < 0) & (b < 0) & (c < 0)
+    
+    result = np.where(all_positive, np.minimum(np.minimum(a, b), c),
+            np.where(all_negative, np.maximum(np.maximum(a, b), c), 0))
+
+    return result
+
+def minmod2(a, b):
+    all_positive = (a > 0) & (b > 0)
+    all_negative = (a < 0) & (b < 0)
+    
+    result = np.where(all_positive, np.minimum(a, b),
+            np.where(all_negative, np.maximum(a, b), 0))
+
+    return result
+
+def LF_central1(U_list, F_list, numXj, n_groups, lam):
     k = np.zeros((numXj, n_groups, 5))
 
     p = np.arange(1, numXj - 1, 1)
     for i in range(0, n_groups):
-        # Lax-Freidrichs intercell flux.
-        f_left = 0.5 * (F_list[p - 1, i] + F_list[p, i]) + dx / (2 * delta_t) * (U_list[p - 1, i] - U_list[p, i])
-        f_right = 0.5 * (F_list[p, i] + F_list[p + 1, i]) + dx / (2 * delta_t) * (U_list[p, i] - U_list[p + 1, i])
-        k[1:numXj - 1, i] = delta_t / dx * (f_left - f_right)
+        # Lax-Freidrichs flux.
+        k[1:numXj - 1, i] = 0.5 * (U_list[p + 1, i] + U_list[p - 1, i]) - 0.5 * lam * (F_list[p + 1, i] - F_list[p - 1, i]) - U_list[p, i]
+
+    return k
+
+def LF_central1_conservative(U_list, F_list, numXj, n_groups, lam):
+    k = np.zeros((numXj, n_groups, 5))
+
+    p = np.arange(1, numXj - 1, 1)
+    for i in range(0, n_groups):
+        f_left = 0.5 * (F_list[p - 1, i] + F_list[p, i]) + 1 / (2 * lam) * (U_list[p - 1, i] - U_list[p, i])
+        f_right = 0.5 * (F_list[p, i] + F_list[p + 1, i]) + 1 / (2 * lam) * (U_list[p, i] - U_list[p + 1, i])
+        k[1:numXj - 1, i] = lam * (f_left - f_right)
+
+    return k
+
+def KT_central2(U_list, F_list, numXj, n_groups, dt, dx, CX_LB, CX_UB):
+    # Returns dU/dt and not U^{n+1}. Requires a little different treatment than LF_central1 method.
+    k = np.zeros((numXj, n_groups, 5))
+
+    p = np.arange(2, numXj - 2, 1)
+    theta = 2
+
+    a_plus = CX_UB
+    a_minus = CX_UB
+
+    for i in range(0, n_groups):
+        uR_plus = U_list[p + 1, i] - dx/2 * minmod3(theta * (U_list[p + 1, i] - U_list[p, i])/dx, (U_list[p + 2, i] - U_list[p, i])/(2*dx), theta * (U_list[p + 2, i] - U_list[p + 1, i])/dx)
+        uL_plus = U_list[p, i] + dx/2 * minmod3(theta * (U_list[p, i] - U_list[p - 1, i])/dx, (U_list[p + 1, i] - U_list[p - 1, i])/(2*dx), theta * (U_list[p + 1, i] - U_list[p, i])/dx)
+        uR_minus = U_list[p, i] - dx/2 * minmod3(theta * (U_list[p, i] - U_list[p - 1, i])/dx, (U_list[p + 1, i] - U_list[p - 1, i])/(2*dx), theta * (U_list[p + 1, i] - U_list[p, i])/dx)
+        uL_minus = U_list[p - 1, i] + dx/2 * minmod3(theta * (U_list[p - 1, i] - U_list[p - 2, i])/dx, (U_list[p, i] - U_list[p - 2, i])/(2*dx), theta * (U_list[p, i] - U_list[p - 1, i])/dx)
+
+        # Need to evaluate the flux at the recontructed values of U...
+        fR_plus = F_list[p + 1, i] - dx/2 * minmod2((F_list[p + 1, i] - F_list[p, i])/dx, (F_list[p + 2, i] - F_list[p + 1, i])/dx)
+        fL_plus = F_list[p, i] + dx/2 * minmod2((F_list[p, i] - F_list[p - 1, i])/dx, (F_list[p + 1, i] - F_list[p, i])/dx)
+        fR_minus = F_list[p, i] - dx/2 * minmod2((F_list[p, i] - F_list[p - 1, i])/dx, (F_list[p + 1, i] - F_list[p, i])/dx)
+        fL_minus = F_list[p - 1, i] + dx/2 * minmod2((F_list[p - 1, i] - F_list[p - 2, i])/dx, (F_list[p, i] - F_list[p - 1, i])/dx)
+
+        H_plus = (fR_plus + fL_plus)/2 - (a_plus/2) * (uR_plus - uL_plus)
+        H_minus = (fR_minus + fL_minus)/2 - (a_minus/2) * (uR_minus - uL_minus)
+
+        k[2:numXj - 2, i] = -1/dx * (H_plus - H_minus)
+
+        k[1] = 0.5 * (U_list[2, i] + U_list[0, i]) - 0.5 * dt/dx * (F_list[2, i] - F_list[0, i]) - U_list[1, i]
+        k[-2] = 0.5 * (U_list[-1, i] + U_list[-3, i]) - 0.5 * dt/dx * (F_list[-1, i] - F_list[-3, i]) - U_list[-2, i]
 
     return k
 
@@ -417,29 +512,6 @@ def generate_regular_samples(p, n_samples, x_sample, y_sample, z_sample, mu, bou
 
     return weights, n_sample_group, masks
 
-def coll_source(x_sample, y_sample, z_sample, weights, num_group_sample, n_groups, n_samples, bounds_list, COLLISION_PARAMS, VELOCITY_SPACE):
-    # Input: distribution parameters, bounds
-    # Calculate: samples, group moment change
-    # Output: moment change over the time step
-    Rf1 = np.random.uniform(0.0, 1.0, COLLISION_PARAMS['n_coll'])
-    Rf2 = np.random.uniform(0.0, 1.0, COLLISION_PARAMS['n_coll'])
-    depl_idx1 = np.random.randint(0, n_samples, COLLISION_PARAMS['n_coll'])
-    depl_idx2 = np.random.randint(0, n_samples, COLLISION_PARAMS['n_coll'])
-
-    CX_LB, CX_UB = VELOCITY_SPACE['cx_range']
-    CY_LB, CY_UB = VELOCITY_SPACE['cy_range']
-    CZ_LB, CZ_UB = VELOCITY_SPACE['cz_range']
-
-    n_coll = COLLISION_PARAMS['n_coll']
-
-    key_type = types.UniTuple(types.int64, 2)
-
-    # BINARY ELASTIC COLLISIONS.
-    group_n, group_px, group_py, group_pz, group_e = collide(x_sample, y_sample, z_sample, weights, num_group_sample, bounds_list, n_groups, \
-                                                                Rf1, Rf2, depl_idx1, depl_idx2, n_coll, CX_LB, CX_UB, CY_LB, CY_UB, CZ_LB, CZ_UB, key_type)
-    
-    return group_n, group_px, group_py, group_pz, group_e
-
 @jit(nopython=True)
 def collide(x_sample, y_sample, z_sample, weights, num_group_sample, bounds_list, n_groups, Rf1, Rf2, depl_idx1, depl_idx2, n_coll, CX_LB, CX_UB, CY_LB, CY_UB, CZ_LB, CZ_UB, key_type):
     group_n = np.zeros(n_groups)
@@ -498,10 +570,8 @@ def collide(x_sample, y_sample, z_sample, weights, num_group_sample, bounds_list
         gz = np.abs(vz2 - vz1)
         g = np.sqrt(gx**2 + gy**2 + gz**2)
 
-        Rf = Rf1[i]
-        phi = 2 * np.pi * Rf
-        Rf = Rf2[i]
-        cos_theta = 2 * Rf - 1
+        phi = 2 * np.pi * Rf1[i]
+        cos_theta = 2 * Rf2[i] - 1
         sin_theta = np.sqrt(1 - cos_theta**2)
 
         gx_p = 0.5 * g * sin_theta * np.cos(phi)
@@ -579,4 +649,4 @@ def collide(x_sample, y_sample, z_sample, weights, num_group_sample, bounds_list
         group_pz[group_idx2r] += Gi * vz2p
         group_e[group_idx2r] += Gi * (vx2p**2 + vy2p**2 + vz2p**2)
 
-    return group_n, group_px, group_py, group_pz, group_e
+    return [group_n, group_px, group_py, group_pz, group_e]
