@@ -2,10 +2,31 @@ from numba import jit, types
 from numba.typed import Dict
 import numpy as np
 from scipy import optimize, special, interpolate
+from matplotlib import pyplot as plt
 import math
 import cvxpy as cp
 import sys
+from scipy.special import erf
+from scipy.stats import norm
 
+
+def gen_exp_sample(u, sigma, v_start, v_end, n_samples, stretch_factor=1.0):
+    center_dist_start = abs(v_start - u)
+    center_dist_end = abs(v_end - u)
+    
+    xi_edges = np.linspace(0, 1, n_samples + 1)
+    xi = 0.5 * (xi_edges[:-1] + xi_edges[1:])  # Midpoints
+    
+    if center_dist_start < center_dist_end:
+        # Left side closer to center - cluster at v_start
+        xi_warped = (np.exp(stretch_factor * xi) - 1) / (np.exp(stretch_factor) - 1)
+        v_group = v_start + (v_end - v_start) * xi_warped
+    else:
+        # Right side closer to center - cluster at v_end
+        xi_warped = (np.exp(stretch_factor * xi) - 1) / (np.exp(stretch_factor) - 1)
+        v_group = v_end - (v_end - v_start) * xi_warped[::-1]
+
+    return v_group
 
 def calculate_velocity_grid(velocity_space):
     # Helper function to get velocity space grid
@@ -16,21 +37,48 @@ def calculate_velocity_grid(velocity_space):
 
     return cx_vec, cy_vec, cz_vec, cx, cy, cz 
 
-def generate_grid(n_samples_x, n_samples_y, n_samples_z):
+def generate_grid(n_samples_x, n_samples_y, n_samples_z, U_i, bounds_list):
     def gen_group_sample(a, b, n):
         return np.linspace(a, b, n, endpoint=False) + (b - a) / (2 * n)
-    
-    g1 = gen_group_sample(-2.5, 0.4666666666666668, 10)
-    # g2 = gen_group_sample(0, 2.0999999999999996, 6)
-    g3 = gen_group_sample(0.4666666666666668, 4.0, 10)
-    g4 = gen_group_sample(-3.5, 3.5, 10)
+
+    ux = U_i[:, 1] / U_i[:, 0]
+    uy = U_i[:, 2] / U_i[:, 0]
+    uz = U_i[:, 3] / U_i[:, 0]  
+    T = 2/3 * ((U_i[:, 4] / U_i[:, 0]) - (ux**2 + uy**2 + uz**2))
+    x_boundsl = np.maximum.reduce([bounds_list[:, 0], ux - 3*np.sqrt(T)])
+    x_boundsu = np.minimum.reduce([bounds_list[:, 1], ux + 3*np.sqrt(T)])
+    y_boundsl = np.maximum.reduce([bounds_list[:, 2], uy - 3*np.sqrt(T)])
+    y_boundsu = np.minimum.reduce([bounds_list[:, 3], uy + 3*np.sqrt(T)])
+    z_boundsl = np.maximum.reduce([bounds_list[:, 4], uz - 3*np.sqrt(T)])
+    z_boundsu = np.minimum.reduce([bounds_list[:, 5], uz + 3*np.sqrt(T)])
+
+    g1 = gen_group_sample(x_boundsl[0], x_boundsu[0], 9)
+    g2 = gen_group_sample(x_boundsl[4], x_boundsu[4], 15)
+
+    g3 = gen_group_sample(y_boundsl[4], y_boundsu[4], 10)
+    g4 = gen_group_sample(y_boundsl[6], y_boundsu[6], 10)
+
+    g5 = gen_group_sample(z_boundsl[4], z_boundsu[4], 10)
+    g6 = gen_group_sample(z_boundsl[5], z_boundsu[5], 10)
+
+    # g1 = gen_group_sample(ux - 4*sigma, 0.0, 12)
+    # g2 = gen_group_sample(0.0, ux + 4*sigma, 10)
+    # g3 = gen_exp_sample(ux, sigma, ux - 3*sigma, 0.0, 6, 3)
+    # g4 = gen_group_sample(0.0, ux + 3*sigma, 14)
+
+    # g7 = gen_group_sample(-4*sigma, 0.0, 9)
+    # g8 = gen_group_sample(0.0, +4*sigma, 9)
+
+    # g3 = gen_group_sample(ux - 4*sigma, 0.0, 8)
+    # g4 = gen_group_sample(0.0, ux + 4*sigma, 10)
+    # plt.scatter(np.concatenate([g3, g4]), np.zeros(16))
+    # plt.show()
 
     # sample_loc_x = np.append(sample_loc_x_neg, sample_loc_x_pos)
     # np.append(np.linspace(-20, -1e-5, 8), np.append(np.linspace(1e-5, 6.65, 8), np.linspace(6.67, 20, 8))) 
-    sample_loc_x = np.concatenate([g1, g3])
-    sample_loc_y = np.concatenate([g4])
-    sample_loc_z = sample_loc_y
-    print(sample_loc_x)
+    sample_loc_x = np.concatenate([g1, g2])
+    sample_loc_y = np.concatenate([g3, g4])
+    sample_loc_z = np.concatenate([g5, g6])
     
     [xgrid, ygrid, zgrid] = np.meshgrid(sample_loc_x, sample_loc_y, sample_loc_z, indexing='ij')
 
@@ -38,7 +86,10 @@ def generate_grid(n_samples_x, n_samples_y, n_samples_z):
     y_sample = ygrid.flatten()
     z_sample = zgrid.flatten()
 
-    return x_sample, y_sample, z_sample, sample_loc_x, sample_loc_y, sample_loc_z
+    v_min = np.array([x_boundsl[0], y_boundsl[4], z_boundsl[4]])
+    v_max = np.array([x_boundsu[4], y_boundsu[6], z_boundsl[6]])
+
+    return x_sample, y_sample, z_sample, sample_loc_x, sample_loc_y, sample_loc_z, v_min, v_max
 
 @jit(nopython=True)
 def moments(beta, wx, wy, wz, ci_cx, cf_cx, ci_cy, cf_cy, ci_cz, cf_cz):
@@ -301,7 +352,8 @@ def calc_flux(Ak, bk, wxk, wyk, wzk, I0x, I0y, I0z, I1x, I1y, I1z, I2x, I2y, I2z
     return F
 
 @jit(nopython=True)
-def calc_flux_int(num_groups, weights, masks, bounds_list, cx_loc, cy_loc, cz_loc):
+def calc_flux_int(num_groups, weights, masks, bounds_list, cx_loc, cy_loc, cz_loc, v_min, v_max):
+    # Calculate the flux from samples generated. Requires samples to be placed at locations covering the whole domain for best results.
     F = np.zeros((num_groups, 5))
 
     for i in range(0, num_groups):
@@ -316,60 +368,18 @@ def calc_flux_int(num_groups, weights, masks, bounds_list, cx_loc, cy_loc, cz_lo
         cx_vec = cx_loc[(cx_loc > ci_cx) & (cx_loc < cf_cx)]
         cy_vec = cy_loc[(cy_loc > ci_cy) & (cy_loc < cf_cy)]
         cz_vec = cz_loc[(cz_loc > ci_cz) & (cz_loc < cf_cz)]
-        dx = np.abs(cx_vec[1] - cx_vec[0])
-        dy = np.abs(cy_vec[1] - cy_vec[0])
-        dz = np.abs(cz_vec[1] - cz_vec[0])
 
-        shape_weights = np.reshape(weights[mask] / (dx*dy*dz), (cx_vec.size, cy_vec.size, cz_vec.size))
+        shape_weights = np.reshape(weights[mask], (cx_vec.size, cy_vec.size, cz_vec.size))
 
-        # Extend ci_vec and shape_weights to include the extrapolated points.
-        cx_vec_ext = np.empty(len(cx_vec) + 2)
-        cy_vec_ext = np.empty(len(cy_vec) + 2)
-        cz_vec_ext = np.empty(len(cz_vec) + 2)
+        cx_3d = np.ones((1, cy_vec.size, cz_vec.size)) * cx_vec[:, None, None]
+        cy_3d = np.ones((cx_vec.size, 1, cz_vec.size)) * cy_vec[None, :, None]
+        cz_3d = np.ones((cx_vec.size, cy_vec.size, 1)) * cz_vec[None, None, :]
 
-        cx_vec_ext[0] = cx_vec[0] - dx / 2
-        cx_vec_ext[1:-1] = cx_vec
-        cx_vec_ext[-1] = cx_vec[-1] + dx / 2
-        cy_vec_ext[0] = cy_vec[0] - dy / 2
-        cy_vec_ext[1:-1] = cy_vec
-        cy_vec_ext[-1] = cy_vec[-1] + dy / 2
-        cz_vec_ext[0] = cz_vec[0] - dz / 2
-        cz_vec_ext[1:-1] = cz_vec
-        cz_vec_ext[-1] = cz_vec[-1] + dz / 2
-
-        nx_ext, ny_ext, nz_ext = len(cx_vec_ext), len(cy_vec_ext), len(cz_vec_ext)
-        weights_ext = np.zeros((nx_ext, ny_ext, nz_ext))
-
-        weights_ext[1:-1, 1:-1, 1:-1] = shape_weights
-
-        weights_ext[0, 1:-1, 1:-1] = 2 * shape_weights[0, :, :] - shape_weights[1, :, :]      # x_min face
-        weights_ext[-1, 1:-1, 1:-1] = 2 * shape_weights[-1, :, :] - shape_weights[-2, :, :]   # x_max face
+        F[i, 0] = np.sum(cx_3d * shape_weights)
+        F[i, 1] = np.sum(cx_3d**2 * shape_weights)
+        ccTc = cx_3d**3 + cy_3d**2 * cx_3d + cz_3d**2 * cx_3d
+        F[i, 4] = np.sum(ccTc * shape_weights)
         
-        weights_ext[:, 0, 1:-1] = 2 * weights_ext[:, 1, 1:-1] - weights_ext[:, 2, 1:-1]    # y_min face
-        weights_ext[:, -1, 1:-1] = 2 * weights_ext[:, -2, 1:-1] - weights_ext[:, -3, 1:-1]  # y_max face
-        
-        weights_ext[:, :, 0] = 2 * weights_ext[:, :, 1] - weights_ext[:, :, 2]      # z_min face
-        weights_ext[:, :, -1] = 2 * weights_ext[:, :, -2] - weights_ext[:, :, -3]   # z_max face
-
-        # Create meshgrid. (Friendly with Numba).
-        cx = np.empty((nx_ext, ny_ext, nz_ext))
-        cy = np.empty((nx_ext, ny_ext, nz_ext))
-        cz = np.empty((nx_ext, ny_ext, nz_ext))
-        for x in range(nx_ext):
-            cx[x, :, :] = cx_vec_ext[x]
-
-        for y in range(ny_ext):
-            cy[:, y, :] = cy_vec_ext[y]
-        
-        for z in range(nz_ext):
-            cz[:, :, z] = cz_vec_ext[z]
-
-        # Integrate to get flux. 
-        F[i, 0] = np.trapezoid(np.trapezoid(np.trapezoid(cx * weights_ext, cz_vec_ext), cy_vec_ext), cx_vec_ext)
-        F[i, 1] = np.trapezoid(np.trapezoid(np.trapezoid(cx**2 * weights_ext, cz_vec_ext), cy_vec_ext), cx_vec_ext)
-        ccTc = cx**3 + cy**2 * cx + cz**2 * cx
-        F[i, 4] = np.trapezoid(np.trapezoid(np.trapezoid(ccTc * weights_ext, cz_vec_ext), cy_vec_ext), cx_vec_ext)
-
     return F
 
 # Flux limiter function.
@@ -417,30 +427,37 @@ def KT_central2(U_list, F_list, numXj, n_groups, dt, dx, CX_LB, CX_UB):
     k = np.zeros((numXj, n_groups, 5))
 
     p = np.arange(2, numXj - 2, 1)
-    theta = 2
+    # print(p)
+    theta = 1.5
 
     a_plus = CX_UB
     a_minus = CX_UB
 
     for i in range(0, n_groups):
+        # rho = U_list[p, i, 0]
+        # u_x = U_list[p, i, 1] / rho
+        # u_y = U_list[p, i, 2] / rho
+        # u_z = U_list[p, i, 3] / rho
+        # T = (2/3) * (U_list[p, i, 4]/rho - (u_x**2 + u_y**2 + u_z**2))
+
         uR_plus = U_list[p + 1, i] - dx/2 * minmod3(theta * (U_list[p + 1, i] - U_list[p, i])/dx, (U_list[p + 2, i] - U_list[p, i])/(2*dx), theta * (U_list[p + 2, i] - U_list[p + 1, i])/dx)
         uL_plus = U_list[p, i] + dx/2 * minmod3(theta * (U_list[p, i] - U_list[p - 1, i])/dx, (U_list[p + 1, i] - U_list[p - 1, i])/(2*dx), theta * (U_list[p + 1, i] - U_list[p, i])/dx)
         uR_minus = U_list[p, i] - dx/2 * minmod3(theta * (U_list[p, i] - U_list[p - 1, i])/dx, (U_list[p + 1, i] - U_list[p - 1, i])/(2*dx), theta * (U_list[p + 1, i] - U_list[p, i])/dx)
         uL_minus = U_list[p - 1, i] + dx/2 * minmod3(theta * (U_list[p - 1, i] - U_list[p - 2, i])/dx, (U_list[p, i] - U_list[p - 2, i])/(2*dx), theta * (U_list[p, i] - U_list[p - 1, i])/dx)
 
         # Need to evaluate the flux at the recontructed values of U...
-        fR_plus = F_list[p + 1, i] - dx/2 * minmod2((F_list[p + 1, i] - F_list[p, i])/dx, (F_list[p + 2, i] - F_list[p + 1, i])/dx)
-        fL_plus = F_list[p, i] + dx/2 * minmod2((F_list[p, i] - F_list[p - 1, i])/dx, (F_list[p + 1, i] - F_list[p, i])/dx)
-        fR_minus = F_list[p, i] - dx/2 * minmod2((F_list[p, i] - F_list[p - 1, i])/dx, (F_list[p + 1, i] - F_list[p, i])/dx)
-        fL_minus = F_list[p - 1, i] + dx/2 * minmod2((F_list[p - 1, i] - F_list[p - 2, i])/dx, (F_list[p, i] - F_list[p - 1, i])/dx)
+        fR_plus = F_list[p + 1, i] - dx/2 * minmod3(theta * (F_list[p + 1, i] - F_list[p, i])/dx, (F_list[p + 2, i] - F_list[p, i])/(2*dx), theta * (F_list[p + 2, i] - F_list[p + 1, i])/dx)
+        fL_plus = F_list[p, i] + dx/2 * minmod3(theta * (F_list[p, i] - F_list[p - 1, i])/dx, (F_list[p + 1, i] - F_list[p - 1, i])/(2*dx), theta * (F_list[p + 1, i] - F_list[p, i])/dx)
+        fR_minus = F_list[p, i] - dx/2 * minmod3(theta * (F_list[p, i] - F_list[p - 1, i])/dx, (F_list[p + 1, i] - F_list[p - 1, i])/(2*dx), theta * (F_list[p + 1, i] - F_list[p, i])/dx)
+        fL_minus = F_list[p - 1, i] + dx/2 * minmod3(theta * (F_list[p - 1, i] - F_list[p - 2, i])/dx, (F_list[p, i] - F_list[p - 2, i])/(2*dx), theta * (F_list[p, i] - F_list[p - 1, i])/dx)
 
         H_plus = (fR_plus + fL_plus)/2 - (a_plus/2) * (uR_plus - uL_plus)
         H_minus = (fR_minus + fL_minus)/2 - (a_minus/2) * (uR_minus - uL_minus)
 
-        k[2:numXj - 2, i] = -1/dx * (H_plus - H_minus)
+        k[2:numXj-2, i] = -1/dx * (H_plus - H_minus)
 
-        k[1] = 0.5 * (U_list[2, i] + U_list[0, i]) - 0.5 * dt/dx * (F_list[2, i] - F_list[0, i]) - U_list[1, i]
-        k[-2] = 0.5 * (U_list[-1, i] + U_list[-3, i]) - 0.5 * dt/dx * (F_list[-1, i] - F_list[-3, i]) - U_list[-2, i]
+        k[1, i] = -(F_list[2, i] - F_list[0, i])/(2 * dx) + 1/(2 * dx) * (a_plus * (U_list[2, i] - U_list[1, i]) - a_minus * (U_list[1, i] - U_list[0, i]))
+        k[-2, i] = -(F_list[-1, i] - F_list[-3, i])/(2 * dx) + 1/(2 * dx) * (a_plus * (U_list[-1, i] - U_list[-2, i]) - a_minus * (U_list[-2, i] - U_list[-3, i]))
 
     return k
 
@@ -468,7 +485,7 @@ def generate_regular_samples(p, n_samples, x_sample, y_sample, z_sample, mu, bou
 
         num_sample_group = len(x_sample_slice)
 
-        if mu[i, 0] < 1e-4: # wonder what a good threshold is.
+        if mu[i, 0] < 1e-3: # wonder what a good threshold is.
             try:
                 A = np.zeros((5, num_sample_group))
                 b = np.zeros(5)
@@ -488,9 +505,11 @@ def generate_regular_samples(p, n_samples, x_sample, y_sample, z_sample, mu, bou
                 prob = cp.Problem(cp.Minimize(cost))
                 prob.solve()
 
-                weights = x.value
+                n_sample_group[i] = num_sample_group
+                weights[mask] = x.value
             except:
                 print('i knew it')
+            # weights[mask] = np.zeros(num_sample_group)
         else:
             try:
                 x = cp.Variable(shape=num_sample_group, nonneg=True)
@@ -501,14 +520,11 @@ def generate_regular_samples(p, n_samples, x_sample, y_sample, z_sample, mu, bou
                             cp.sum(cp.multiply(x_sample_slice**2 + y_sample_slice**2 + z_sample_slice**2, x)) == mu[i, 4]]
                 prob = cp.Problem(obj, constraints)
                 prob.solve()
-                # if prob.status == cp.OPTIMAL_INACCURATE:
-                    # print(prob.value, p, i)
-                    # print(ci_cx, cf_cx, ci_cy, cf_cy, ci_cz, cf_cz, mu[i, 0], mu[i, 1], mu[i, 2], mu[i, 3], mu[i, 4])
 
                 n_sample_group[i] = num_sample_group
                 weights[mask] = x.value
             except:
-                print('Hi', p, i)
+                print('Hi', p, i, mu[i, 0], mu[i, 1], mu[i, 2], mu[i, 3], mu[i, 4])
 
     return weights, n_sample_group, masks
 
@@ -623,7 +639,7 @@ def collide(x_sample, y_sample, z_sample, weights, num_group_sample, bounds_list
         else: key = (group_idx2, group_idx1)
         n_coll_group = depl_tracker[key]
 
-        Li = weights[d_idx1] * weights[d_idx2] * num_group_sample[group_idx1] * num_group_sample[group_idx2] / n_coll_group
+        Li = 0.5 * weights[d_idx1] * weights[d_idx2] * num_group_sample[group_idx1] * num_group_sample[group_idx2] / n_coll_group
         group_n[group_idx1] -= Li
         group_px[group_idx1] -= Li * vx1
         group_py[group_idx1] -= Li * vy1
@@ -636,7 +652,7 @@ def collide(x_sample, y_sample, z_sample, weights, num_group_sample, bounds_list
         group_pz[group_idx2] -= Li * vz2
         group_e[group_idx2] -= Li * (vx2**2 + vy2**2 + vz2**2)
 
-        Gi = Li
+        Gi = 0.5 * weights[d_idx1] * weights[d_idx2] * num_group_sample[group_idx1] * num_group_sample[group_idx2] / n_coll_group
         group_n[group_idx1r] += Gi
         group_px[group_idx1r] += Gi * vx1p
         group_py[group_idx1r] += Gi * vy1p

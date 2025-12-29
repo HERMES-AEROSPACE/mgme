@@ -17,11 +17,18 @@ def run_simulation():
 
     gamma = CONSTANTS['gamma']
     R = CONSTANTS['R']
+    d = CONSTANTS['d']
     T1 = FREESTREAM_PARAMS['T1']
     P1 = FREESTREAM_PARAMS['P1']
     Ma1 = FREESTREAM_PARAMS['Ma1']
     m = CONSTANTS['m']
     k = CONSTANTS['k']
+
+    n_coll = COLLISION_PARAMS['n_coll']
+    CX_LB, CX_UB = VELOCITY_SPACE['cx_range']
+    CY_LB, CY_UB = VELOCITY_SPACE['cy_range']
+    CZ_LB, CZ_UB = VELOCITY_SPACE['cz_range']
+    key_type = types.UniTuple(types.int64, 2)
 
     a1 = np.sqrt(gamma * R * T1)
     u1 = Ma1 * a1
@@ -36,12 +43,20 @@ def run_simulation():
     u2 = u1 * rho1/rho2
     Ma2 = Ma1 * u2/u1 * (T1/T2)**0.5
     n2 = P2/(R * T2) * 1/m
-    print(n1, n2, u1, u2, T1, T2)
+    # print(n1, n2, u1, u2, T1, T2)
 
     m_ref = m
     n_ref = n1
-    T_ref = T2
+    T_ref = T1
+    d_ref = d
     c_ref = np.sqrt((2 * k * T_ref)/m_ref)
+    sigma_ref = np.pi * d_ref**2
+    lam_ref = 1/(n_ref * sigma_ref)
+    L_ref = lam_ref
+    Kn = lam_ref / L_ref
+    t_ref = L_ref / c_ref
+    print('Reference mean free path:', lam_ref, '[m]')
+    print('Knudsen number:', Kn)
     # c_ref = np.sqrt((2 * k * T1)/m_ref)
     # T_ref = m * c_ref**2 / (2 * k)
 
@@ -55,8 +70,17 @@ def run_simulation():
     Xj_u = PHYS_SPACE['xj_range'][1]
     numXj = PHYS_SPACE['num_xj']
 
-    transition_start = -0.8
-    transition_end = 0.8
+    cfl = 0.7
+    t_end = 30.0
+    tc = 1/(n2/n_ref * (d/d_ref)**2 * np.sqrt(2) * 1)
+    dt = np.round(cfl/(1/tc + CX_UB/dx), 3)
+    print('CFL number:', cfl)
+    print('Collision time scale:', tc * t_ref, '[s]')
+    print('Time step:', dt)
+    print('dx:', dx)
+
+    transition_start = -15
+    transition_end = 10
     ramp_length = transition_end - transition_start
 
     t = (xj_vec - transition_start) / ramp_length
@@ -66,7 +90,7 @@ def run_simulation():
     T_val = (T1 + cosine_factor * (T2 - T1)) / T_ref
     u_val = (u1 + cosine_factor * (u2 - u1)) / c_ref
     n_val = (n1 + cosine_factor * (n2 - n1)) / n_ref
-
+    print(u_val[0])
     print("---------------------------SETTING UP INITIAL CONDITION---------------------------")
     group_bounds_cx = GROUP_PARAMS['group_bounds_cx']
     group_bounds_cy = GROUP_PARAMS['group_bounds_cy']
@@ -84,12 +108,13 @@ def run_simulation():
     U0, f = ic(cx, cy, cz, cx_vec, cy_vec, cz_vec, n_val, u_val, T_val, VELOCITY_SPACE['num_cx'], VELOCITY_SPACE['num_cy'], VELOCITY_SPACE['num_cz'], \
         numXj, num_groups, combinations)
     if restart:
-        data = np.load('simulation_data/U1500.npy')
+        data = np.load('simulation_data/U141.npy')
         print('Restarting from...')
         U = data
     else:
         U = U0.copy()
 
+    print(U[0, :, 0])
     # plt.plot(xj_vec, 2/3 * ((np.sum(U[:, :, 4], axis=1) / np.sum(U[:, :, 0], axis=1)) - (np.sum(U[:, :, 1], axis=1) / np.sum(U[:, :, 0], axis=1))**2))
     # plt.plot(xj_vec, T_val, '--')
     # plt.xlabel('xj', fontsize=16)
@@ -114,41 +139,32 @@ def run_simulation():
         bounds_list[i] = np.array([ci_combo[i, 0], cf_combo[i, 0], ci_combo[i, 1], cf_combo[i, 1], ci_combo[i, 2], cf_combo[i, 2]])
 
     n_samples = SAMPLING_PARAMS['n_samples_x'] * SAMPLING_PARAMS['n_samples_y'] * SAMPLING_PARAMS['n_samples_z']
-    x_sample, y_sample, z_sample, cx_loc, cy_loc, cz_loc = generate_grid(SAMPLING_PARAMS['n_samples_x'], SAMPLING_PARAMS['n_samples_y'], SAMPLING_PARAMS['n_samples_z'])
+    ncx, ncy, ncz = SAMPLING_PARAMS['n_samples_x'], SAMPLING_PARAMS['n_samples_y'], SAMPLING_PARAMS['n_samples_z']
+    x_sample, y_sample, z_sample = np.zeros((numXj, n_samples)), np.zeros((numXj, n_samples)), np.zeros((numXj, n_samples))
+    cx_loc, cy_loc, cz_loc = np.zeros((numXj, ncx)), np.zeros((numXj, ncy)), np.zeros((numXj, ncz))
+    v_min, v_max = np.zeros((numXj, 3)), np.zeros((numXj, 3))
 
     print("--------------------------------BEGIN SIMULATION----------------------------------")
-    t_end = 15.0
-    dt = 0.025
-    n_coll = COLLISION_PARAMS['n_coll']
-    CX_LB, CX_UB = VELOCITY_SPACE['cx_range']
-    CY_LB, CY_UB = VELOCITY_SPACE['cy_range']
-    CZ_LB, CZ_UB = VELOCITY_SPACE['cz_range']
-    key_type = types.UniTuple(types.int64, 2)
 
-    def coll_step(i, n_samples, x_sample, y_sample, z_sample, U_i_c, bounds_list, num_groups, CX_LB, CX_UB, CY_LB, CY_UB, CZ_LB, CZ_UB, key_type):
+    def step(i, n_samples, x_sample, y_sample, z_sample, U_i, bounds_list, num_groups, CX_LB, CX_UB, CY_LB, CY_UB, CZ_LB, CZ_UB, key_type,\
+            cx_loc, cy_loc, cz_loc, v_min, v_max):
         # Generate random numbers for collisions.
         Rf1 = np.random.uniform(0.0, 1.0, n_coll)
         Rf2 = np.random.uniform(0.0, 1.0, n_coll)
         depl_idx1 = np.random.randint(0, n_samples, n_coll)
         depl_idx2 = np.random.randint(0, n_samples, n_coll)
 
-        # Advance the collision forward.
-        weights, num_group_sample, _ = generate_regular_samples(
-            i, n_samples, x_sample, y_sample, z_sample, U_i_c, bounds_list, num_groups
+        weights, num_group_sample, masks = generate_regular_samples(
+            i, n_samples, x_sample, y_sample, z_sample, U_i, bounds_list, num_groups
         )
+
+        # Advance the collision forward.
         coll = collide(x_sample, y_sample, z_sample, weights, num_group_sample, bounds_list, num_groups, \
                         Rf1, Rf2, depl_idx1, depl_idx2, n_coll, CX_LB, CX_UB, CY_LB, CY_UB, CZ_LB, CZ_UB, key_type)
 
-        return i, coll
+        flux = calc_flux_int(num_groups, weights, masks, bounds_list, cx_loc, cy_loc, cz_loc, v_min, v_max)
 
-    def flux_step(i, n_samples, x_sample, y_sample, z_sample, U_i_f, bounds_list, num_groups, cx_loc, cy_loc, cz_loc):
-        # Advance the flux term forward.
-        weights_f, _, masks_f = generate_regular_samples(
-            i, n_samples, x_sample, y_sample, z_sample, U_i_f, bounds_list, num_groups
-        )
-        flux = calc_flux_int(num_groups, weights_f, masks_f, bounds_list, cx_loc, cy_loc, cz_loc)
-        
-        return i, flux
+        return i, coll, flux
 
     profiler = cProfile.Profile()
     for t in range(0, int(np.ceil(int(t_end / dt) / 100) * 100) + 1):
@@ -161,70 +177,35 @@ def run_simulation():
         U[0, :] = U0[0, :]
         U[-1, :] = U[-2, :]
 
-        # RK2 integration.
+        # RK1 integration.
         k1_c = np.zeros((numXj, num_groups, 5))
-        k2_c = np.zeros((numXj, num_groups, 5))
-
         F1 = np.zeros((numXj, num_groups, 5))
-        F2 = np.zeros((numXj, num_groups, 5))
-        F3 = np.zeros((numXj, num_groups, 5))
+
+        for i in range(0, numXj):
+            x_sample[i], y_sample[i], z_sample[i], cx_loc[i], cy_loc[i], cz_loc[i], v_min[i], v_max[i] = generate_grid(ncx, ncy, ncz, U[i], bounds_list)
         
-        # Use Strang splitting to first advance the collision term by dt/2. Then apply the flux term. Finally do the collision term again.
-        # Apply RK1 (Euler) to advance collision term to t^{n + 1/2}.
-        coll_dt_half = Parallel(n_jobs=12)(
-            delayed(coll_step)(i, n_samples, x_sample, y_sample, z_sample, U[i], bounds_list, num_groups, CX_LB, CX_UB, CY_LB, CY_UB, CZ_LB, CZ_UB, key_type)
+        # Integrate collision term and flux term separately. Integrate in time using explicit Euler.
+        step_dt = Parallel(n_jobs=12)(
+            delayed(step)(i, n_samples, x_sample[i], y_sample[i], z_sample[i], U[i], bounds_list, num_groups, \
+            CX_LB, CX_UB, CY_LB, CY_UB, CZ_LB, CZ_UB, key_type, cx_loc[i], cy_loc[i], cz_loc[i], v_min[i], v_max[i])
             for i in range(0, numXj)
         )
-        for i, coll in coll_dt_half:
+        for i, coll, flux in step_dt:
+            if np.any(np.isnan(coll)):
+                print(coll, i)
+                sys.exit()
             k1_c[i, :, 0] = coll[0]
             k1_c[i, :, 1] = coll[1]
             k1_c[i, :, 2] = coll[2]
             k1_c[i, :, 3] = coll[3]
             k1_c[i, :, 4] = coll[4]
-        U_half = U + dt/2 * k1_c
-
-        # Apply RK2 to step the flux term to t^{n + 1}.
-        flux_dt_1 = Parallel(n_jobs=12)(
-            delayed(flux_step)(i, n_samples, x_sample, y_sample, z_sample, U_half[i], bounds_list, num_groups, cx_loc, cy_loc, cz_loc) 
-            for i in range(0, numXj)
-        )
-        for i, flux in flux_dt_1:
             F1[i] = flux
-        k1_f = KT_central2(U_half, F1, numXj, num_groups, dt, dx, CX_LB, CX_UB)
-        U1_flux = U_half + dt * k1_f
 
-        flux_dt_2 = Parallel(n_jobs=12)(
-            delayed(flux_step)(i, n_samples, x_sample, y_sample, z_sample, U1_flux[i], bounds_list, num_groups, cx_loc, cy_loc, cz_loc) 
-            for i in range(0, numXj)
-        )
-        for i, flux in flux_dt_2:
-            F2[i] = flux
-        k2_f = KT_central2(U1_flux, F2, numXj, num_groups, dt, dx, CX_LB, CX_UB)
-        U2_flux = 1/2 * U_half + 1/2 * (U1_flux + dt * k2_f)
-
-        # flux_dt_3 = Parallel(n_jobs=12)(
-        #     delayed(flux_step)(i, n_samples, x_sample, y_sample, z_sample, U2_flux[i], bounds_list, num_groups, cx_loc, cy_loc, cz_loc) 
-        #     for i in range(0, numXj)
-        # )
-        # for i, flux in flux_dt_3:
-        #     F3[i] = flux
-        # k3_f = KT_central2(U2_flux, F3, numXj, num_groups, dt, dx, CX_LB, CX_UB)
-        # U3_flux = 1/3 * U_half + 2/3 * (U2_flux + dt * k3_f)
-        
-        # Apply Euler to advance collision term to t^{n + 1}.
-        coll_dt = Parallel(n_jobs=12)(
-            delayed(coll_step)(i, n_samples, x_sample, y_sample, z_sample, U2_flux[i], bounds_list, num_groups, CX_LB, CX_UB, CY_LB, CY_UB, CZ_LB, CZ_UB, key_type)
-            for i in range(0, numXj)
-        )
-        for i, coll in coll_dt:
-            k2_c[i, :, 0] = coll[0]
-            k2_c[i, :, 1] = coll[1]
-            k2_c[i, :, 2] = coll[2]
-            k2_c[i, :, 3] = coll[3]
-            k2_c[i, :, 4] = coll[4]
-
-        # Update solution.
-        U = U2_flux + dt/2 * k2_c
+        # 2nd order central difference using MUSCL reconstruction and slope limiters.
+        if t == 0: F0 = F1
+        k1_f = KT_central2(U, F1, numXj, num_groups, dt, dx, CX_LB, CX_UB)
+        # k1_f = LF_central1(U, F1, numXj, num_groups, dt/dx)
+        U += dt * (k1_f + k1_c)
 
         # Save solution.
         f1 = 'simulation_data/U{}.npy'.format(t + 0)

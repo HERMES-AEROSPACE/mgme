@@ -1,13 +1,13 @@
 import numpy as np
 from matplotlib import pyplot as plt
-from .config import CONSTANTS, FREESTREAM_PARAMS
+from .config import CONSTANTS, FREESTREAM_PARAMS, PHYS_SPACE
 from .moment_utils import invert
 from scipy.interpolate import interp1d
 
 
 # data = np.load('simulation_data/U20.npy')
 data1 = np.load('simulation_data/U0.npy')
-data2 = np.load('simulation_data/U25.npy')
+data2 = np.load('simulation_data/U240.npy')
 dsmc = np.loadtxt('src/dsmc.txt')
 dsmcT = np.loadtxt('src/dsmcT.txt')
 
@@ -16,7 +16,7 @@ dsmcT = np.loadtxt('src/dsmcT.txt')
 # plt.ylabel('Relative speedup', fontsize=16)
 # plt.show()
 
-x = np.linspace(-25, 25, 201)
+x = np.linspace(*PHYS_SPACE['xj_range'], PHYS_SPACE['num_xj'])
 x2 = np.linspace(-30, 20, 251)
 x_scale = (x - x.min()) / (x.max() - x.min())
 x2_scale = (x2 - x2.min()) / (x2.max() - x2.min())
@@ -24,16 +24,21 @@ x2_scale = (x2 - x2.min()) / (x2.max() - x2.min())
 # y = np.sum(data, axis=1)[:, 0]
 n1 = np.sum(data1, axis=1)[:, 0]
 n2 = np.sum(data2, axis=1)[:, 0]
+u1 = np.sum(data1, axis=1)[:, 1]
 u2 = np.sum(data2, axis=1)[:, 1]
+T1 = np.sum(data1, axis=1)[:, 4]
 T2 = np.sum(data2, axis=1)[:, 4]
-temperature = 2/3 * ((T2 / n2) - (u2 / n2)**2)
+temperature1 = 2/3 * ((T1 / n1) - (u1 / n1)**2)
+temperature2 = 2/3 * ((T2 / n2) - (u2 / n2)**2)
 n1_scale = (n1 - n1[0]) / (n1[-1] - n1[0])
 n2_scale = (n2 - n2[0]) / (n2[-1] - n2[0])
 u2_scale = (u2 - u2[0]) / (u2[-1] - u2[0])
+T1_scale = (T1 - T1[0]) / (T1[-1] - T1[0])
 T2_scale = (T2 - T2[0]) / (T2[-1] - T2[0])
-temperature_scale = (temperature - temperature[0]) / (temperature[-1] - temperature[0])
+temperature1_scale = (temperature1 - temperature1[0]) / (temperature1[-1] - temperature1[0])
+temperature2_scale = (temperature2 - temperature2[0]) / (temperature2[-1] - temperature2[0])
 
-# shock_thick = (np.max(n2_scale) - np.min(n2_scale)) / np.max(np.gradient(n2_scale, x))
+shock_thick = (np.max(n2_scale) - np.min(n2_scale)) / np.max(np.abs(np.gradient(n2_scale, x_scale)))
 
 gamma = CONSTANTS['gamma']
 R = CONSTANTS['R']
@@ -44,46 +49,72 @@ a1 = np.sqrt(gamma * R * T1)
 rho1 = P1/(R * T1)
 mu1 = 2.26e-5  # [Pa * s]
 
-# shock_thick2 = (np.max(dsmc[:, 1]) - np.min(dsmc[:, 1])) / np.max(np.gradient(dsmc[:, 1], dsmc[:, 0]))
-lambda_inf = 16/5 * (gamma / (2 * np.pi))**0.5 * mu1 / (rho1 * a1) * 1000
-# lambda_inf = 1.098
-# print(lambda_inf, lambda_inf/shock_thick)
+shock_thick2 = (np.max(dsmc[:, 1]) - np.min(dsmc[:, 1])) / np.max(np.abs(np.gradient(dsmc[:, 1], dsmc[:, 0])))
+# lambda_inf = 16/5 * (gamma / (2 * np.pi))**0.5 * mu1 / (rho1 * a1) * 1000
+lambda_inf = 1.098
+print('DSMC:', lambda_inf/shock_thick2, 'Current:', lambda_inf/shock_thick)
 
 # Calculate some distributions and plot them.
-p = 100
-negx_n = np.sum(data2[:, 0:4], axis=1)[p, 0]
-posx_n = np.sum(data2[:, 4:], axis=1)[p, 0]
-negx_u = np.sum(data2[:, 0:4], axis=1)[p, 1]
-posx_u = np.sum(data2[:, 4:], axis=1)[p, 1]
-negx_e = np.sum(data2[:, 0:4], axis=1)[p, 4]
-posx_e = np.sum(data2[:, 4:], axis=1)[p, 4]
+p = 0
+negx_n = np.sum(data2[p, 0:4], axis=0)[0]
+posx_n = np.sum(data2[p, 4:], axis=0)[0]
+negx_u = np.sum(data2[p, 0:4], axis=0)[1]
+posx_u = np.sum(data2[p, 4:], axis=0)[1]
+negx_e = np.sum(data2[p, 0:4], axis=0)[4]
+posx_e = np.sum(data2[p, 4:], axis=0)[4]
 
-# point = (x[p] - x.min()) / (x.max() - x.min())
-# A, b, wx, _, _ = invert([negx_n, negx_u, 0.0, 0.0, negx_e], [1.0, 0.0, 0.0, 0.0], {'ci_cx': -7, 'cf_cx': 0.4666666666666668, 'ci_cy': -7, 'cf_cy': 7, 'ci_cz': -7, 'cf_cz': 7})
-# cx_vec, cy_vec, cz_vec = np.linspace(-7, 7, 121), np.linspace(-7, 7, 121), np.linspace(-7, 7, 121)
-# cx, cy, cz = np.meshgrid(cx_vec, cy_vec, cz_vec, indexing='ij')
-# negx_f = np.trapezoid(np.trapezoid(A * np.exp(-b * ((cx - wx)**2 + cy**2 + cz**2)), cz_vec, axis=2), cy_vec, axis=1)
+point = (x[p] - x.min()) / (x.max() - x.min())
+cx_vec, cy_vec, cz_vec = np.linspace(-6, 6, 121), np.linspace(-6, 6, 121), np.linspace(-6, 6, 121)
+cx, cy, cz = np.meshgrid(cx_vec, cy_vec, cz_vec, indexing='ij')
 
-# A, b, wx, _, _ = invert([posx_n, posx_u, 0.0, 0.0, posx_e], [1.0, 0.0, 0.0, 0.0], {'ci_cx': 0.4666666666666668, 'cf_cx': 7, 'ci_cy': -7, 'cf_cy': 7, 'ci_cz': -7, 'cf_cz': 7})
-# cx_vec, cy_vec, cz_vec = np.linspace(-7, 7, 121), np.linspace(-7, 7, 121), np.linspace(-7, 7, 121)
-# cx, cy, cz = np.meshgrid(cx_vec, cy_vec, cz_vec, indexing='ij')
-# posx_f = np.trapezoid(np.trapezoid(A * np.exp(-b * ((cx - wx)**2 + cy**2 + cz**2)), cz_vec, axis=2), cy_vec, axis=1)
+A, b, wx, _, _ = invert([negx_n, negx_u, 0.0, 0.0, negx_e], [1.0, 0.0, 0.0, 0.0], {'ci_cx': -6, 'cf_cx': 1.2, 'ci_cy': -6, 'cf_cy': 6, 'ci_cz': -6, 'cf_cz': 6})
+negx_f = np.trapezoid(np.trapezoid(A * np.exp(-b * ((cx - wx)**2 + cy**2 + cz**2)), cz_vec, axis=2), cy_vec, axis=1)
 
+A, b, wx, _, _ = invert([posx_n, posx_u, 0.0, 0.0, posx_e], [1.0, 0.0, 0.0, 0.0], {'ci_cx': 1.2, 'cf_cx': 6, 'ci_cy': -6, 'cf_cy': 6, 'ci_cz': -6, 'cf_cz': 6})
+posx_f = np.trapezoid(np.trapezoid(A * np.exp(-b * ((cx - wx)**2 + cy**2 + cz**2)), cz_vec, axis=2), cy_vec, axis=1)
+
+# Interpolate to get smooth curves of the DSMC data.
 f = interp1d(1 - dsmc[:, 0], dsmc[:, 1], kind='cubic')
 ft = interp1d(1 - dsmcT[:, 0], dsmcT[:, 1], kind='cubic')
 x_new = np.linspace(0.03, 0.99, 20)
 
+# Time average the data for anything noisy due to low collisions.
+# n_avg = np.zeros(PHYS_SPACE['num_xj'])
+# T_avg = np.zeros(PHYS_SPACE['num_xj'])
+# avg_t = 40
+# for i in range(630, 630 + avg_t):
+#     data = np.load('simulation_data/U{}.npy'.format(i))
+#     n = np.sum(data, axis=1)[:, 0]
+#     u = np.sum(data, axis=1)[:, 1]
+#     e = np.sum(data, axis=1)[:, 4]
+#     T = 2/3 * ((e / n) - (u / n)**2)
+#     n_scale = (n - n[0]) / (n[-1] - n[0])
+#     T_scale = (T - T[0]) / (T[-1] - T[0])
+#     n_avg += n_scale
+#     T_avg += T_scale
+
+# n_avg /= avg_t
+# T_avg /= avg_t
+# np.save('simulation_data/n_avg_coarse.npy', n_avg)
+# np.save('simulation_data/T_avg_coarse.npy', T_avg)
+
 plt.rcParams['font.family'] = "serif"
+x_scale_shifted = x_scale + 0.08176
 
 fig = plt.figure(figsize=(10, 6))
 ax1 = fig.add_subplot(111)
-ax1.plot(1 - dsmc[:, 0], dsmc[:, 1], '--', color='green')
-# ax1.scatter(x_new, f(x_new), color='green', marker='s', facecolors='none')
-ax1.plot(1 - dsmcT[:, 0], dsmcT[:, 1], '--', color='red')
-# ax1.scatter(x_new, ft(x_new), color='red', marker='s', facecolors='none')
-ax1.plot(x_scale, temperature_scale, color='red')
-# ax1.plot(x2_scale - 0.01814, n1_scale, color='purple')
+# ax1.plot(1 - dsmc[:, 0], dsmc[:, 1], '--', color='green')
+ax1.scatter(x_new, f(x_new), color='green', marker='s', facecolors='none')
+# ax1.plot(1 - dsmcT[:, 0], dsmcT[:, 1], '--', color='red')
+ax1.scatter(x_new, ft(x_new), color='red', marker='s', facecolors='none')
+
+# ax1.plot(x_scale, temperature1_scale, color='indigo')
+ax1.plot(x_scale, temperature2_scale, color='red')
+# ax1.plot(x_scale, n1_scale, color='purple')
 ax1.plot(x_scale, n2_scale, color='green')
+# ax1.plot(x_scale, n_avg, '-.', color='green')
+# ax1.plot(x_scale, T_avg, '-.', color='red')
+
 ax1.set_xlabel(r'Scaled Location', fontsize=20)
 ax1.set_ylabel(r'Normalized Property', fontsize=20)
 ax1.tick_params(axis='both',labelsize=16)
@@ -94,8 +125,8 @@ plt.tight_layout()
 
 # fig3 = plt.figure(figsize=(6, 6))
 # ax3 = fig3.add_subplot(111)
-# ax3.plot(cx_vec[0:65], negx_f[0:65], color='green')
-# ax3.plot(cx_vec[64:], posx_f[64:], color='red')
+# ax3.plot(cx_vec[0:73], negx_f[0:73], color='green')
+# ax3.plot(cx_vec[72:], posx_f[72:], color='red')
 # ax3.set_xlabel(r'$C_x$', fontsize=20)
 # ax3.set_ylabel(r'f', fontsize=20)
 # ax3.tick_params(axis='both',labelsize=16)
@@ -104,11 +135,4 @@ plt.tight_layout()
 # plt.savefig('simulation_data/dist1.jpg', bbox_inches='tight')
 # plt.tight_layout()
 
-# fig2 = plt.figure(figsize=(6, 6))
-# ax2 = fig2.add_subplot(111)
-# ax2.plot(x_scale, (np.sum(data2, axis=1)[:, 0] - np.sum(data1, axis=1)[:, 0]), color='black')
-# ax2.set_xlabel(r'$X_j$', fontsize=20)
-# ax2.set_ylabel(r'Density difference', fontsize=20)
-# ax2.tick_params(axis='both',labelsize=16)
-# plt.tight_layout() 
 plt.show()

@@ -20,29 +20,30 @@ I0z = np.sqrt(np.pi / (4 * b)) * (special.erf(np.sqrt(b) * (7.0 - wz)) - special
 A = 0.01688446754551784 / (I0x * I0y * I0z)
 # print(A, b, wx, wy, wz)
 
-ci_cx = -5
-cf_cx = 5
-ci_cy = -5
-cf_cy = 5
-ci_cz = -5
-cf_cz = 5
+ci_cx = -6
+cf_cx = 0
+ci_cy = -6
+cf_cy = 0
+ci_cz = -6
+cf_cz = 0
 
-cx_vec = np.linspace(-5, 5, 241)
-cy_vec = np.linspace(-5, 5, 241)
-cz_vec = np.linspace(-5, 5, 241)
+cx_vec = np.linspace(-6, 6, 241)
+cy_vec = np.linspace(-6, 6, 241)
+cz_vec = np.linspace(-6, 6, 241)
 cx, cy, cz = np.meshgrid(cx_vec, cy_vec, cz_vec, indexing='ij')
 
-K = 1 - 0.4 * np.exp(-0/6)
+# K = 1 - 0.4 * np.exp(-0/6)
 # f0 = 1 / (2 * K * (np.pi * K)**1.5) * (5 * K - 3 + 2 * (1 - K) / K * (cx**2 + cy**2 + cz**2)) * np.exp(-(cx**2 + cy**2 + cz**2) / K)
-f0 = 1 / (np.pi**1.5) * np.exp(-1 * ((cx - .75  )**2 + cy**2 + cz**2))
+# f0 = 1 / (np.pi**1.5) * np.exp(-1 * ((cx - .75  )**2 + cy**2 + cz**2))
+f0 = 1 * (1.0 / (np.pi * 1))**1.5 * np.exp(-(1/1) * ((cx - 1.8256910592827011)**2 + cy**2 + cz**2))
 
-mu = calc_moment(f0[0:241], cx[0:241], cy[0:241], cz[0:241], cx_vec[0:241], cy_vec, cz_vec)
+mu = calc_moment(f0[121:241, 121:241, 121:241], cx[121:241, 121:241, 121:241], cy[121:241, 121:241, 121:241], cz[121:241, 121:241, 121:241], cx_vec[121:241], cy_vec[121:241], cz_vec[121:241])
 print('moments:', mu[0], mu[1], mu[2], mu[3], mu[4])
 
 initial_guess = [0.2, 0.0, 0.0, 0.0]
-group_bounds = {'ci_cx': ci_cx, 'cf_cx': cf_cx, 'group_bounds_cx': np.array([0, 241]), \
-                'ci_cy': ci_cy, 'cf_cy': cf_cy, 'group_bounds_cy': np.array([0, 241]), \
-                    'ci_cz': ci_cz, 'cf_cz': cf_cz, 'group_bounds_cz': np.array([0, 241])}
+group_bounds = {'ci_cx': ci_cx, 'cf_cx': cf_cx, 'group_bounds_cx': np.array([0, 121]), \
+                'ci_cy': ci_cy, 'cf_cy': cf_cy, 'group_bounds_cy': np.array([0, 121]), \
+                    'ci_cz': ci_cz, 'cf_cz': cf_cz, 'group_bounds_cz': np.array([0, 121])}
 
 A, b, wx, wy, wz = invert(mu, initial_guess, group_bounds)
 # print(A, b, wx, wy, wz)
@@ -77,13 +78,11 @@ F3 = A * ((I3x + I0x * wx**3 + 3 * I1x * wx**2 + 3 * I2x * wx) * I0y * I0z \
         (I2z + 2 * wz * I1z + wz**2 * I0z) * (I1x + wx * I0x) * I0y)
 
 # Flux the integral way.
-intF1 = np.trapezoid(np.trapezoid(np.trapezoid(cx[0:241] * f0[0:241], cz_vec, axis=2), cy_vec, axis=1), cx_vec[0:241], axis=0)
-intF2 = np.trapezoid(np.trapezoid(np.trapezoid((cx[0:241]**2) * f0[0:241], cz_vec, axis=2), cy_vec, axis=1), cx_vec[0:241], axis=0)
+intF1 = np.trapezoid(np.trapezoid(np.trapezoid(cx[121:241, 121:241, 121:241] * f0[121:241, 121:241, 121:241], cz_vec[121:241], axis=2), cy_vec[121:241], axis=1), cx_vec[121:241], axis=0)
+intF2 = np.trapezoid(np.trapezoid(np.trapezoid((cx[121:241, 121:241, 121:241]**2) * f0[121:241, 121:241, 121:241], cz_vec[121:241], axis=2), cy_vec[121:241], axis=1), cx_vec[121:241], axis=0)
 ccTc = cx**3 + cy**2 * cx + cz**2 * cx
-intF3 = np.trapezoid(np.trapezoid(np.trapezoid(ccTc[0:241] * f0[0:241], cz_vec, axis=2), cy_vec, axis=1), cx_vec[0:241], axis=0)
+intF3 = np.trapezoid(np.trapezoid(np.trapezoid(ccTc[121:241, 121:241, 121:241] * f0[121:241, 121:241, 121:241], cz_vec[121:241], axis=2), cy_vec[121:241], axis=1), cx_vec[121:241], axis=0)
 print('fluxes:', F1, F2x, F3)
-p = 1/3 * (mu[4] - mu[1]**2 / mu[0])
-print('flux the ocky way:', mu[1], mu[1]**2 / mu[0] + p, mu[1] * mu[4] / mu[0] + 2 * p * mu[1] / mu[0])
 print('flux the int way:', intF1, intF2, intF3)
 
 f = A * np.exp(-b * ((cx - wx)**2 + (cy - wy)**2 + (cz - wz)**2))
