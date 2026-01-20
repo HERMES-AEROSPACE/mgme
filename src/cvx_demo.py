@@ -73,24 +73,25 @@ def calc_moment(f, cx, cy, cz, cx_vec, cy_vec, cz_vec):
 
 # np.random.seed(34957293)
 
-cx_vec_smooth = np.linspace(-6, 6, 241)
-cy_vec_smooth = np.linspace(-6, 6, 241)
-cz_vec_smooth = np.linspace(-6, 6, 241)
+cx_vec_smooth = np.linspace(-5, 5.5, 106)
+cy_vec_smooth = np.linspace(-5, 5.5, 106)
+cz_vec_smooth = np.linspace(-5, 5.5, 106)
 
 cx_s, cy_s, cz_s = np.meshgrid(cx_vec_smooth, cy_vec_smooth, cz_vec_smooth, indexing='ij')
 f0 = 1 / (np.pi**1.5) * np.exp(-1 * ((cx_s - 1.8256910592827011)**2 + cy_s**2 + cz_s**2))
 # K = 1 - 0.4 * np.exp(-0/6)
 # f0 = 1 / (2 * K * (np.pi * K)**1.5) * (5 * K - 3 + 2 * (1 - K) / K * (cx_s**2 + cy_s**2 + cz_s**2)) * np.exp(-(cx_s**2 + cy_s**2 + cz_s**2) / K)
-f0_init = np.trapezoid(np.trapezoid(f0[100:121, 0:121, 0:121], cz_vec_smooth[0:121], axis=2), cy_vec_smooth[0:121], axis=1)
+# f0_init = np.trapezoid(np.trapezoid(f0[100:121, 0:121, 0:121], cz_vec_smooth[0:121], axis=2), cy_vec_smooth[0:121], axis=1)
 
 ici = 0
 icf = 121
 mu1 = calc_moment(f0[ici:icf, 0:121, 0:121], cx_s[ici:icf, 0:121, 0:121], cy_s[ici:icf, 0:121, 0:121], cz_s[ici:icf, 0:121, 0:121], \
     cx_vec_smooth[ici:icf], cy_vec_smooth[0:121], cz_vec_smooth[0:121])
 
-bounds = {'ci_cx': -6.0, 'cf_cx': 0.0, \
-        'ci_cy': -6.0, 'cf_cy': 0.0,\
-        'ci_cz': -6.0, 'cf_cz': 0.0}
+mu1 = np.array([0.061376218496269765, 0.04623725433249141, -0.04471815147976567, -0.04471815147976568, 0.10797784023173243])
+bounds = {'ci_cx': -5.0, 'cf_cx': 1.2, \
+        'ci_cy': -5.0, 'cf_cy': 0.0,\
+        'ci_cz': -5.0, 'cf_cz': 0.0}
 
 # cx_vec = np.linspace(bounds['ci_cx'], bounds['cf_cx'], num_cx, endpoint=False) + (bounds['cf_cx'] - bounds['ci_cx']) / (2 * num_cx)
 # cy_vec = np.linspace(bounds['ci_cy'], bounds['cf_cy'], num_cy, endpoint=False) + (bounds['cf_cy'] - bounds['ci_cy']) / (2 * num_cy)
@@ -107,10 +108,10 @@ bounds = {'ci_cx': -6.0, 'cf_cx': 0.0, \
 # x_sample = cx.flatten()
 # y_sample = cy.flatten()
 # z_sample = cz.flatten()
-num_sample = 250
-l_bounds = [-2.31, -2.65, -2.65]
-u_bounds = [0, 0, 0]
-sampler = qmc.LatinHypercube(d=3)
+num_sample = 73
+l_bounds = [-0.13005676558429702, -1.6119891498315448, -1.6119891498315448]
+u_bounds = [1.2, 0.0, 0.0]
+sampler = qmc.LatinHypercube(d=3, seed=6767)
 sample = qmc.scale(sampler.random(n=num_sample), l_bounds, u_bounds)
 
 x_sample = sample[:, 0]
@@ -166,26 +167,28 @@ real_weight = x.value
 # Inversion.
 A, b, wx, wy, wz = invert(mu1, [0.01, 0.0, 0.0, 0.0], bounds)
 f_invert = A * np.exp(-b * ((cx_s - wx)**2 + (cy_s - wy)**2 + (cz_s - wz)**2))
-fI_invert = np.trapezoid(np.trapezoid(f_invert[0:121, 0:121, 0:121], cz_vec_smooth[0:121], axis=2), cx_vec_smooth[0:121], axis=0)
+fI_invert = np.trapezoid(np.trapezoid(f_invert[0:63, 0:51, 0:51], cz_vec_smooth[0:51], axis=2), cy_vec_smooth[0:51], axis=1)
 
 # Compute flux using inversion vs. integrating weights.
-# flux = calc_flux(A, b, wx, wy, wz, bounds)
+flux = calc_flux(A, b, wx, wy, wz, bounds)
 
 # Group temperature investigation.
 ux = mu1[1] / mu1[0]
 uy = mu1[2] / mu1[0]
 uz = mu1[3] / mu1[0]
 T = 2/3 * ((mu1[4] / mu1[0]) - (ux**2 + uy**2 + uz**2))
-print(ux - 4*np.sqrt(T), uy - 4 * np.sqrt(T), uz - 4 * np.sqrt(T))
+print(T)
+print(ux - 3*np.sqrt(T), uy - 3 * np.sqrt(T), uz - 3 * np.sqrt(T))
+print(ux + 3*np.sqrt(T), uy + 3 * np.sqrt(T), uz + 3 * np.sqrt(T))
 
 # Print result.
 print("\nThe optimal value is:", prob.value)
 print('\nThe optimal solution is:')
-print('density:', np.sum(real_weight))
-print('x-momentum:', np.sum(real_weight * x_sample))
-print('y-momentum:', np.sum(real_weight * y_sample))
-print('z-momentum:', np.sum(real_weight * z_sample))
-print('energy:', np.sum((x_sample**2 + y_sample**2 + z_sample**2) * real_weight))
+# print('density:', np.sum(real_weight))
+# print('x-momentum:', np.sum(real_weight * x_sample))
+# print('y-momentum:', np.sum(real_weight * y_sample))
+# print('z-momentum:', np.sum(real_weight * z_sample))
+# print('energy:', np.sum((x_sample**2 + y_sample**2 + z_sample**2) * real_weight))
 print(mu1)
 
 # width = (bounds['cf_cx'] - bounds['ci_cx'])/num_cx
@@ -194,13 +197,15 @@ print(mu1)
 #                       [cx_vec[i] + half_width for i in range(num_cx)])
 
 # counts, ed = np.histogram(x_sample, weights=real_weight / dx, bins=bin_edges)
-
 # shape_weights = np.reshape(real_weight / (dx*dy*dz), (10, 8, 8))
 # f1 = np.trapezoid(np.trapezoid(np.trapezoid(cx * shape_weights, cz_vec, axis=2), cy_vec, axis=1), cx_vec, axis=0)
 # f2 = np.trapezoid(np.trapezoid(np.trapezoid(cx**2 * shape_weights, cz_vec, axis=2), cy_vec, axis=1), cx_vec, axis=0)
-# ccTc = cx**3 + cy**2 * cx + cz**2 * cx
+ccTc = x_sample**3 + y_sample**2 * x_sample + z_sample**2 * x_sample
 # ccTc_s = cx_s**3 + cy_s**2 * cx_s + cz_s**2 * cx_s
 # f3 = np.trapezoid(np.trapezoid(np.trapezoid(ccTc * shape_weights, cz_vec, axis=2), cy_vec, axis=1), cx_vec, axis=0)
+f1 = np.sum(real_weight * x_sample)
+f2 = np.sum(real_weight * x_sample**2)
+f3 = np.sum(real_weight * ccTc)
 
 # f1_invert = np.trapezoid(np.trapezoid(np.trapezoid(cx_s[100:121, 0:121, 0:121] * f_invert[100:121, 0:121, 0:121], \
 #     cz_vec_smooth[0:121], axis=2), cy_vec_smooth[0:121], axis=1), cx_vec_smooth[ici:icf], axis=0)
@@ -208,8 +213,8 @@ print(mu1)
 #     cz_vec_smooth[0:121], axis=2), cy_vec_smooth[0:121], axis=1), cx_vec_smooth[ici:icf], axis=0)
 # f3_invert = np.trapezoid(np.trapezoid(np.trapezoid(ccTc_s[100:121, 0:121, 0:121] * f_invert[100:121, 0:121, 0:121], \
 #     cz_vec_smooth[0:121], axis=2), cy_vec_smooth[0:121], axis=1), cx_vec_smooth[ici:icf], axis=0)
-# print(flux)
-# print(f1, f2, f3)
+print(flux)
+print(f1, f2, f3)
 # print(f1_invert, f2_invert, f3_invert)
 
 plt.rc('font', family='serif')
@@ -229,7 +234,7 @@ plt.rc('font', family='serif')
 fig = plt.figure(figsize=(6, 6))
 ax1 = fig.add_subplot(111)
 # ax1.bar(cx_vec, density, width=dx * 0.1, color='green')
-ax1.plot(cy_vec_smooth[0:121], fI_invert, color='black')
+ax1.plot(cy_vec_smooth[0:63], fI_invert, color='black')
 ax1.set_xlabel('Cy', fontsize=18)
 ax1.set_ylabel('f', fontsize=18)
 ax1.set_yscale('log')

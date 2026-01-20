@@ -7,7 +7,7 @@ from scipy.interpolate import interp1d
 
 # data = np.load('simulation_data/U20.npy')
 data1 = np.load('simulation_data/U0.npy')
-data2 = np.load('simulation_data/U240.npy')
+data2 = np.load('simulation_data/U70.npy')
 dsmc = np.loadtxt('src/dsmc.txt')
 dsmcT = np.loadtxt('src/dsmcT.txt')
 
@@ -30,6 +30,7 @@ T1 = np.sum(data1, axis=1)[:, 4]
 T2 = np.sum(data2, axis=1)[:, 4]
 temperature1 = 2/3 * ((T1 / n1) - (u1 / n1)**2)
 temperature2 = 2/3 * ((T2 / n2) - (u2 / n2)**2)
+vel2 = u2 / n2
 n1_scale = (n1 - n1[0]) / (n1[-1] - n1[0])
 n2_scale = (n2 - n2[0]) / (n2[-1] - n2[0])
 u2_scale = (u2 - u2[0]) / (u2[-1] - u2[0])
@@ -37,6 +38,7 @@ T1_scale = (T1 - T1[0]) / (T1[-1] - T1[0])
 T2_scale = (T2 - T2[0]) / (T2[-1] - T2[0])
 temperature1_scale = (temperature1 - temperature1[0]) / (temperature1[-1] - temperature1[0])
 temperature2_scale = (temperature2 - temperature2[0]) / (temperature2[-1] - temperature2[0])
+vel2_scale = (vel2 - vel2[-1]) / (vel2[0] - vel2[-1])
 
 shock_thick = (np.max(n2_scale) - np.min(n2_scale)) / np.max(np.abs(np.gradient(n2_scale, x_scale)))
 
@@ -55,7 +57,7 @@ lambda_inf = 1.098
 print('DSMC:', lambda_inf/shock_thick2, 'Current:', lambda_inf/shock_thick)
 
 # Calculate some distributions and plot them.
-p = 0
+p = 52
 negx_n = np.sum(data2[p, 0:4], axis=0)[0]
 posx_n = np.sum(data2[p, 4:], axis=0)[0]
 negx_u = np.sum(data2[p, 0:4], axis=0)[1]
@@ -64,13 +66,13 @@ negx_e = np.sum(data2[p, 0:4], axis=0)[4]
 posx_e = np.sum(data2[p, 4:], axis=0)[4]
 
 point = (x[p] - x.min()) / (x.max() - x.min())
-cx_vec, cy_vec, cz_vec = np.linspace(-6, 6, 121), np.linspace(-6, 6, 121), np.linspace(-6, 6, 121)
+cx_vec, cy_vec, cz_vec = np.linspace(-5, 5.5, 106), np.linspace(-5, 5.5, 106), np.linspace(-5, 5.5, 106)
 cx, cy, cz = np.meshgrid(cx_vec, cy_vec, cz_vec, indexing='ij')
 
-A, b, wx, _, _ = invert([negx_n, negx_u, 0.0, 0.0, negx_e], [1.0, 0.0, 0.0, 0.0], {'ci_cx': -6, 'cf_cx': 1.2, 'ci_cy': -6, 'cf_cy': 6, 'ci_cz': -6, 'cf_cz': 6})
+A, b, wx, _, _ = invert([negx_n, negx_u, 0.0, 0.0, negx_e], [1.0, 0.0, 0.0, 0.0], {'ci_cx': -5, 'cf_cx': 1.2, 'ci_cy': -5, 'cf_cy': 5.5, 'ci_cz': -5, 'cf_cz': 5.5})
 negx_f = np.trapezoid(np.trapezoid(A * np.exp(-b * ((cx - wx)**2 + cy**2 + cz**2)), cz_vec, axis=2), cy_vec, axis=1)
 
-A, b, wx, _, _ = invert([posx_n, posx_u, 0.0, 0.0, posx_e], [1.0, 0.0, 0.0, 0.0], {'ci_cx': 1.2, 'cf_cx': 6, 'ci_cy': -6, 'cf_cy': 6, 'ci_cz': -6, 'cf_cz': 6})
+A, b, wx, _, _ = invert([posx_n, posx_u, 0.0, 0.0, posx_e], [1.0, 0.0, 0.0, 0.0], {'ci_cx': 1.2, 'cf_cx': 5.5, 'ci_cy': -5, 'cf_cy': 5.5, 'ci_cz': -5, 'cf_cz': 5.5})
 posx_f = np.trapezoid(np.trapezoid(A * np.exp(-b * ((cx - wx)**2 + cy**2 + cz**2)), cz_vec, axis=2), cy_vec, axis=1)
 
 # Interpolate to get smooth curves of the DSMC data.
@@ -104,35 +106,36 @@ x_scale_shifted = x_scale + 0.08176
 fig = plt.figure(figsize=(10, 6))
 ax1 = fig.add_subplot(111)
 # ax1.plot(1 - dsmc[:, 0], dsmc[:, 1], '--', color='green')
-ax1.scatter(x_new, f(x_new), color='green', marker='s', facecolors='none')
+# ax1.scatter(x_new, f(x_new), color='green', marker='s', facecolors='none')
 # ax1.plot(1 - dsmcT[:, 0], dsmcT[:, 1], '--', color='red')
-ax1.scatter(x_new, ft(x_new), color='red', marker='s', facecolors='none')
+# ax1.scatter(x_new, ft(x_new), color='red', marker='s', facecolors='none')
 
 # ax1.plot(x_scale, temperature1_scale, color='indigo')
-ax1.plot(x_scale, temperature2_scale, color='red')
+ax1.plot(temperature2_scale, color='red')
 # ax1.plot(x_scale, n1_scale, color='purple')
-ax1.plot(x_scale, n2_scale, color='green')
+ax1.plot(n2_scale, color='green')
+ax1.plot(vel2_scale, color='blue')
 # ax1.plot(x_scale, n_avg, '-.', color='green')
 # ax1.plot(x_scale, T_avg, '-.', color='red')
 
 ax1.set_xlabel(r'Scaled Location', fontsize=20)
 ax1.set_ylabel(r'Normalized Property', fontsize=20)
 ax1.tick_params(axis='both',labelsize=16)
-ax1.set_xlim(0.0, 1.0)
+# ax1.set_xlim(-30.0, 20.0)
 ax1.legend(['DSMC - n', 'DSMC - T', r'T', r'n'], fontsize=14)
 plt.savefig('simulation_data/density_shock.jpg', bbox_inches='tight')
 plt.tight_layout()
 
-# fig3 = plt.figure(figsize=(6, 6))
-# ax3 = fig3.add_subplot(111)
-# ax3.plot(cx_vec[0:73], negx_f[0:73], color='green')
-# ax3.plot(cx_vec[72:], posx_f[72:], color='red')
-# ax3.set_xlabel(r'$C_x$', fontsize=20)
-# ax3.set_ylabel(r'f', fontsize=20)
-# ax3.tick_params(axis='both',labelsize=16)
-# ax3.legend([r'Group $x_0$', r'Group $x_1$'], fontsize=14, loc='upper left')
-# ax3.set_title(r'$X_j$ = {}'.format(point), fontsize=18)
-# plt.savefig('simulation_data/dist1.jpg', bbox_inches='tight')
-# plt.tight_layout()
+fig3 = plt.figure(figsize=(6, 6))
+ax3 = fig3.add_subplot(111)
+ax3.plot(cx_vec[0:63], negx_f[0:63], color='green')
+ax3.plot(cx_vec[62:], posx_f[62:], color='red')
+ax3.set_xlabel(r'$C_x$', fontsize=20)
+ax3.set_ylabel(r'f', fontsize=20)
+ax3.tick_params(axis='both',labelsize=16)
+ax3.legend([r'Group $x_0$', r'Group $x_1$'], fontsize=14, loc='upper left')
+ax3.set_title(r'$X_j$ = {}'.format(point), fontsize=18)
+plt.savefig('simulation_data/dist1.jpg', bbox_inches='tight')
+plt.tight_layout()
 
 plt.show()

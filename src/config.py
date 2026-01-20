@@ -3,12 +3,12 @@ import numpy as np
 
 # Velocity space grid parameters
 VELOCITY_SPACE = {
-    'num_cx': 121,
-    'num_cy': 121,
-    'num_cz': 121,
-    'cx_range': (-6.0, 6.0),
-    'cy_range': (-6.0, 6.0),
-    'cz_range': (-6.0, 6.0)
+    'num_cx': 106,
+    'num_cy': 106,
+    'num_cz': 106,
+    'cx_range': (-5.0, 5.5),
+    'cy_range': (-5.0, 5.5),
+    'cz_range': (-5.0, 5.5)
 }
 
 PHYS_SPACE = {
@@ -27,15 +27,15 @@ GROUP_PARAMS = {
     # 'ci_cz': np.array([-5.0, -0.5, 0.0, 0.5]),
     # 'cf_cz': np.array([-0.5, 0.0, 0.5, 5.0]),
     # 'group_bounds_cz': np.array([[0, 109], [108, 121], [120, 133], [132, 241]])
-    'ci_cx': np.array([-6.0, 0.0]),
-    'cf_cx': np.array([0.0, 6.0]),
-    'group_bounds_cx': np.array([[0, 61], [60, 121]]),
-    'ci_cy': np.array([-6.0, 0]), 
-    'cf_cy': np.array([0, 6.0]),
-    'group_bounds_cy': np.array([[0, 61], [60, 121]]),
-    'ci_cz': np.array([-6.0, 0]),
-    'cf_cz': np.array([0, 6.0]),
-    'group_bounds_cz': np.array([[0, 61], [60, 121]])
+    'ci_cx': np.array([-5.0, 1.2]),
+    'cf_cx': np.array([1.2, 5.5]),
+    'group_bounds_cx': np.array([[0, 63], [62, 106]]),
+    'ci_cy': np.array([-5.0, 0]), 
+    'cf_cy': np.array([0, 5.5]),
+    'group_bounds_cy': np.array([[0, 51], [50, 106]]),
+    'ci_cz': np.array([-5.0, 0]), 
+    'cf_cz': np.array([0, 5.5]),
+    'group_bounds_cz': np.array([[0, 51], [50, 106]])
     # 'ci_cx': np.array([-3, -1.0, 0.0, 1.0]),
     # 'cf_cx': np.array([-1.0, 0.0, 1.0, 3.0]),
     # 'group_bounds_cx': np.array([[0, 81], [80, 121], [120, 161], [160, 241]]),
@@ -54,7 +54,7 @@ AMR = {
 
 # Collision parameters
 COLLISION_PARAMS = {
-    'n_coll': 50000
+    'n_coll': 100000
 }
 
 LOOKUP_TABLE = {
