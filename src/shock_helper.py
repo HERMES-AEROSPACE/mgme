@@ -371,54 +371,73 @@ def LF_central1_conservative(U_list, F_list, numXj, n_groups, lam):
 
     return k
 
-def KT_central2(U_list, F_list, numXj, n_groups, dt, dx, CX_LB, CX_UB, U0, F0, num_groups, bounds_list, offsets, num_samples, x_sample, y_sample, z_sample):
+def KT_central2(U_list, F_list, numXj, n_groups, dt, dx, CX_LB, CX_UB):
     # Returns dU/dt and not U^{n+1}. Requires a little different treatment than LF_central1 method.
     k = np.zeros((numXj, n_groups, 5))
 
-    p = np.arange(2, numXj, 1)
-    theta = 1.5
+    p = np.arange(2, numXj - 2, 1)
+    theta = 1.0
 
-    U_list = np.concatenate((U0[0:1, :, :], U_list, U_list[-1:, :, :]), axis=0)
-    F_list = np.concatenate((F0[0:1, :, :], F_list, F_list[-1:, :, :]), axis=0)
+    # U_list = np.concatenate((U0[0:1, :, :], U_list, U_list[-1:, :, :]), axis=0)
+    # F_list = np.concatenate((F0[0:1, :, :], F_list, F_list[-1:, :, :]), axis=0)
 
     a_plus = np.abs(CX_LB)
     a_minus = np.abs(CX_LB)
 
     for i in range(0, n_groups):
-        uR_plus = U_list[p + 1, i] - dx/2 * minmod2((U_list[p + 1, i] - U_list[p, i])/dx, (U_list[p + 2, i] - U_list[p + 1, i])/dx)
-        uL_plus = U_list[p, i] + dx/2 * minmod2((U_list[p, i] - U_list[p - 1, i])/dx, (U_list[p + 1, i] - U_list[p, i])/dx)
-        uR_minus = U_list[p, i] - dx/2 * minmod2((U_list[p, i] - U_list[p - 1, i])/dx, (U_list[p + 1, i] - U_list[p, i])/dx)
-        uL_minus = U_list[p - 1, i] + dx/2 * minmod2((U_list[p - 1, i] - U_list[p - 2, i])/dx, (U_list[p, i] - U_list[p - 1, i])/dx)
+        uR_plus = U_list[p + 1, i] - dx/2 * minmod3(theta * (U_list[p + 1, i] - U_list[p, i])/dx, (U_list[p + 2, i] - U_list[p, i])/(2*dx), theta * (U_list[p + 2, i] - U_list[p + 1, i])/dx)
+        uL_plus = U_list[p, i] + dx/2 * minmod3(theta * (U_list[p, i] - U_list[p - 1, i])/dx, (U_list[p + 1, i] - U_list[p - 1, i])/(2*dx), theta * (U_list[p + 1, i] - U_list[p, i])/dx)
+        uR_minus = U_list[p, i] - dx/2 * minmod3(theta * (U_list[p, i] - U_list[p - 1, i])/dx, (U_list[p + 1, i] - U_list[p - 1, i])/(2*dx), theta * (U_list[p + 1, i] - U_list[p, i])/dx)
+        uL_minus = U_list[p - 1, i] + dx/2 * minmod3(theta * (U_list[p - 1, i] - U_list[p - 2, i])/dx, (U_list[p, i] - U_list[p - 2, i])/(2*dx), theta * (U_list[p, i] - U_list[p - 1, i])/dx)
 
         # Need to evaluate the flux at the recontructed values of U...
-        fR_plus = F_list[p + 1, i] - dx/2 * minmod2((F_list[p + 1, i] - F_list[p, i])/dx, (F_list[p + 2, i] - F_list[p + 1, i])/dx)
-        fL_plus = F_list[p, i] + dx/2 * minmod2((F_list[p, i] - F_list[p - 1, i])/dx, (F_list[p + 1, i] - F_list[p, i])/dx)
-        fR_minus = F_list[p, i] - dx/2 * minmod2((F_list[p, i] - F_list[p - 1, i])/dx, (F_list[p + 1, i] - F_list[p, i])/dx)
-        fL_minus = F_list[p - 1, i] + dx/2 * minmod2((F_list[p - 1, i] - F_list[p - 2, i])/dx, (F_list[p, i] - F_list[p - 1, i])/dx)
+        fR_plus = F_list[p + 1, i] - dx/2 * minmod3(theta * (F_list[p + 1, i] - F_list[p, i])/dx, (F_list[p + 2, i] - F_list[p, i])/(2*dx), theta * (F_list[p + 2, i] - F_list[p + 1, i])/dx)
+        fL_plus = F_list[p, i] + dx/2 * minmod3(theta * (F_list[p, i] - F_list[p - 1, i])/dx, (F_list[p + 1, i] - F_list[p - 1, i])/(2*dx), theta * (F_list[p + 1, i] - F_list[p, i])/dx)
+        fR_minus = F_list[p, i] - dx/2 * minmod3(theta * (F_list[p, i] - F_list[p - 1, i])/dx, (F_list[p + 1, i] - F_list[p - 1, i])/(2*dx), theta * (F_list[p + 1, i] - F_list[p, i])/dx)
+        fL_minus = F_list[p - 1, i] + dx/2 * minmod3(theta * (F_list[p - 1, i] - F_list[p - 2, i])/dx, (F_list[p, i] - F_list[p - 2, i])/(2*dx), theta * (F_list[p, i] - F_list[p - 1, i])/dx)
 
         H_plus = (fR_plus + fL_plus)/2 - (a_plus/2) * (uR_plus - uL_plus)
         H_minus = (fR_minus + fL_minus)/2 - (a_minus/2) * (uR_minus - uL_minus)
 
-        k[1:numXj-1, i] = -1/dx * (H_plus - H_minus)
+        k[2:numXj-2, i] = -1/dx * (H_plus - H_minus)
 
-        # k[1, i] = -(F_list[2, i] - F_list[0, i])/(2 * dx) + 1/(2 * dx) * (a_plus * (U_list[2, i] - U_list[1, i]) - a_minus * (U_list[1, i] - U_list[0, i]))
-        # k[-2, i] = -(F_list[-1, i] - F_list[-3, i])/(2 * dx) + 1/(2 * dx) * (a_plus * (U_list[-1, i] - U_list[-2, i]) - a_minus * (U_list[-2, i] - U_list[-3, i]))
+        k[1, i] = -(F_list[2, i] - F_list[0, i])/(2 * dx) + 1/(2 * dx) * (a_plus * (U_list[2, i] - U_list[1, i]) - a_minus * (U_list[1, i] - U_list[0, i]))
+        k[-2, i] = -(F_list[-1, i] - F_list[-3, i])/(2 * dx) + 1/(2 * dx) * (a_plus * (U_list[-1, i] - U_list[-2, i]) - a_minus * (U_list[-2, i] - U_list[-3, i]))
 
     return k
 
 def generate_regular_samples(p, offsets, num_samples, x_sample, y_sample, z_sample, U_i, num_groups, bounds_list):
     weights = np.zeros(int(np.sum(num_samples)))
+    num_valid_samples = np.zeros(num_groups, dtype=np.int64)
+
+    fixed_bounds = np.array([
+                             [-2.5, 1.2, -4, 0, -4, 0], \
+                             [-2.5, 1.2, -4, 0, 0, 4], \
+                             [-2.5, 1.2, 0, 4, -4, 0], \
+                             [-2.5, 1.2, 0, 4, 0, 4], \
+                             [1.2, 4.5, -4, 0, -4, 0], \
+                             [1.2, 4.5, -4, 0, 0, 4], \
+                             [1.2, 4.5, 0, 4, -4, 0], \
+                             [1.2, 4.5, 0, 4, 0, 4]])
 
     ux = U_i[:, 1] / U_i[:, 0]
     uy = U_i[:, 2] / U_i[:, 0]
     uz = U_i[:, 3] / U_i[:, 0] 
     T = 2/3 * ((U_i[:, 4] / U_i[:, 0]) - (ux**2 + uy**2 + uz**2))
-    x_boundsl = np.maximum(bounds_list[:, 0], ux - 3*np.sqrt(T))
-    x_boundsu = np.minimum(bounds_list[:, 1], ux + 3*np.sqrt(T))
-    y_boundsl = np.maximum(bounds_list[:, 2], uy - 3*np.sqrt(T))
-    y_boundsu = np.minimum(bounds_list[:, 3], uy + 3*np.sqrt(T))
-    z_boundsl = np.maximum(bounds_list[:, 4], uz - 3*np.sqrt(T))
-    z_boundsu = np.minimum(bounds_list[:, 5], uz + 3*np.sqrt(T))
+    x_boundsl = np.maximum(bounds_list[:, 0], 
+                            np.maximum(ux - 3*np.sqrt(T), fixed_bounds[:, 0]))
+    x_boundsu = np.minimum(bounds_list[:, 1], 
+                            np.minimum(ux + 3*np.sqrt(T), fixed_bounds[:, 1]))
+    
+    y_boundsl = np.maximum(bounds_list[:, 2], 
+                            np.maximum(uy - 3*np.sqrt(T), fixed_bounds[:, 2]))
+    y_boundsu = np.minimum(bounds_list[:, 3], 
+                            np.minimum(uy + 3*np.sqrt(T), fixed_bounds[:, 3]))
+    
+    z_boundsl = np.maximum(bounds_list[:, 4], 
+                            np.maximum(uz - 3*np.sqrt(T), fixed_bounds[:, 4]))
+    z_boundsu = np.minimum(bounds_list[:, 5], 
+                            np.minimum(uz + 3*np.sqrt(T), fixed_bounds[:, 5]))
 
     for i in range(num_groups):
         start_idx = int(offsets[i])
@@ -449,13 +468,17 @@ def generate_regular_samples(p, offsets, num_samples, x_sample, y_sample, z_samp
                 prob = cp.Problem(obj, constraints)
                 prob.solve()
 
-                weights[start_idx:end_idx][mask] = x.value
+                mask_indices = np.where(mask)[0]
+                absolute_indices = start_idx + mask_indices
+                weights[absolute_indices] = x.value
+                num_valid_samples[i] = np.sum(x.value > 1e-12)
 
                 if np.any(np.isnan(x.value)):
                     raise Exception("Catch CVXPY failures")
             except:
                 print('CLARABEL failed', p, i, U_i[i, 0], U_i[i, 1], U_i[i, 2], U_i[i, 3], U_i[i, 4])
                 print(x_boundsl[i], x_boundsu[i], y_boundsl[i], y_boundsu[i], z_boundsl[i], z_boundsu[i], int(x_sample_filter.size))
+                num_valid_samples[i] = 0
 
                 # l_bounds = [x_boundsl[i], y_boundsl[i], z_boundsl[i]]
                 # u_bounds = [x_boundsu[i], y_boundsu[i], z_boundsu[i]]
@@ -477,20 +500,31 @@ def generate_regular_samples(p, offsets, num_samples, x_sample, y_sample, z_samp
 
                 # weights[start_idx:end_idx][mask] = x.value
 
-    return weights
+    return weights, num_valid_samples
 
 @jit(nopython=True)
-def collide(x_sample, y_sample, z_sample, weights, num_group_sample, bounds_list, n_groups, Rf1, Rf2, depl_idx1, depl_idx2, n_coll, CX_LB, CX_UB, CY_LB, CY_UB, CZ_LB, CZ_UB, key_type):
+def collide(x_sample, y_sample, z_sample, weights, num_valid_samples, bounds_list, n_groups, n_coll, CX_LB, CX_UB, CY_LB, CY_UB, CZ_LB, CZ_UB, key_type):
     group_n = np.zeros(n_groups)
     group_px = np.zeros(n_groups)
     group_py = np.zeros(n_groups)
     group_pz = np.zeros(n_groups)
     group_e = np.zeros(n_groups)
 
+    nonzero_mask = weights > 1e-12  # Use small threshold instead of exact zero
+    nonzero_indices = np.where(nonzero_mask)[0]
+
+    # Generate random numbers for collisions.
+    Rf1 = np.random.uniform(0.0, 1.0, n_coll)
+    Rf2 = np.random.uniform(0.0, 1.0, n_coll)
+    depl_idx1 = np.random.choice(nonzero_indices, size=n_coll, replace=True)
+    depl_idx2 = np.random.choice(nonzero_indices, size=n_coll, replace=True)
+
     mask = depl_idx1 != depl_idx2
 
     depl_idx1 = depl_idx1[mask]
     depl_idx2 = depl_idx2[mask]
+    Rf1 = Rf1[mask]
+    Rf2 = Rf2[mask]
 
     # Group the prospective collisions into which group they end up in.
     depl_tracker = Dict.empty(key_type=key_type, \
@@ -590,7 +624,7 @@ def collide(x_sample, y_sample, z_sample, weights, num_group_sample, bounds_list
         else: key = (group_idx2, group_idx1)
         n_coll_group = depl_tracker[key]
 
-        Li = 0.5 * weights[d_idx1] * weights[d_idx2] * num_group_sample[group_idx1] * num_group_sample[group_idx2] / n_coll_group
+        Li = 0.5 * weights[d_idx1] * weights[d_idx2] * num_valid_samples[group_idx1] * num_valid_samples[group_idx2] / n_coll_group
         group_n[group_idx1] -= Li
         group_px[group_idx1] -= Li * vx1
         group_py[group_idx1] -= Li * vy1
@@ -603,7 +637,7 @@ def collide(x_sample, y_sample, z_sample, weights, num_group_sample, bounds_list
         group_pz[group_idx2] -= Li * vz2
         group_e[group_idx2] -= Li * (vx2**2 + vy2**2 + vz2**2)
 
-        Gi = 0.5 * weights[d_idx1] * weights[d_idx2] * num_group_sample[group_idx1] * num_group_sample[group_idx2] / n_coll_group
+        Gi = 0.5 * weights[d_idx1] * weights[d_idx2] * num_valid_samples[group_idx1] * num_valid_samples[group_idx2] / n_coll_group
         group_n[group_idx1r] += Gi
         group_px[group_idx1r] += Gi * vx1p
         group_py[group_idx1r] += Gi * vy1p

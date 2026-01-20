@@ -15,6 +15,7 @@ ax = fig.add_subplot(111)
 # ax.plot(1 - dsmcT[:, 0], dsmcT[:, 1], '--', color='red')
 line1, = ax.plot([], [], color='black', label='Density')
 line2, = ax.plot([], [], color='red', label='Temperature')
+line3, = ax.plot([], [], color='blue', label='Velocity')
 lines = [line1, line2]
 
 ax.set_xlabel('Scaled Location', fontsize=18)
@@ -47,21 +48,24 @@ def update(i):
     u = np.sum(data, axis=1)[:, 1]
     e = np.sum(data, axis=1)[:, 4]
     temperature = 2/3 * ((e / n) - (u / n)**2)
+    vel = u / n
     n_scale = (n - n[0]) / (n[-1] - n[0])
+    vel_scale = (vel - vel[-1]) / (vel[0] - vel[-1])
     temperature_scale = (temperature - temperature[0]) / (temperature[-1] - temperature[0])
     shock_thick = (np.max(n_scale) - np.min(n_scale)) / np.max(np.abs(np.gradient(n_scale, x_scale)))
     thick = 1.098/shock_thick
 
     line1.set_data(x_scale, n_scale)
     line2.set_data(x_scale, temperature_scale)
+    line3.set_data(x_scale, vel_scale)
 
-    # p = 52
-    # negx_n = np.sum(data[p, 0:4], axis=0)[0]
-    # posx_n = np.sum(data[p, 4:], axis=0)[0]
-    # negx_u = np.sum(data[p, 0:4], axis=0)[1]
-    # posx_u = np.sum(data[p, 4:], axis=0)[1]
-    # negx_e = np.sum(data[p, 0:4], axis=0)[4]
-    # posx_e = np.sum(data[p, 4:], axis=0)[4]
+    p = 52
+    negx_n = np.sum(data[p, 0:4], axis=0)[0]
+    posx_n = np.sum(data[p, 4:], axis=0)[0]
+    negx_u = np.sum(data[p, 0:4], axis=0)[1]
+    posx_u = np.sum(data[p, 4:], axis=0)[1]
+    negx_e = np.sum(data[p, 0:4], axis=0)[4]
+    posx_e = np.sum(data[p, 4:], axis=0)[4]
     # cx_vec, cy_vec, cz_vec = np.linspace(-5, 5.5, 106), np.linspace(-5, 5.5, 106), np.linspace(-5, 5.5, 106)
     # cx, cy, cz = np.meshgrid(cx_vec, cy_vec, cz_vec, indexing='ij')
 
@@ -80,7 +84,7 @@ def update(i):
     #     title.set_text(f't = {t:.2f}')
     # else:
     t = i * 0.041
-    title.set_text(f't = {t:.3f}, $\lambda/\delta = {thick:.3f}$')
+    title.set_text(f't = {t:.3f}, $u1$ = {posx_u/posx_n:.3f}, $u0$ = {negx_u/negx_n:.3f}')
 
     return lines, title
 
@@ -94,7 +98,7 @@ def on_key(event):
             anim.resume()
             anim_running = True
 
-anim = FuncAnimation(fig, update, init_func=init, frames=54, blit=False, interval=50)
+anim = FuncAnimation(fig, update, init_func=init, frames=560, blit=False, interval=50)
 # anim.save('simulation_data/evo.mp4')
 fig.canvas.mpl_connect('key_press_event', on_key)
 plt.show()

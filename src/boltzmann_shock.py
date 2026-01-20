@@ -61,7 +61,7 @@ def run_simulation():
     # T_ref = m * c_ref**2 / (2 * k)
 
     cx_vec, cy_vec, cz_vec, cx, cy, cz = calculate_velocity_grid(VELOCITY_SPACE)
-    print(cx_vec[50])
+    print(cx_vec[40])
     xj_vec = np.linspace(PHYS_SPACE['xj_range'][0], PHYS_SPACE['xj_range'][1], PHYS_SPACE['num_xj'])
     dx = np.abs(xj_vec[1] - xj_vec[0])
     dcx = np.abs(cx_vec[1] - cx_vec[0])
@@ -109,7 +109,7 @@ def run_simulation():
     U0, f = ic(cx, cy, cz, cx_vec, cy_vec, cz_vec, n_val, u_val, T_val, VELOCITY_SPACE['num_cx'], VELOCITY_SPACE['num_cy'], VELOCITY_SPACE['num_cz'], \
         numXj, num_groups, combinations)
     if restart:
-        data = np.load('simulation_data/U141.npy')
+        data = np.load('simulation_data/U148.npy')
         print('Restarting from...')
         U = data
     else:
@@ -129,26 +129,25 @@ def run_simulation():
     bounds_list = np.zeros((num_groups, 6))
     for i in range(num_groups):
         bounds_list[i] = np.array([ci_combo[i, 0], cf_combo[i, 0], ci_combo[i, 1], cf_combo[i, 1], ci_combo[i, 2], cf_combo[i, 2]])
+    
+    # Generate sample locations through different ways (only Latin Hypercube now).
     x_sample, y_sample, z_sample, offsets, num_samples = generate_grid(bounds_list, num_groups)
+    print(bounds_list)
     print("--------------------------------BEGIN SIMULATION----------------------------------")
 
     def step(i, U_i, bounds_list, num_groups, CX_LB, CX_UB, CY_LB, CY_UB, CZ_LB, CZ_UB, key_type, x_sample, y_sample, z_sample, offsets, num_samples):
         # Calculate weights through convex optimization.
-        weights = generate_regular_samples(i, offsets, num_samples, x_sample, y_sample, z_sample, U_i, num_groups, bounds_list)
+        weights, num_valid_samples = generate_regular_samples(i, offsets, num_samples, x_sample, y_sample, z_sample, U_i, num_groups, bounds_list)
+        
 
         if np.any(np.isnan(weights)):
+            
             print('NaN weights')
             sys.exit()
 
-        # Generate random numbers for collisions.
-        Rf1 = np.random.uniform(0.0, 1.0, n_coll)
-        Rf2 = np.random.uniform(0.0, 1.0, n_coll)
-        depl_idx1 = np.random.randint(0, int(np.sum(num_samples)), n_coll)
-        depl_idx2 = np.random.randint(0, int(np.sum(num_samples)), n_coll)
-
         # Advance the collision and flux forward.
-        coll = collide(x_sample, y_sample, z_sample, weights, num_samples, bounds_list, num_groups, \
-                        Rf1, Rf2, depl_idx1, depl_idx2, n_coll, CX_LB, CX_UB, CY_LB, CY_UB, CZ_LB, CZ_UB, key_type)
+        coll = collide(x_sample, y_sample, z_sample, weights, num_valid_samples, bounds_list, num_groups, \
+                        n_coll, CX_LB, CX_UB, CY_LB, CY_UB, CZ_LB, CZ_UB, key_type)
         # coll = np.zeros(5)
         flux = calc_flux_int(num_groups, weights, offsets, x_sample, y_sample, z_sample)
 
@@ -156,11 +155,6 @@ def run_simulation():
 
     profiler = cProfile.Profile()
     for t in range(0, int(np.ceil(int(t_end / dt) / 100) * 100) + 1):
-        # Generate sample locations through different ways (only Latin Hypercube now).
-        if t % 30 == 0:
-            print('new samples')
-        
-
         # Boundary conditions.
         U[0, :] = U0[0, :]
         U[-1, :] = U[-2, :]
@@ -184,9 +178,9 @@ def run_simulation():
 
         # 2nd order central difference using MUSCL reconstruction and slope limiters.
         if t == 0: F0 = F1
-        k1_f = KT_central2(U, F1, numXj, num_groups, dt, dx, CX_LB, CX_UB, U0, F0, num_groups, bounds_list, offsets, num_samples, x_sample, y_sample, z_sample)
+        k1_f = KT_central2(U, F1, numXj, num_groups, dt, dx, CX_LB, CX_UB)
         # k1_f = LF_central1(U, F1, numXj, num_groups, dt/dx)
-        U += (k1_f) * dt
+        U += (k1_f + k1_c) * dt
 
         # Save solution.
         f1 = 'simulation_data/U{}.npy'.format(t + 0)

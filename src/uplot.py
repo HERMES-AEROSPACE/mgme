@@ -6,8 +6,8 @@ from scipy.interpolate import interp1d
 
 
 # data = np.load('simulation_data/U20.npy')
-data1 = np.load('simulation_data/U0.npy')
-data2 = np.load('simulation_data/U70.npy')
+data1 = np.load('simulation_data/U610.npy')
+data2 = np.load('simulation_data/U620.npy')
 dsmc = np.loadtxt('src/dsmc.txt')
 dsmcT = np.loadtxt('src/dsmcT.txt')
 
@@ -105,16 +105,16 @@ x_scale_shifted = x_scale + 0.08176
 
 fig = plt.figure(figsize=(10, 6))
 ax1 = fig.add_subplot(111)
-# ax1.plot(1 - dsmc[:, 0], dsmc[:, 1], '--', color='green')
+ax1.plot(1 - dsmc[:, 0], dsmc[:, 1], '--', color='green')
 # ax1.scatter(x_new, f(x_new), color='green', marker='s', facecolors='none')
-# ax1.plot(1 - dsmcT[:, 0], dsmcT[:, 1], '--', color='red')
+ax1.plot(1 - dsmcT[:, 0], dsmcT[:, 1], '--', color='red')
 # ax1.scatter(x_new, ft(x_new), color='red', marker='s', facecolors='none')
 
-# ax1.plot(x_scale, temperature1_scale, color='indigo')
-ax1.plot(temperature2_scale, color='red')
+ax1.plot(x_scale, temperature1_scale, color='indigo')
+ax1.plot(x_scale, temperature2_scale, color='red')
 # ax1.plot(x_scale, n1_scale, color='purple')
-ax1.plot(n2_scale, color='green')
-ax1.plot(vel2_scale, color='blue')
+ax1.plot(x_scale, n2_scale, color='green')
+ax1.plot(x_scale, vel2_scale, color='blue')
 # ax1.plot(x_scale, n_avg, '-.', color='green')
 # ax1.plot(x_scale, T_avg, '-.', color='red')
 
@@ -122,7 +122,7 @@ ax1.set_xlabel(r'Scaled Location', fontsize=20)
 ax1.set_ylabel(r'Normalized Property', fontsize=20)
 ax1.tick_params(axis='both',labelsize=16)
 # ax1.set_xlim(-30.0, 20.0)
-ax1.legend(['DSMC - n', 'DSMC - T', r'T', r'n'], fontsize=14)
+ax1.legend(['T', 'n', 'u'], fontsize=14)
 plt.savefig('simulation_data/density_shock.jpg', bbox_inches='tight')
 plt.tight_layout()
 
