@@ -7,7 +7,7 @@ from scipy.interpolate import interp1d
 
 # data = np.load('simulation_data/U20.npy')
 data1 = np.load('simulation_data/U2000.npy')
-data2 = np.load('simulation_data/U28.npy')
+data2 = np.load('simulation_data/U990.npy')
 dsmc = np.loadtxt('src/dsmc.txt')
 dsmcT = np.loadtxt('src/dsmcT.txt')
 
@@ -60,26 +60,26 @@ print('DSMC:', lambda_inf/shock_thick2, 'Current:', lambda_inf/shock_thick)
 p = 70
 nx1 = np.sum(data2[p, 0:4], axis=0)[0]
 nx2 = np.sum(data2[p, 4:8], axis=0)[0]
-nx3 = np.sum(data2[p, 8:], axis=0)[0]
+# nx3 = np.sum(data2[p, 8:], axis=0)[0]
 ux1 = np.sum(data2[p, 0:4], axis=0)[1]
 ux2 = np.sum(data2[p, 4:8], axis=0)[1]
-ux3 = np.sum(data2[p, 8:], axis=0)[1]
+# ux3 = np.sum(data2[p, 8:], axis=0)[1]
 ex1 = np.sum(data2[p, 0:4], axis=0)[4]
 ex2 = np.sum(data2[p, 4:8], axis=0)[4]
-ex3 = np.sum(data2[p, 8:], axis=0)[4]
+# ex3 = np.sum(data2[p, 8:], axis=0)[4]
 
 point = (x[p] - x.min()) / (x.max() - x.min())
 cx_vec, cy_vec, cz_vec = np.linspace(-5, 5.5, 106), np.linspace(-5, 5.5, 106), np.linspace(-5, 5.5, 106)
 cx, cy, cz = np.meshgrid(cx_vec, cy_vec, cz_vec, indexing='ij')
 
-A, b, wx, _, _ = invert([nx1, ux1, 0.0, 0.0, ex1], [1.0, 0.0, 0.0, 0.0], {'ci_cx': -5, 'cf_cx': -0.5, 'ci_cy': -5, 'cf_cy': 5.5, 'ci_cz': -5, 'cf_cz': 5.5})
+A, b, wx, _, _ = invert([nx1, ux1, 0.0, 0.0, ex1], [1.0, 0.0, 0.0, 0.0], {'ci_cx': -5, 'cf_cx': 1.2, 'ci_cy': -5, 'cf_cy': 5.5, 'ci_cz': -5, 'cf_cz': 5.5})
 fx1 = np.trapezoid(np.trapezoid(A * np.exp(-b * ((cx - wx)**2 + cy**2 + cz**2)), cz_vec, axis=2), cy_vec, axis=1)
 
-A, b, wx, _, _ = invert([nx2, ux2, 0.0, 0.0, ex2], [1.0, 0.0, 0.0, 0.0], {'ci_cx': -0.5, 'cf_cx': 1.2, 'ci_cy': -5, 'cf_cy': 5.5, 'ci_cz': -5, 'cf_cz': 5.5})
-fx2 = np.trapezoid(np.trapezoid(A * np.exp(-b * ((cx - wx)**2 + cy**2 + cz**2)), cz_vec, axis=2), cy_vec, axis=1)
+# A, b, wx, _, _ = invert([nx2, ux2, 0.0, 0.0, ex2], [1.0, 0.0, 0.0, 0.0], {'ci_cx': -0.5, 'cf_cx': 1.2, 'ci_cy': -5, 'cf_cy': 5.5, 'ci_cz': -5, 'cf_cz': 5.5})
+# fx2 = np.trapezoid(np.trapezoid(A * np.exp(-b * ((cx - wx)**2 + cy**2 + cz**2)), cz_vec, axis=2), cy_vec, axis=1)
 
-A, b, wx, _, _ = invert([nx3, ux3, 0.0, 0.0, ex3], [1.0, 0.0, 0.0, 0.0], {'ci_cx': 1.2, 'cf_cx': 5.5, 'ci_cy': -5, 'cf_cy': 5.5, 'ci_cz': -5, 'cf_cz': 5.5})
-fx3 = np.trapezoid(np.trapezoid(A * np.exp(-b * ((cx - wx)**2 + cy**2 + cz**2)), cz_vec, axis=2), cy_vec, axis=1)
+A, b, wx, _, _ = invert([nx2, ux2, 0.0, 0.0, ex2], [1.0, 0.0, 0.0, 0.0], {'ci_cx': 1.2, 'cf_cx': 5.5, 'ci_cy': -5, 'cf_cy': 5.5, 'ci_cz': -5, 'cf_cz': 5.5})
+fx2 = np.trapezoid(np.trapezoid(A * np.exp(-b * ((cx - wx)**2 + cy**2 + cz**2)), cz_vec, axis=2), cy_vec, axis=1)
 
 # Interpolate to get smooth curves of the DSMC data.
 f = interp1d(1 - dsmc[:, 0], dsmc[:, 1], kind='cubic')
@@ -112,31 +112,31 @@ x_scale_shifted = x_scale + 0.08176
 fig = plt.figure(figsize=(10, 6))
 ax1 = fig.add_subplot(111)
 # ax1.plot(x_scale, temperature1_scale, color='indigo')
-ax1.plot(x_scale, temperature2_scale, color='red')
+ax1.plot(x_scale - 0.045, temperature2_scale, color='red')
 # ax1.plot(x_scale, n1_scale, color='purple')
-ax1.plot(x_scale, n2_scale, color='green')
-ax1.plot(x_scale, vel2_scale, color='blue')
+ax1.plot(x_scale - 0.045, n2_scale, color='green')
+# ax1.plot(x_scale, vel2_scale, color='blue')
 # ax1.plot(x_scale, n_avg, '-.', color='green')
 # ax1.plot(x_scale, T_avg, '-.', color='red')
 # ax1.plot(1 - dsmc[:, 0], dsmc[:, 1], '--', color='green')
-# ax1.scatter(x_new, f(x_new), color='green', marker='s', facecolors='none')
+ax1.scatter(x_new, f(x_new), color='green', marker='s', facecolors='none')
 # ax1.plot(1 - dsmcT[:, 0], dsmcT[:, 1], '--', color='red')
-# ax1.scatter(x_new, ft(x_new), color='red', marker='s', facecolors='none')
+ax1.scatter(x_new, ft(x_new), color='red', marker='s', facecolors='none')
 
 ax1.set_xlabel(r'Scaled Location', fontsize=20)
 ax1.set_ylabel(r'Normalized Property', fontsize=20)
 ax1.tick_params(axis='both',labelsize=16)
 # ax1.set_xlim(-30.0, 20.0)
-ax1.legend(['T', 'n'], fontsize=14)
+ax1.legend(['T', 'n', 'DSMC - n', 'DSMC - T'], fontsize=14)
 plt.savefig('simulation_data/density_shock.jpg', bbox_inches='tight')
 ax1.grid()
 plt.tight_layout()
 
 fig3 = plt.figure(figsize=(6, 6))
 ax3 = fig3.add_subplot(111)
-ax3.plot(cx_vec[0:46], fx1[0:46], color='green')
-ax3.plot(cx_vec[45:63], fx2[45:63], color='red')
-ax3.plot(cx_vec[62:], fx3[62:], color='blue')
+ax3.plot(cx_vec[0:63], fx1[0:63], color='green')
+ax3.plot(cx_vec[62:106], fx2[62:106], color='red')
+# ax3.plot(cx_vec[62:], fx3[62:], color='blue')
 ax3.set_xlabel(r'$C_x$', fontsize=20)
 ax3.set_ylabel(r'f', fontsize=20)
 ax3.tick_params(axis='both',labelsize=16)

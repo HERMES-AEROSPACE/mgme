@@ -71,7 +71,7 @@ def run_simulation():
     Xj_u = PHYS_SPACE['xj_range'][1]
     numXj = PHYS_SPACE['num_xj']
 
-    cfl = 0.5
+    cfl = 0.7
     t_end = 30.0
     tc = 1/(n2/n_ref * (d/d_ref)**2 * np.sqrt(2) * 1)
     dt = np.round(cfl/(1/tc + CX_UB/dx), 3)
@@ -104,12 +104,12 @@ def run_simulation():
     cf_combo = np.array(list(itertools.product(cf_cx, cf_cy, cf_cz)))
     num_groups = combinations.shape[0]
 
-    restart = 0
+    restart =1
 
     U0, f = ic(cx, cy, cz, cx_vec, cy_vec, cz_vec, n_val, u_val, T_val, VELOCITY_SPACE['num_cx'], VELOCITY_SPACE['num_cy'], VELOCITY_SPACE['num_cz'], \
         numXj, num_groups, combinations)
     if restart:
-        data = np.load('simulation_data/U1291.npy')
+        data = np.load('simulation_data/U800.npy')
         print('Restarting from...')
         U = data
     else:
@@ -178,11 +178,11 @@ def run_simulation():
         U += (k1_f + k1_c) * dt
 
         # Save solution.
-        f1 = 'simulation_data/U{}.npy'.format(t + 0)
+        f1 = 'simulation_data/U{}.npy'.format(t + 801)
         with open(f1, 'wb') as file:
             np.save(file, U)
 
-        print(t * dt,  t + 0)
+        print(t * dt,  t + 801)
 
 if __name__ == '__main__':
     run_simulation()
