@@ -11,7 +11,7 @@ from .config import (
     SAMPLING_PARAMS
 )
 from .moment_utils import calc_moment
-from .sampling import generate_regular_samples, generate_grid, calculate_volume_elements, calculate_entropy, calculate_velocity_grid
+from .sampling import generate_regular_samples, generate_grid, calculate_volume_elements, calculate_velocity_grid
 from .virtual_collisions import collide
 from .data_utils import save_simulation_data
 from .banner import print_banner
@@ -25,12 +25,21 @@ def run_simulation():
     
     # Get velocity space grid.
     cx_vec, cy_vec, cz_vec, cx, cy, cz = calculate_velocity_grid()
+    dx = cx_vec[1] - cx_vec[0]
+    dy = cy_vec[1] - cy_vec[0]
+    dz = cz_vec[1] - cz_vec[0]
 
     # Initial distribution function. Still have to uncomment the correct one.
+    Ak = 0.00384934
+    bk = 0.03110795
+    wxk = 2.36981369
+    wyk = 0.0
+    wzk = 0.0
     # K = 1 - 0.4 * np.exp(-0/6)
     # f0 = 1 / (2 * K * (np.pi * K)**1.5) * (5 * K - 3 + 2 * (1 - K) / K * (cx**2 + cy**2 + cz**2)) * np.exp(-(cx**2 + cy**2 + cz**2) / K)
     f0 = 1 / (np.pi**1.5) * np.exp(-1 * (cx**2 + cy**2 + cz**2))
     # f0 = 0.5 * (3 / np.pi)**1.5 * (np.exp(-3.0 * (cx - 1)**2) + np.exp(-3.0 * (cx + 1)**2)) * np.exp(-3 * (cy**2 + cz**2))
+    # f0 = Ak * np.exp(-bk * ((cx - wxk)**2 + (cy - wyk)**2 + (cz - wzk)**2))
 
     # Create the root node of the AMR tree.
     root = GroupNode({'ci_cx': VELOCITY_SPACE['cx_range'][0], 'cf_cx': VELOCITY_SPACE['cx_range'][1], 'group_bounds_cx': np.array([0, VELOCITY_SPACE['num_cx']]),
@@ -40,7 +49,7 @@ def run_simulation():
     root.set_mu(mu)
     root._update_group_dist_params([1.0, 0.0, 0.0, 0.0])
     root_f = root.A * np.exp(-root.b * ((cx - root.wx)**2 + (cy - root.wy)**2 + (cz - root.wz)**2))
-    dist = calculate_hellinger_distance(f0, root_f, cx_vec, cy_vec, cz_vec, root.group_bounds)
+    dist = calculate_hellinger_distance(f0, root_f, cx_vec, cy_vec, cz_vec)
     root.set_hellinger_distance(dist)
 
     print('Running AMR to get initial groups...\n')
@@ -57,7 +66,7 @@ def run_simulation():
     for i, group in enumerate(curr_groups):
         bounds_list[i] = np.array([group.group_bounds['ci_cx'], group.group_bounds['cf_cx'], group.group_bounds['ci_cy'], \
                                    group.group_bounds['cf_cy'], group.group_bounds['ci_cz'], group.group_bounds['cf_cz']])
-
+    # print(bounds_list)
     print('Initial group generation complete. Generating samples...\n')
 
     # Sets up list of current groups in refinement level. Will need other arrays for finer/coarser grids in AMR.
@@ -70,6 +79,23 @@ def run_simulation():
     vol_elem = calculate_volume_elements(sample_loc_x, sample_loc_y, sample_loc_z)
     weights, num_group_sample = generate_regular_samples(n_samples, x_sample, y_sample, z_sample, curr_groups, vol_elem)
     print('Reweighting samples...\n')
+    
+    # plt.rcParams['font.family'] = "serif"
+    # fig, ax = plt.subplots(3, 1, figsize=(8, 10))
+    # ax[0].plot(cx_vec, np.trapz(np.trapz(f0, cz_vec, axis=2), cy_vec, axis=1))
+    # ax[0].plot(sample_loc_x, np.sum(np.reshape(weights, (24, 20, 20)) / 2, axis=(1, 2)), '--o', color='black')
+    # ax[0].hist(x_sample, weights=weights / dx, bins=24)
+    # ax[1].plot(cy_vec, np.trapz(np.trapz(f0, cz_vec, axis=2), cx_vec, axis=0))
+    # ax[1].plot(sample_loc_y, np.sum(np.reshape(weights, (24, 20, 20)), axis=(0, 2)), '--o', color='black')
+    # ax[1].hist(y_sample, weights=weights, bins=12)
+    # ax[2].plot(cz_vec, np.trapz(np.trapz(f0, cy_vec, axis=1), cx_vec, axis=0))
+    # ax[2].hist(z_sample, weights=weights, bins=12)
+    # ax[2].plot(sample_loc_z, np.sum(np.reshape(weights, (24, 20, 20)), axis=(0, 1)), '--o', color='black')
+    # ax[0].set_xlabel('Cx', fontsize=20)
+    # ax[1].set_xlabel('Cy', fontsize=20)
+    # ax[2].set_xlabel('Cz', fontsize=20)
+    # plt.tight_layout()
+    # plt.show()
 
     # reweighted_weights = reweight_samples(x_sample, y_sample, z_sample, weights, num_group_sample, mu)
 
@@ -77,14 +103,14 @@ def run_simulation():
 
     # Set up array for entropy calculation and outputting.
     entropy_list = np.zeros(COLLISION_PARAMS['n_t'] + 1)
-    entropy_list[0] = calculate_entropy(weights, volume_elements, sample_loc_x, sample_loc_y, sample_loc_z, SAMPLING_PARAMS['n_samples_x'], SAMPLING_PARAMS['n_samples_y'], SAMPLING_PARAMS['n_samples_z'])
-    print(entropy_list[0])
+    # entropy_list[0] = calculate_entropy(weights, volume_elements, sample_loc_x, sample_loc_y, sample_loc_z, SAMPLING_PARAMS['n_samples_x'], SAMPLING_PARAMS['n_samples_y'], SAMPLING_PARAMS['n_samples_z'])
+    # print(entropy_list[0])
 
     # MAIN SIMULATION LOOP.
     for t in range(1, COLLISION_PARAMS['n_t'] + 1):
         if t % 10 == 0:
             print('Time step: ', t)
-            print('Entropy: ', entropy_list[t - 1])
+            # print('Entropy: ', entropy_list[t - 1])
 
         # Random values necessary for collision routine.
         Rf1 = np.random.uniform(0.0, 1.0, COLLISION_PARAMS['n_coll'])
@@ -94,17 +120,18 @@ def run_simulation():
 
         # BINARY ELASTIC COLLISIONS.
         group_n, group_px, group_py, group_pz, group_e = collide(x_sample, y_sample, z_sample, weights, num_group_sample, bounds_list, n_groups, Rf1, Rf2, depl_idx1, depl_idx2)
-        
+        # print(np.sum(group_n.reshape(-1, 1), axis=1))
         # Update group parameters after collisions. Do not invert the distribution.
         for i, group in enumerate(curr_groups):
             group.update_parameters(COLLISION_PARAMS['dt'], group_n[i], group_px[i], group_py[i], group_pz[i], group_e[i])
+            # print(group.A, group.b, group.wx, group.wy, group.wz)
 
         # Save data for plotting.
         curr_groups_list[t] = copy.deepcopy(curr_groups)
 
         # Update weights for next simulation step. Update entropy.
-        weights, _ = generate_regular_samples(n_samples, x_sample, y_sample, z_sample, curr_groups)
-        entropy_list[t] = calculate_entropy(weights, volume_elements, sample_loc_x, sample_loc_y, sample_loc_z, SAMPLING_PARAMS['n_samples_x'], SAMPLING_PARAMS['n_samples_y'], SAMPLING_PARAMS['n_samples_z'])
+        weights, _ = generate_regular_samples(n_samples, x_sample, y_sample, z_sample, curr_groups, vol_elem)
+        # entropy_list[t] = calculate_entropy(weights, volume_elements, sample_loc_x, sample_loc_y, sample_loc_z, SAMPLING_PARAMS['n_samples_x'], SAMPLING_PARAMS['n_samples_y'], SAMPLING_PARAMS['n_samples_z'])
 
     # Save final state.
     save_simulation_data(COLLISION_PARAMS['n_t'], curr_groups_list, entropy_list)

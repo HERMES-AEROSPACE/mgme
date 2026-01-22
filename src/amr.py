@@ -48,7 +48,7 @@ class GroupNode:
         self.A, self.b, self.wx, self.wy, self.wz = invert(self.mu, initial_guess, self.group_bounds)
 
 
-def calculate_hellinger_distance(f1, f2, cx_vec, cy_vec, cz_vec, params=GROUP_PARAMS):
+def calculate_hellinger_distance(f1, f2, cx_vec, cy_vec, cz_vec):
     """
     Calculate the Hellinger distance between two distributions in a specific group.
     Make sure distributions are normalized to 1!!!!!!
@@ -113,7 +113,7 @@ def refine_init(f0, cx, cy, cz, cx_vec, cy_vec, cz_vec, node, max_depth=6, curr_
             
                 # Calculate Hellinger distance.
                 f = A * np.exp(-b * ((cx_slice - wx)**2 + (cy_slice - wy)**2 + (cz_slice - wz)**2))
-                dist = calculate_hellinger_distance(f0_slice, f, cx_vec_slice, cy_vec_slice, cz_vec_slice, child.group_bounds)
+                dist = calculate_hellinger_distance(f0_slice, f, cx_vec_slice, cy_vec_slice, cz_vec_slice)
                 child.set_hellinger_distance(dist)
 
                 children.append(child)
@@ -284,13 +284,13 @@ def custom_groups(f0, cx, cy, cz, cx_vec, cy_vec, cz_vec, root, group_params):
         child.set_mu(mu)
             
         if mu[0] > 1e-4:
-            A, b, wx, wy, wz = invert(mu, [1.0, 0.0, 0.0, 0.0], child.group_bounds)
+            A, b, wx, wy, wz = invert(mu, [0.1, mu[1], mu[2], mu[3]], child.group_bounds)
             # print(A, b, wx, wy, wz)
             child.set_dist_param(A, b, wx, wy, wz)
         
             # Calculate Hellinger distance.
             f = A * np.exp(-b * ((cx_slice - wx)**2 + (cy_slice - wy)**2 + (cz_slice - wz)**2))
-            dist = calculate_hellinger_distance(f0_slice, f, cx_vec_slice, cy_vec_slice, cz_vec_slice, child.group_bounds)
+            dist = calculate_hellinger_distance(f0_slice, f, cx_vec_slice, cy_vec_slice, cz_vec_slice)
             child.set_hellinger_distance(dist)
         else:
             child.set_dist_param(0.0, 0.0, 0.0, 0.0, 0.0)
