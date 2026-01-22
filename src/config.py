@@ -27,9 +27,9 @@ GROUP_PARAMS = {
     # 'ci_cz': np.array([-5.0, -0.5, 0.0, 0.5]),
     # 'cf_cz': np.array([-0.5, 0.0, 0.5, 5.0]),
     # 'group_bounds_cz': np.array([[0, 109], [108, 121], [120, 133], [132, 241]])
-    'ci_cx': np.array([-5.0, -2.0, 1.2]),
-    'cf_cx': np.array([-2.0, 1.2, 5.5]),
-    'group_bounds_cx': np.array([[0, 31], [30, 63], [62, 106]]),
+    'ci_cx': np.array([-5.0, 0.6]),
+    'cf_cx': np.array([0.6, 5.5]),
+    'group_bounds_cx': np.array([[0, 60], [59, 106]]),
     'ci_cy': np.array([-5.0, 0]), 
     'cf_cy': np.array([0, 5.5]),
     'group_bounds_cy': np.array([[0, 51], [50, 106]]),
@@ -54,7 +54,7 @@ AMR = {
 
 # Collision parameters
 COLLISION_PARAMS = {
-    'n_coll': 100000
+    'n_coll': 50000
 }
 
 LOOKUP_TABLE = {
