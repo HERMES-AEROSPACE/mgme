@@ -79,11 +79,10 @@ def update(i):
 
     # line1.set_data(cx_vec[0:63], negx_f[0:63])
     # line2.set_data(cx_vec[62:], posx_f[62:])
-    # if i > 1158:
-    #     t = 1158 * 0.01 + 0.02 * (i - 1158)
+    # if i > 115169
     #     title.set_text(f't = {t:.2f}')
     # else:
-    t = i * 0.041
+    t = i * 0.029
     title.set_text(f't = {t:.3f}, $u1$ = {posx_u/posx_n:.3f}, $u0$ = {negx_u/negx_n:.3f}')
 
     return lines, title
@@ -98,7 +97,7 @@ def on_key(event):
             anim.resume()
             anim_running = True
 
-anim = FuncAnimation(fig, update, init_func=init, frames=560, blit=False, interval=50)
+anim = FuncAnimation(fig, update, init_func=init, frames=130, blit=False, interval=50)
 # anim.save('simulation_data/evo.mp4')
 fig.canvas.mpl_connect('key_press_event', on_key)
 plt.show()

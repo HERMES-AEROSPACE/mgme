@@ -61,7 +61,7 @@ def run_simulation():
     # T_ref = m * c_ref**2 / (2 * k)
 
     cx_vec, cy_vec, cz_vec, cx, cy, cz = calculate_velocity_grid(VELOCITY_SPACE)
-    print(cx_vec[40])
+    print(cx_vec[30])
     xj_vec = np.linspace(PHYS_SPACE['xj_range'][0], PHYS_SPACE['xj_range'][1], PHYS_SPACE['num_xj'])
     dx = np.abs(xj_vec[1] - xj_vec[0])
     dcx = np.abs(cx_vec[1] - cx_vec[0])
@@ -71,7 +71,7 @@ def run_simulation():
     Xj_u = PHYS_SPACE['xj_range'][1]
     numXj = PHYS_SPACE['num_xj']
 
-    cfl = 0.7
+    cfl = 0.5
     t_end = 30.0
     tc = 1/(n2/n_ref * (d/d_ref)**2 * np.sqrt(2) * 1)
     dt = np.round(cfl/(1/tc + CX_UB/dx), 3)
@@ -80,8 +80,8 @@ def run_simulation():
     print('Time step:', dt)
     print('dx:', dx)
 
-    transition_start = -15
-    transition_end = 10
+    transition_start = -5
+    transition_end = 5
     ramp_length = transition_end - transition_start
 
     t = (xj_vec - transition_start) / ramp_length
@@ -109,7 +109,7 @@ def run_simulation():
     U0, f = ic(cx, cy, cz, cx_vec, cy_vec, cz_vec, n_val, u_val, T_val, VELOCITY_SPACE['num_cx'], VELOCITY_SPACE['num_cy'], VELOCITY_SPACE['num_cz'], \
         numXj, num_groups, combinations)
     if restart:
-        data = np.load('simulation_data/U148.npy')
+        data = np.load('simulation_data/U1291.npy')
         print('Restarting from...')
         U = data
     else:
@@ -130,26 +130,21 @@ def run_simulation():
     for i in range(num_groups):
         bounds_list[i] = np.array([ci_combo[i, 0], cf_combo[i, 0], ci_combo[i, 1], cf_combo[i, 1], ci_combo[i, 2], cf_combo[i, 2]])
     
-    # Generate sample locations through different ways (only Latin Hypercube now).
     x_sample, y_sample, z_sample, offsets, num_samples = generate_grid(bounds_list, num_groups)
     print(bounds_list)
     print("--------------------------------BEGIN SIMULATION----------------------------------")
 
     def step(i, U_i, bounds_list, num_groups, CX_LB, CX_UB, CY_LB, CY_UB, CZ_LB, CZ_UB, key_type, x_sample, y_sample, z_sample, offsets, num_samples):
         # Calculate weights through convex optimization.
-        weights, num_valid_samples = generate_regular_samples(i, offsets, num_samples, x_sample, y_sample, z_sample, U_i, num_groups, bounds_list)
-        
-
-        if np.any(np.isnan(weights)):
-            
-            print('NaN weights')
-            sys.exit()
+        weights, num_valid_samples, x_sample_mod, y_sample_mod, z_sample_mod = generate_regular_samples(
+            i, offsets, num_samples, x_sample, y_sample, z_sample, U_i, num_groups, bounds_list,
+            max_retries=10
+        )
 
         # Advance the collision and flux forward.
-        coll = collide(x_sample, y_sample, z_sample, weights, num_valid_samples, bounds_list, num_groups, \
+        coll = collide(x_sample_mod, y_sample_mod, z_sample_mod, weights, num_valid_samples, bounds_list, num_groups, \
                         n_coll, CX_LB, CX_UB, CY_LB, CY_UB, CZ_LB, CZ_UB, key_type)
-        # coll = np.zeros(5)
-        flux = calc_flux_int(num_groups, weights, offsets, x_sample, y_sample, z_sample)
+        flux = calc_flux_int(num_groups, weights, offsets, x_sample_mod, y_sample_mod, z_sample_mod)
 
         return i, coll, flux
 

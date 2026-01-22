@@ -28,13 +28,12 @@ def generate_grid(bounds_list, num_groups):
         volume = (bounds_list[i, 1] - bounds_list[i, 0]) * \
             (bounds_list[i, 3] - bounds_list[i, 2]) * \
             (bounds_list[i, 5] - bounds_list[i, 4])
-        num_samples[i] = int(np.ceil(20 * volume))
+        num_samples[i] = int(np.ceil(30 * volume))
     
     x_sample = np.zeros(int(np.sum(num_samples)))
     y_sample = np.zeros(int(np.sum(num_samples)))
     z_sample = np.zeros(int(np.sum(num_samples)))
     offsets = np.concatenate([[0], np.cumsum(num_samples)])
-    sampler = qmc.LatinHypercube(d=3)
 
     for i in range(0, num_groups):
         l_bounds = [bounds_list[i, 0], bounds_list[i, 2], bounds_list[i, 4]]
@@ -43,6 +42,7 @@ def generate_grid(bounds_list, num_groups):
         start_idx = int(offsets[i])
         end_idx = int(offsets[i+1])
 
+        sampler = qmc.LatinHypercube(d=3)
         sample = qmc.scale(sampler.random(n=int(num_samples[i])), l_bounds, u_bounds)
     
         x_sample[start_idx:end_idx] = sample[:, 0]
@@ -311,12 +311,12 @@ def calc_flux(Ak, bk, wxk, wyk, wzk, I0x, I0y, I0z, I1x, I1y, I1z, I2x, I2y, I2z
 
     return F
 
-@jit(nopython=True)
+# @jit(nopython=True)
 def calc_flux_int(num_groups, weights, offsets, x_sample, y_sample, z_sample):
     # Calculate the flux from samples generated. Requires samples to be placed at locations covering the whole domain for best results.
     F = np.zeros((num_groups, 5))
 
-    for i in range(0, num_groups):
+    for i in range(0, num_groups): 
         start_idx = int(offsets[i])
         end_idx = int(offsets[i+1])
 
@@ -399,6 +399,21 @@ def KT_central2(U_list, F_list, numXj, n_groups, dt, dx, CX_LB, CX_UB):
         H_plus = (fR_plus + fL_plus)/2 - (a_plus/2) * (uR_plus - uL_plus)
         H_minus = (fR_minus + fL_minus)/2 - (a_minus/2) * (uR_minus - uL_minus)
 
+        if np.any(np.abs(-1/dx * (H_plus - H_minus)) > 10.0): 
+            flux_value = -1/dx * (H_plus - H_minus)
+            bad_indices = np.where(np.abs(flux_value) > 10.0)[0]
+
+            for idx in bad_indices[:5]:
+                print(f"\n--- Cell {idx} ---")
+                print(f"Flux value: {flux_value[idx]}")
+                print(f"H_plus[{idx}]: {H_plus[idx]}")
+                print(f"H_minus[{idx}]: {H_minus[idx]}")
+                print(f"Difference (H_plus - H_minus): {(H_plus[idx] - H_minus[idx])}")
+                print(fR_plus[idx])
+                print(fL_plus[idx])
+                print(fR_minus[idx])
+                print(fL_minus[idx])
+
         k[2:numXj-2, i] = -1/dx * (H_plus - H_minus)
 
         k[1, i] = -(F_list[2, i] - F_list[0, i])/(2 * dx) + 1/(2 * dx) * (a_plus * (U_list[2, i] - U_list[1, i]) - a_minus * (U_list[1, i] - U_list[0, i]))
@@ -406,101 +421,153 @@ def KT_central2(U_list, F_list, numXj, n_groups, dt, dx, CX_LB, CX_UB):
 
     return k
 
-def generate_regular_samples(p, offsets, num_samples, x_sample, y_sample, z_sample, U_i, num_groups, bounds_list):
+def try_solve_group(i, x_sample_filter, y_sample_filter, z_sample_filter, U_i, flux_limit=10.0):
+    """Attempt to solve for one group"""
+    try:
+        x = cp.Variable(shape=int(x_sample_filter.size), nonneg=True)
+        obj = cp.Maximize(cp.sum(cp.entr(x)))
+
+        constraints = [
+            cp.sum(x) == U_i[i, 0],
+            cp.sum(cp.multiply(x_sample_filter, x)) == U_i[i, 1],
+            cp.sum(cp.multiply(y_sample_filter, x)) == U_i[i, 2],
+            cp.sum(cp.multiply(z_sample_filter, x)) == U_i[i, 3],
+            cp.sum(cp.multiply(x_sample_filter**2 + y_sample_filter**2 + z_sample_filter**2, x)) == U_i[i, 4]
+        ]
+        
+        prob = cp.Problem(obj, constraints)
+        prob.solve(solver=cp.CLARABEL, verbose=False)
+
+        if prob.status == cp.OPTIMAL and x.value is not None and not np.any(np.isnan(x.value)):
+            predicted_flux = np.sum(x_sample_filter * x.value)
+            
+            if np.abs(predicted_flux) < flux_limit:
+                return True, x.value, predicted_flux
+            else:
+                return False, None, f"flux_too_large_{predicted_flux:.3f}"
+        else:
+            return False, None, f"status_{prob.status}"
+
+    except Exception as e:
+        return False, None, str(e)
+
+def regenerate_group_samples(i, n_samples, bounds_list):
+    """Generate new samples for a group"""
+    sampler = qmc.LatinHypercube(d=3)
+    l_bounds = [bounds_list[i, 0], bounds_list[i, 2], bounds_list[i, 4]]
+    u_bounds = [bounds_list[i, 1], bounds_list[i, 3], bounds_list[i, 5]]
+    
+    if all(u > l for l, u in zip(l_bounds, u_bounds)):
+        sample = qmc.scale(sampler.random(n=n_samples), l_bounds, u_bounds)
+        return sample[:, 0], sample[:, 1], sample[:, 2]
+    else:
+        return None, None, None
+
+def generate_regular_samples(p, offsets, num_samples, x_sample, y_sample, z_sample, U_i, num_groups, bounds_list, max_retries=10):
     weights = np.zeros(int(np.sum(num_samples)))
     num_valid_samples = np.zeros(num_groups, dtype=np.int64)
 
-    fixed_bounds = np.array([
-                             [-2.5, 1.2, -4, 0, -4, 0], \
-                             [-2.5, 1.2, -4, 0, 0, 4], \
-                             [-2.5, 1.2, 0, 4, -4, 0], \
-                             [-2.5, 1.2, 0, 4, 0, 4], \
-                             [1.2, 4.5, -4, 0, -4, 0], \
-                             [1.2, 4.5, -4, 0, 0, 4], \
-                             [1.2, 4.5, 0, 4, -4, 0], \
-                             [1.2, 4.5, 0, 4, 0, 4]])
+    x_sample_modified = x_sample.copy()
+    y_sample_modified = y_sample.copy()
+    z_sample_modified = z_sample.copy()
 
     ux = U_i[:, 1] / U_i[:, 0]
     uy = U_i[:, 2] / U_i[:, 0]
-    uz = U_i[:, 3] / U_i[:, 0] 
-    T = 2/3 * ((U_i[:, 4] / U_i[:, 0]) - (ux**2 + uy**2 + uz**2))
-    x_boundsl = np.maximum(bounds_list[:, 0], 
-                            np.maximum(ux - 3*np.sqrt(T), fixed_bounds[:, 0]))
-    x_boundsu = np.minimum(bounds_list[:, 1], 
-                            np.minimum(ux + 3*np.sqrt(T), fixed_bounds[:, 1]))
+    uz = U_i[:, 3] / U_i[:, 0]
     
-    y_boundsl = np.maximum(bounds_list[:, 2], 
-                            np.maximum(uy - 3*np.sqrt(T), fixed_bounds[:, 2]))
-    y_boundsu = np.minimum(bounds_list[:, 3], 
-                            np.minimum(uy + 3*np.sqrt(T), fixed_bounds[:, 3]))
+    thermal = (U_i[:, 4] / U_i[:, 0]) - (ux**2 + uy**2 + uz**2)
+    sigma = np.sqrt(np.maximum(2 * thermal / 3, 1e-10))
     
-    z_boundsl = np.maximum(bounds_list[:, 4], 
-                            np.maximum(uz - 3*np.sqrt(T), fixed_bounds[:, 4]))
-    z_boundsu = np.minimum(bounds_list[:, 5], 
-                            np.minimum(uz + 3*np.sqrt(T), fixed_bounds[:, 5]))
+    x_boundsl = np.maximum(bounds_list[:, 0], ux - 3*sigma)
+    x_boundsu = np.minimum(bounds_list[:, 1], ux + 3*sigma)
+    
+    y_boundsl = np.maximum(bounds_list[:, 2], uy - 3*sigma)
+    y_boundsu = np.minimum(bounds_list[:, 3], uy + 3*sigma)
+    
+    z_boundsl = np.maximum(bounds_list[:, 4], uz - 3*sigma)
+    z_boundsu = np.minimum(bounds_list[:, 5], uz + 3*sigma)
 
     for i in range(num_groups):
         start_idx = int(offsets[i])
         end_idx = int(offsets[i+1])
+        n_samples_group = end_idx - start_idx
 
-        x_sample_slice = x_sample[start_idx:end_idx]
-        y_sample_slice = y_sample[start_idx:end_idx]
-        z_sample_slice = z_sample[start_idx:end_idx]
+        # Skip if density too small
+        if U_i[i, 0] <= 1e-6:
+            num_valid_samples[i] = 0
+            weights[start_idx:end_idx] = 0.0
+            continue
 
-        mask = (
-            (x_sample_slice > x_boundsl[i]) & (x_sample_slice < x_boundsu[i]) &
-            (y_sample_slice > y_boundsl[i]) & (y_sample_slice < y_boundsu[i]) &
-            (z_sample_slice > z_boundsl[i]) & (z_sample_slice < z_boundsu[i])
-        )
+        # Try multiple times
+        success = False
+        for attempt in range(max_retries):
+            
+            # For retry attempts, regenerate samples
+            if attempt > 0:
+                x_new, y_new, z_new = regenerate_group_samples(i, n_samples_group, bounds_list)
+                
+                if x_new is None:
+                    break  # Invalid bounds
+                
+                # Replace samples in modified arrays
+                x_sample_modified[start_idx:end_idx] = x_new
+                y_sample_modified[start_idx:end_idx] = y_new
+                z_sample_modified[start_idx:end_idx] = z_new
+            
+            # Get samples (from original on first attempt, modified on retries)
+            if attempt == 0:
+                x_sample_slice = x_sample[start_idx:end_idx]
+                y_sample_slice = y_sample[start_idx:end_idx]
+                z_sample_slice = z_sample[start_idx:end_idx]
+            else:
+                x_sample_slice = x_sample_modified[start_idx:end_idx]
+                y_sample_slice = y_sample_modified[start_idx:end_idx]
+                z_sample_slice = z_sample_modified[start_idx:end_idx]
 
-        x_sample_filter = x_sample_slice[mask]
-        y_sample_filter = y_sample_slice[mask]
-        z_sample_filter = z_sample_slice[mask]
+            # Filter samples within adaptive bounds
+            mask = (
+                (x_sample_slice > x_boundsl[i]) & (x_sample_slice < x_boundsu[i]) &
+                (y_sample_slice > y_boundsl[i]) & (y_sample_slice < y_boundsu[i]) &
+                (z_sample_slice > z_boundsl[i]) & (z_sample_slice < z_boundsu[i])
+            )
 
-        if U_i[i, 0] > 1e-4: # wonder what a good threshold is.
-            try:
-                x = cp.Variable(shape=int(x_sample_filter.size), nonneg=True)
-                obj = cp.Maximize(cp.sum(cp.entr(x)))
+            x_sample_filter = x_sample_slice[mask]
+            y_sample_filter = y_sample_slice[mask]
+            z_sample_filter = z_sample_slice[mask]
 
-                constraints = [cp.sum(x) == U_i[i, 0], cp.sum(cp.multiply(x_sample_filter, x)) == U_i[i, 1], \
-                            cp.sum(cp.multiply(y_sample_filter, x)) == U_i[i, 2], cp.sum(cp.multiply(z_sample_filter, x)) == U_i[i, 3], \
-                            cp.sum(cp.multiply(x_sample_filter**2 + y_sample_filter**2 + z_sample_filter**2, x)) == U_i[i, 4]]
-                prob = cp.Problem(obj, constraints)
-                prob.solve()
+            # Check if enough samples survived filtering
+            if x_sample_filter.size < 10:
+                if attempt == max_retries - 1:
+                    print(f'Cell {p}, Group {i}: Failed - only {x_sample_filter.size} samples after {max_retries} attempts')
+                    num_valid_samples[i] = 0
+                    weights[start_idx:end_idx] = 0.0
+                continue  # Try next attempt
 
+            # Try to solve
+            success, solution, status = try_solve_group(
+                i, x_sample_filter, y_sample_filter, z_sample_filter, U_i
+            )
+            
+            if success:
+                # Accept solution
                 mask_indices = np.where(mask)[0]
                 absolute_indices = start_idx + mask_indices
-                weights[absolute_indices] = x.value
-                num_valid_samples[i] = np.sum(x.value > 1e-12)
+                weights[absolute_indices] = solution
+                num_valid_samples[i] = np.sum(solution > 1e-12)
+                
+                # if attempt > 0:
+                    # print(f'Cell {p}, Group {i}: Success on retry {attempt+1}')
+                
+                break  # Exit retry loop
+            else:
+                if attempt == max_retries - 1:
+                    print(f'Cell {p}, Group {i}: Failed after {max_retries} attempts - {status}')
+                    print(U_i[i, 0], U_i[i, 1], U_i[i, 2], U_i[i, 3], U_i[i, 4])
+                    print(x_boundsl[i], x_boundsu[i], y_boundsl[i], y_boundsu[i], z_boundsl[i], z_boundsu[i])
+                    num_valid_samples[i] = 0
+                    weights[start_idx:end_idx] = 0.0
 
-                if np.any(np.isnan(x.value)):
-                    raise Exception("Catch CVXPY failures")
-            except:
-                print('CLARABEL failed', p, i, U_i[i, 0], U_i[i, 1], U_i[i, 2], U_i[i, 3], U_i[i, 4])
-                print(x_boundsl[i], x_boundsu[i], y_boundsl[i], y_boundsu[i], z_boundsl[i], z_boundsu[i], int(x_sample_filter.size))
-                num_valid_samples[i] = 0
-
-                # l_bounds = [x_boundsl[i], y_boundsl[i], z_boundsl[i]]
-                # u_bounds = [x_boundsu[i], y_boundsu[i], z_boundsu[i]]
-                # sampler = qmc.LatinHypercube(d=3)
-                # sample = qmc.scale(sampler.random(n=int(x_sample_filter.size)), l_bounds, u_bounds)
-
-                # x_sample_filter = sample[:, 0]
-                # y_sample_filter = sample[:, 1]
-                # z_sample_filter = sample[:, 2]
-
-                # x = cp.Variable(shape=int(x_sample_filter.size), nonneg=True)
-                # obj = cp.Maximize(cp.sum(cp.entr(x)))
-
-                # constraints = [cp.sum(x) == U_i[i, 0], cp.sum(cp.multiply(x_sample_filter, x)) == U_i[i, 1], \
-                #             cp.sum(cp.multiply(y_sample_filter, x)) == U_i[i, 2], cp.sum(cp.multiply(z_sample_filter, x)) == U_i[i, 3], \
-                #             cp.sum(cp.multiply(x_sample_filter**2 + y_sample_filter**2 + z_sample_filter**2, x)) == U_i[i, 4]]
-                # prob = cp.Problem(obj, constraints)
-                # prob.solve(verbose=True)
-
-                # weights[start_idx:end_idx][mask] = x.value
-
-    return weights, num_valid_samples
+    return weights, num_valid_samples, x_sample_modified, y_sample_modified, z_sample_modified
 
 @jit(nopython=True)
 def collide(x_sample, y_sample, z_sample, weights, num_valid_samples, bounds_list, n_groups, n_coll, CX_LB, CX_UB, CY_LB, CY_UB, CZ_LB, CZ_UB, key_type):

@@ -88,10 +88,10 @@ icf = 121
 mu1 = calc_moment(f0[ici:icf, 0:121, 0:121], cx_s[ici:icf, 0:121, 0:121], cy_s[ici:icf, 0:121, 0:121], cz_s[ici:icf, 0:121, 0:121], \
     cx_vec_smooth[ici:icf], cy_vec_smooth[0:121], cz_vec_smooth[0:121])
 
-mu1 = np.array([0.061376218496269765, 0.04623725433249141, -0.04471815147976567, -0.04471815147976568, 0.10797784023173243])
-bounds = {'ci_cx': -5.0, 'cf_cx': 1.2, \
-        'ci_cy': -5.0, 'cf_cy': 0.0,\
-        'ci_cz': -5.0, 'cf_cz': 0.0}
+mu1 = np.array([0.0007763650355286552, -0.0016730375615871755, 0.00019104354358810463, 0.00018702198653392654, 0.007557816246825353])
+bounds = {'ci_cx': -5.0, 'cf_cx': -0.5, \
+        'ci_cy': 0.0, 'cf_cy': 5.5,\
+        'ci_cz': 0.0, 'cf_cz': 5.5}
 
 # cx_vec = np.linspace(bounds['ci_cx'], bounds['cf_cx'], num_cx, endpoint=False) + (bounds['cf_cx'] - bounds['ci_cx']) / (2 * num_cx)
 # cy_vec = np.linspace(bounds['ci_cy'], bounds['cf_cy'], num_cy, endpoint=False) + (bounds['cf_cy'] - bounds['ci_cy']) / (2 * num_cy)
@@ -108,9 +108,9 @@ bounds = {'ci_cx': -5.0, 'cf_cx': 1.2, \
 # x_sample = cx.flatten()
 # y_sample = cy.flatten()
 # z_sample = cz.flatten()
-num_sample = 73
-l_bounds = [-0.13005676558429702, -1.6119891498315448, -1.6119891498315448]
-u_bounds = [1.2, 0.0, 0.0]
+num_sample = 4000
+l_bounds = [-5.0, 0.0, 0.0]
+u_bounds = [-0.5, 5.5, 5.5]
 sampler = qmc.LatinHypercube(d=3, seed=6767)
 sample = qmc.scale(sampler.random(n=num_sample), l_bounds, u_bounds)
 
@@ -167,7 +167,7 @@ real_weight = x.value
 # Inversion.
 A, b, wx, wy, wz = invert(mu1, [0.01, 0.0, 0.0, 0.0], bounds)
 f_invert = A * np.exp(-b * ((cx_s - wx)**2 + (cy_s - wy)**2 + (cz_s - wz)**2))
-fI_invert = np.trapezoid(np.trapezoid(f_invert[0:63, 0:51, 0:51], cz_vec_smooth[0:51], axis=2), cy_vec_smooth[0:51], axis=1)
+fI_invert = np.trapezoid(np.trapezoid(f_invert[0:46, 50:, 50:], cz_vec_smooth[50:], axis=2), cy_vec_smooth[50:], axis=1)
 
 # Compute flux using inversion vs. integrating weights.
 flux = calc_flux(A, b, wx, wy, wz, bounds)
@@ -234,7 +234,7 @@ plt.rc('font', family='serif')
 fig = plt.figure(figsize=(6, 6))
 ax1 = fig.add_subplot(111)
 # ax1.bar(cx_vec, density, width=dx * 0.1, color='green')
-ax1.plot(cy_vec_smooth[0:63], fI_invert, color='black')
+ax1.plot(cy_vec_smooth[0:46], fI_invert, color='black')
 ax1.set_xlabel('Cy', fontsize=18)
 ax1.set_ylabel('f', fontsize=18)
 ax1.set_yscale('log')
