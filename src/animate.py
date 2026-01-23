@@ -97,7 +97,7 @@ def on_key(event):
             anim.resume()
             anim_running = True
 
-anim = FuncAnimation(fig, update, init_func=init, frames=960, blit=False, interval=50)
+anim = FuncAnimation(fig, update, init_func=init, frames=1180, blit=False, interval=50)
 # anim.save('simulation_data/evo.mp4')
 fig.canvas.mpl_connect('key_press_event', on_key)
 plt.show()

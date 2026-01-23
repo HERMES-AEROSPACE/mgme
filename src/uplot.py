@@ -7,7 +7,7 @@ from scipy.interpolate import interp1d
 
 # data = np.load('simulation_data/U20.npy')
 data1 = np.load('simulation_data/U2000.npy')
-data2 = np.load('simulation_data/U990.npy')
+data2 = np.load('simulation_data/U1180.npy')
 dsmc = np.loadtxt('src/dsmc.txt')
 dsmcT = np.loadtxt('src/dsmcT.txt')
 
@@ -72,13 +72,13 @@ point = (x[p] - x.min()) / (x.max() - x.min())
 cx_vec, cy_vec, cz_vec = np.linspace(-5, 5.5, 106), np.linspace(-5, 5.5, 106), np.linspace(-5, 5.5, 106)
 cx, cy, cz = np.meshgrid(cx_vec, cy_vec, cz_vec, indexing='ij')
 
-A, b, wx, _, _ = invert([nx1, ux1, 0.0, 0.0, ex1], [1.0, 0.0, 0.0, 0.0], {'ci_cx': -5, 'cf_cx': 1.2, 'ci_cy': -5, 'cf_cy': 5.5, 'ci_cz': -5, 'cf_cz': 5.5})
+A, b, wx, _, _ = invert([nx1, ux1, 0.0, 0.0, ex1], [1.0, 0.0, 0.0, 0.0], {'ci_cx': -5, 'cf_cx': 0.6, 'ci_cy': -5, 'cf_cy': 5.5, 'ci_cz': -5, 'cf_cz': 5.5})
 fx1 = np.trapezoid(np.trapezoid(A * np.exp(-b * ((cx - wx)**2 + cy**2 + cz**2)), cz_vec, axis=2), cy_vec, axis=1)
 
 # A, b, wx, _, _ = invert([nx2, ux2, 0.0, 0.0, ex2], [1.0, 0.0, 0.0, 0.0], {'ci_cx': -0.5, 'cf_cx': 1.2, 'ci_cy': -5, 'cf_cy': 5.5, 'ci_cz': -5, 'cf_cz': 5.5})
 # fx2 = np.trapezoid(np.trapezoid(A * np.exp(-b * ((cx - wx)**2 + cy**2 + cz**2)), cz_vec, axis=2), cy_vec, axis=1)
 
-A, b, wx, _, _ = invert([nx2, ux2, 0.0, 0.0, ex2], [1.0, 0.0, 0.0, 0.0], {'ci_cx': 1.2, 'cf_cx': 5.5, 'ci_cy': -5, 'cf_cy': 5.5, 'ci_cz': -5, 'cf_cz': 5.5})
+A, b, wx, _, _ = invert([nx2, ux2, 0.0, 0.0, ex2], [1.0, 0.0, 0.0, 0.0], {'ci_cx': 0.6, 'cf_cx': 5.5, 'ci_cy': -5, 'cf_cy': 5.5, 'ci_cz': -5, 'cf_cz': 5.5})
 fx2 = np.trapezoid(np.trapezoid(A * np.exp(-b * ((cx - wx)**2 + cy**2 + cz**2)), cz_vec, axis=2), cy_vec, axis=1)
 
 # Interpolate to get smooth curves of the DSMC data.
@@ -112,9 +112,9 @@ x_scale_shifted = x_scale + 0.08176
 fig = plt.figure(figsize=(10, 6))
 ax1 = fig.add_subplot(111)
 # ax1.plot(x_scale, temperature1_scale, color='indigo')
-ax1.plot(x_scale - 0.045, temperature2_scale, color='red')
+ax1.plot(x_scale, temperature2_scale, color='red')
 # ax1.plot(x_scale, n1_scale, color='purple')
-ax1.plot(x_scale - 0.045, n2_scale, color='green')
+ax1.plot(x_scale, n2_scale, color='green')
 # ax1.plot(x_scale, vel2_scale, color='blue')
 # ax1.plot(x_scale, n_avg, '-.', color='green')
 # ax1.plot(x_scale, T_avg, '-.', color='red')
@@ -134,8 +134,8 @@ plt.tight_layout()
 
 fig3 = plt.figure(figsize=(6, 6))
 ax3 = fig3.add_subplot(111)
-ax3.plot(cx_vec[0:63], fx1[0:63], color='green')
-ax3.plot(cx_vec[62:106], fx2[62:106], color='red')
+ax3.plot(cx_vec[0:57], fx1[0:57], color='green')
+ax3.plot(cx_vec[56:106], fx2[56:106], color='red')
 # ax3.plot(cx_vec[62:], fx3[62:], color='blue')
 ax3.set_xlabel(r'$C_x$', fontsize=20)
 ax3.set_ylabel(r'f', fontsize=20)

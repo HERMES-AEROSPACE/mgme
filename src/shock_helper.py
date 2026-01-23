@@ -376,7 +376,7 @@ def KT_central2(U_list, F_list, numXj, n_groups, dt, dx, CX_LB, CX_UB):
     k = np.zeros((numXj, n_groups, 5))
 
     p = np.arange(2, numXj - 2, 1)
-    theta = 1.0
+    theta = 2.0
 
     # U_list = np.concatenate((U0[0:1, :, :], U_list, U_list[-1:, :, :]), axis=0)
     # F_list = np.concatenate((F0[0:1, :, :], F_list, F_list[-1:, :, :]), axis=0)
