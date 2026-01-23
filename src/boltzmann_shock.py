@@ -104,7 +104,7 @@ def run_simulation():
     cf_combo = np.array(list(itertools.product(cf_cx, cf_cy, cf_cz)))
     num_groups = combinations.shape[0]
 
-    restart =1
+    restart =0
 
     U0, f = ic(cx, cy, cz, cx_vec, cy_vec, cz_vec, n_val, u_val, T_val, VELOCITY_SPACE['num_cx'], VELOCITY_SPACE['num_cy'], VELOCITY_SPACE['num_cz'], \
         numXj, num_groups, combinations)
@@ -159,7 +159,7 @@ def run_simulation():
         F1 = np.zeros((numXj, num_groups, 5))    
         
         # Integrate collision term and flux term separately. Integrate in time using explicit Euler.
-        step_dt = Parallel(n_jobs=12)(
+        step_dt = Parallel(n_jobs=16)(
             delayed(step)(i, U[i], bounds_list, num_groups, CX_LB, CX_UB, CY_LB, CY_UB, CZ_LB, CZ_UB, key_type, x_sample, y_sample, z_sample, offsets, num_samples)
             for i in range(0, numXj)
         )
@@ -178,11 +178,11 @@ def run_simulation():
         U += (k1_f + k1_c) * dt
 
         # Save solution.
-        f1 = 'simulation_data/U{}.npy'.format(t + 901)
+        f1 = 'simulation_data/U{}.npy'.format(t + 0)
         with open(f1, 'wb') as file:
             np.save(file, U)
 
-        print(t * dt,  t + 901)
+        print(t * dt,  t + 0)
 
 if __name__ == '__main__':
     run_simulation()

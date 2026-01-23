@@ -6,8 +6,8 @@ from scipy.interpolate import interp1d
 
 
 # data = np.load('simulation_data/U20.npy')
-data1 = np.load('simulation_data/U2000.npy')
-data2 = np.load('simulation_data/U1180.npy')
+data1 = np.load('simulation_data/U20.npy')
+data2 = np.load('simulation_data/U103.npy')
 dsmc = np.loadtxt('src/dsmc.txt')
 dsmcT = np.loadtxt('src/dsmcT.txt')
 
