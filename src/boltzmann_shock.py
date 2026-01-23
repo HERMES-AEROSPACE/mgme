@@ -61,7 +61,7 @@ def run_simulation():
     # T_ref = m * c_ref**2 / (2 * k)
 
     cx_vec, cy_vec, cz_vec, cx, cy, cz = calculate_velocity_grid(VELOCITY_SPACE)
-    print(cx_vec[30])
+    print(cx_vec[56])
     xj_vec = np.linspace(PHYS_SPACE['xj_range'][0], PHYS_SPACE['xj_range'][1], PHYS_SPACE['num_xj'])
     dx = np.abs(xj_vec[1] - xj_vec[0])
     dcx = np.abs(cx_vec[1] - cx_vec[0])
@@ -72,7 +72,7 @@ def run_simulation():
     numXj = PHYS_SPACE['num_xj']
 
     cfl = 0.7
-    t_end = 30.0
+    t_end = 35.0
     tc = 1/(n2/n_ref * (d/d_ref)**2 * np.sqrt(2) * 1)
     dt = np.round(cfl/(1/tc + CX_UB/dx), 3)
     print('CFL number:', cfl)
@@ -109,7 +109,7 @@ def run_simulation():
     U0, f = ic(cx, cy, cz, cx_vec, cy_vec, cz_vec, n_val, u_val, T_val, VELOCITY_SPACE['num_cx'], VELOCITY_SPACE['num_cy'], VELOCITY_SPACE['num_cz'], \
         numXj, num_groups, combinations)
     if restart:
-        data = np.load('simulation_data/U800.npy')
+        data = np.load('simulation_data/U900.npy')
         print('Restarting from...')
         U = data
     else:
@@ -178,11 +178,11 @@ def run_simulation():
         U += (k1_f + k1_c) * dt
 
         # Save solution.
-        f1 = 'simulation_data/U{}.npy'.format(t + 801)
+        f1 = 'simulation_data/U{}.npy'.format(t + 901)
         with open(f1, 'wb') as file:
             np.save(file, U)
 
-        print(t * dt,  t + 801)
+        print(t * dt,  t + 901)
 
 if __name__ == '__main__':
     run_simulation()
