@@ -61,7 +61,7 @@ def run_simulation():
     # T_ref = m * c_ref**2 / (2 * k)
 
     cx_vec, cy_vec, cz_vec, cx, cy, cz = calculate_velocity_grid(VELOCITY_SPACE)
-    print(cx_vec[56])
+    print(cx_vec[68])
     xj_vec = np.linspace(PHYS_SPACE['xj_range'][0], PHYS_SPACE['xj_range'][1], PHYS_SPACE['num_xj'])
     dx = np.abs(xj_vec[1] - xj_vec[0])
     dcx = np.abs(cx_vec[1] - cx_vec[0])
@@ -72,7 +72,7 @@ def run_simulation():
     numXj = PHYS_SPACE['num_xj']
 
     cfl = 0.7
-    t_end = 35.0
+    t_end = 80.0
     tc = 1/(n2/n_ref * (d/d_ref)**2 * np.sqrt(2) * 1)
     dt = np.round(cfl/(1/tc + CX_UB/dx), 3)
     print('CFL number:', cfl)
@@ -80,8 +80,8 @@ def run_simulation():
     print('Time step:', dt)
     print('dx:', dx)
 
-    transition_start = -5
-    transition_end = 5
+    transition_start = -30
+    transition_end = 30
     ramp_length = transition_end - transition_start
 
     t = (xj_vec - transition_start) / ramp_length
@@ -104,12 +104,12 @@ def run_simulation():
     cf_combo = np.array(list(itertools.product(cf_cx, cf_cy, cf_cz)))
     num_groups = combinations.shape[0]
 
-    restart =0
+    restart = 1
 
     U0, f = ic(cx, cy, cz, cx_vec, cy_vec, cz_vec, n_val, u_val, T_val, VELOCITY_SPACE['num_cx'], VELOCITY_SPACE['num_cy'], VELOCITY_SPACE['num_cz'], \
         numXj, num_groups, combinations)
     if restart:
-        data = np.load('simulation_data/U900.npy')
+        data = np.load('simulation_data/U2200.npy')
         print('Restarting from...')
         U = data
     else:
@@ -178,11 +178,11 @@ def run_simulation():
         U += (k1_f + k1_c) * dt
 
         # Save solution.
-        f1 = 'simulation_data/U{}.npy'.format(t + 0)
+        f1 = 'simulation_data/U{}.npy'.format(t + 2201)
         with open(f1, 'wb') as file:
             np.save(file, U)
 
-        print(t * dt,  t + 0)
+        print(t * dt,  t + 2201)
 
 if __name__ == '__main__':
     run_simulation()

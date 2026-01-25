@@ -108,10 +108,10 @@ bounds = {'ci_cx': -5.0, 'cf_cx': -0.5, \
 # x_sample = cx.flatten()
 # y_sample = cy.flatten()
 # z_sample = cz.flatten()
-num_sample = 4000
+num_sample = 2500
 l_bounds = [-5.0, 0.0, 0.0]
 u_bounds = [-0.5, 5.5, 5.5]
-sampler = qmc.LatinHypercube(d=3, seed=6767)
+sampler = qmc.LatinHypercube(d=3)
 sample = qmc.scale(sampler.random(n=num_sample), l_bounds, u_bounds)
 
 x_sample = sample[:, 0]
@@ -159,13 +159,14 @@ obj = cp.Maximize(cp.sum(cp.entr(x)))
 constraints = [cp.sum(x) == mu1[0], cp.sum(cp.multiply(x_sample, x)) == mu1[1], \
                cp.sum(cp.multiply(y_sample, x)) == mu1[2], cp.sum(cp.multiply(z_sample, x)) == mu1[3], \
                cp.sum(cp.multiply(x_sample**2 + y_sample**2 + z_sample**2, x)) == mu1[4]]
+
 prob = cp.Problem(obj, constraints)
-prob.solve(verbose=True)
+prob.solve(verbose=True, tol_gap_abs=1e-6, tol_gap_rel=1e-6, tol_feas=1e-6)
 
 real_weight = x.value
 
 # Inversion.
-A, b, wx, wy, wz = invert(mu1, [0.01, 0.0, 0.0, 0.0], bounds)
+A, b, wx, wy, wz = invert(mu1, [0.001, 0.0, 0.0, 0.0], bounds)
 f_invert = A * np.exp(-b * ((cx_s - wx)**2 + (cy_s - wy)**2 + (cz_s - wz)**2))
 fI_invert = np.trapezoid(np.trapezoid(f_invert[0:46, 50:, 50:], cz_vec_smooth[50:], axis=2), cy_vec_smooth[50:], axis=1)
 
@@ -177,18 +178,17 @@ ux = mu1[1] / mu1[0]
 uy = mu1[2] / mu1[0]
 uz = mu1[3] / mu1[0]
 T = 2/3 * ((mu1[4] / mu1[0]) - (ux**2 + uy**2 + uz**2))
-print(T)
 print(ux - 3*np.sqrt(T), uy - 3 * np.sqrt(T), uz - 3 * np.sqrt(T))
 print(ux + 3*np.sqrt(T), uy + 3 * np.sqrt(T), uz + 3 * np.sqrt(T))
 
 # Print result.
 print("\nThe optimal value is:", prob.value)
 print('\nThe optimal solution is:')
-# print('density:', np.sum(real_weight))
-# print('x-momentum:', np.sum(real_weight * x_sample))
-# print('y-momentum:', np.sum(real_weight * y_sample))
-# print('z-momentum:', np.sum(real_weight * z_sample))
-# print('energy:', np.sum((x_sample**2 + y_sample**2 + z_sample**2) * real_weight))
+print('density:', np.sum(real_weight))
+print('x-momentum:', np.sum(real_weight * x_sample))
+print('y-momentum:', np.sum(real_weight * y_sample))
+print('z-momentum:', np.sum(real_weight * z_sample))
+print('energy:', np.sum((x_sample**2 + y_sample**2 + z_sample**2) * real_weight))
 print(mu1)
 
 # width = (bounds['cf_cx'] - bounds['ci_cx'])/num_cx
@@ -239,4 +239,5 @@ ax1.set_xlabel('Cy', fontsize=18)
 ax1.set_ylabel('f', fontsize=18)
 ax1.set_yscale('log')
 plt.tight_layout()
+plt.savefig('plots/cvx_fI_invert.pdf')
 plt.show()

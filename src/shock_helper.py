@@ -381,8 +381,8 @@ def KT_central2(U_list, F_list, numXj, n_groups, dt, dx, CX_LB, CX_UB):
     # U_list = np.concatenate((U0[0:1, :, :], U_list, U_list[-1:, :, :]), axis=0)
     # F_list = np.concatenate((F0[0:1, :, :], F_list, F_list[-1:, :, :]), axis=0)
 
-    a_plus = np.abs(CX_LB)
-    a_minus = np.abs(CX_LB)
+    a_plus = np.abs(CX_UB)
+    a_minus = np.abs(CX_UB)
 
     for i in range(0, n_groups):
         uR_plus = U_list[p + 1, i] - dx/2 * minmod3(theta * (U_list[p + 1, i] - U_list[p, i])/dx, (U_list[p + 2, i] - U_list[p, i])/(2*dx), theta * (U_list[p + 2, i] - U_list[p + 1, i])/dx)

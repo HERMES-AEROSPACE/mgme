@@ -12,8 +12,8 @@ VELOCITY_SPACE = {
 }
 
 PHYS_SPACE = {
-    'num_xj': 251,
-    'xj_range': [-30, 20]
+    'num_xj': 201,
+    'xj_range': [-30, 30]
 }
 
 # Group parameters
@@ -27,9 +27,9 @@ GROUP_PARAMS = {
     # 'ci_cz': np.array([-5.0, -0.5, 0.0, 0.5]),
     # 'cf_cz': np.array([-0.5, 0.0, 0.5, 5.0]),
     # 'group_bounds_cz': np.array([[0, 109], [108, 121], [120, 133], [132, 241]])
-    'ci_cx': np.array([-5.0, 0.6]),
-    'cf_cx': np.array([0.6, 5.5]),
-    'group_bounds_cx': np.array([[0, 57], [56, 106]]),
+    'ci_cx': np.array([-5.0, 0.6, 1.8]),
+    'cf_cx': np.array([0.6, 1.8, 5.5]),
+    'group_bounds_cx': np.array([[0, 57], [56, 69], [68, 106]]),
     'ci_cy': np.array([-5.0, 0]), 
     'cf_cy': np.array([0, 5.5]),
     'group_bounds_cy': np.array([[0, 51], [50, 106]]),
