@@ -326,6 +326,8 @@ def calc_flux_int(num_groups, weights, offsets, x_sample, y_sample, z_sample):
 
         F[i, 0] = np.sum(x_group * weights[start_idx:end_idx])
         F[i, 1] = np.sum(x_group**2 * weights[start_idx:end_idx])
+        F[i, 2] = np.sum(x_group * y_group * weights[start_idx:end_idx])
+        F[i, 3] = np.sum(x_group * z_group * weights[start_idx:end_idx])
         ccTc = x_group**3 + y_group**2 * x_group + z_group**2 * x_group
         F[i, 4] = np.sum(ccTc * weights[start_idx:end_idx])
         
@@ -376,10 +378,7 @@ def KT_central2(U_list, F_list, numXj, n_groups, dt, dx, CX_LB, CX_UB):
     k = np.zeros((numXj, n_groups, 5))
 
     p = np.arange(2, numXj - 2, 1)
-    theta = 2.0
-
-    # U_list = np.concatenate((U0[0:1, :, :], U_list, U_list[-1:, :, :]), axis=0)
-    # F_list = np.concatenate((F0[0:1, :, :], F_list, F_list[-1:, :, :]), axis=0)
+    theta = 1.5
 
     a_plus = np.abs(CX_UB)
     a_minus = np.abs(CX_UB)
@@ -478,14 +477,56 @@ def generate_regular_samples(p, offsets, num_samples, x_sample, y_sample, z_samp
     thermal = (U_i[:, 4] / U_i[:, 0]) - (ux**2 + uy**2 + uz**2)
     sigma = np.sqrt(np.maximum(2 * thermal / 3, 1e-10))
     
-    x_boundsl = np.maximum(bounds_list[:, 0], ux - 3*sigma)
-    x_boundsu = np.minimum(bounds_list[:, 1], ux + 3*sigma)
+    # x_boundsl = np.maximum(bounds_list[:, 0], ux - 3*sigma)
+    # x_boundsu = np.minimum(bounds_list[:, 1], ux + 3*sigma)
     
-    y_boundsl = np.maximum(bounds_list[:, 2], uy - 3*sigma)
-    y_boundsu = np.minimum(bounds_list[:, 3], uy + 3*sigma)
+    # y_boundsl = np.maximum(bounds_list[:, 2], uy - 3*sigma)
+    # y_boundsu = np.minimum(bounds_list[:, 3], uy + 3*sigma)
     
-    z_boundsl = np.maximum(bounds_list[:, 4], uz - 3*sigma)
-    z_boundsu = np.minimum(bounds_list[:, 5], uz + 3*sigma)
+    # z_boundsl = np.maximum(bounds_list[:, 4], uz - 3*sigma)
+    # z_boundsu = np.minimum(bounds_list[:, 5], uz + 3*sigma)
+
+    x_min_global = bounds_list[:, 0].min()  # -5
+    x_max_global = bounds_list[:, 1].max()  # 5.5
+    y_min_global = bounds_list[:, 2].min()  # -5
+    y_max_global = bounds_list[:, 3].max()  # 5.5
+    z_min_global = bounds_list[:, 4].min()  # -5
+    z_max_global = bounds_list[:, 5].max()  # 5.5
+
+    # Calculate adaptive bounds
+    x_boundsl_adaptive = ux - 3*sigma
+    x_boundsu_adaptive = ux + 3*sigma
+    y_boundsl_adaptive = uy - 3*sigma
+    y_boundsu_adaptive = uy + 3*sigma
+    z_boundsl_adaptive = uz - 3*sigma
+    z_boundsu_adaptive = uz + 3*sigma
+
+    # Apply adaptive bounds ONLY to global extremes, keep interior fixed
+    x_boundsl = np.where(bounds_list[:, 0] == x_min_global, 
+                        np.maximum(x_min_global, x_boundsl_adaptive),
+                        bounds_list[:, 0])
+
+    x_boundsu = np.where(bounds_list[:, 1] == x_max_global, 
+                        np.minimum(x_max_global, x_boundsu_adaptive),
+                        bounds_list[:, 1])
+
+    y_boundsl = np.where(bounds_list[:, 2] == y_min_global, 
+                        np.maximum(y_min_global, y_boundsl_adaptive),
+                        bounds_list[:, 2])
+
+    y_boundsu = np.where(bounds_list[:, 3] == y_max_global, 
+                        np.minimum(y_max_global, y_boundsu_adaptive),
+                        bounds_list[:, 3])
+
+    z_boundsl = np.where(bounds_list[:, 4] == z_min_global, 
+                        np.maximum(z_min_global, z_boundsl_adaptive),
+                        bounds_list[:, 4])
+
+    z_boundsu = np.where(bounds_list[:, 5] == z_max_global, 
+                        np.minimum(z_max_global, z_boundsu_adaptive),
+                        bounds_list[:, 5])
+
+    # if p == 95: print(thermal)
 
     for i in range(num_groups):
         start_idx = int(offsets[i])
@@ -501,7 +542,6 @@ def generate_regular_samples(p, offsets, num_samples, x_sample, y_sample, z_samp
         # Try multiple times
         success = False
         for attempt in range(max_retries):
-            
             # For retry attempts, regenerate samples
             if attempt > 0:
                 x_new, y_new, z_new = regenerate_group_samples(i, n_samples_group, bounds_list)
@@ -535,10 +575,20 @@ def generate_regular_samples(p, offsets, num_samples, x_sample, y_sample, z_samp
             y_sample_filter = y_sample_slice[mask]
             z_sample_filter = z_sample_slice[mask]
 
+            # n_keep = np.min([x_sample_filter.size, 1000])
+            # random_indices = np.random.choice(len(x_sample_filter), size=n_keep, replace=False)
+
+            # x_sample_filter = x_sample_filter[random_indices]
+            # y_sample_filter = y_sample_filter[random_indices]
+            # z_sample_filter = z_sample_filter[random_indices]
+
             # Check if enough samples survived filtering
             if x_sample_filter.size < 10:
                 if attempt == max_retries - 1:
                     print(f'Cell {p}, Group {i}: Failed - only {x_sample_filter.size} samples after {max_retries} attempts')
+                    print(U_i[i, 0], U_i[i, 1], U_i[i, 2], U_i[i, 3], U_i[i, 4])
+                    print(x_boundsl[i], x_boundsu[i], y_boundsl[i], y_boundsu[i], z_boundsl[i], z_boundsu[i])
+                    print(x_sample_filter.size)
                     num_valid_samples[i] = 0
                     weights[start_idx:end_idx] = 0.0
                 continue  # Try next attempt
@@ -551,12 +601,11 @@ def generate_regular_samples(p, offsets, num_samples, x_sample, y_sample, z_samp
             if success:
                 # Accept solution
                 mask_indices = np.where(mask)[0]
+                # selected_mask_indices = mask_indices[random_indices]
+                # absolute_indices = start_idx + selected_mask_indices
                 absolute_indices = start_idx + mask_indices
                 weights[absolute_indices] = solution
                 num_valid_samples[i] = np.sum(solution > 1e-12)
-                
-                # if attempt > 0:
-                    # print(f'Cell {p}, Group {i}: Success on retry {attempt+1}')
                 
                 break  # Exit retry loop
             else:
@@ -564,8 +613,10 @@ def generate_regular_samples(p, offsets, num_samples, x_sample, y_sample, z_samp
                     print(f'Cell {p}, Group {i}: Failed after {max_retries} attempts - {status}')
                     print(U_i[i, 0], U_i[i, 1], U_i[i, 2], U_i[i, 3], U_i[i, 4])
                     print(x_boundsl[i], x_boundsu[i], y_boundsl[i], y_boundsu[i], z_boundsl[i], z_boundsu[i])
+                    print(x_sample_filter.size)
                     num_valid_samples[i] = 0
                     weights[start_idx:end_idx] = 0.0
+                    sys.exit()
 
     return weights, num_valid_samples, x_sample_modified, y_sample_modified, z_sample_modified
 

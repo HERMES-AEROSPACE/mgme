@@ -80,8 +80,8 @@ def run_simulation():
     print('Time step:', dt)
     print('dx:', dx)
 
-    transition_start = -30
-    transition_end = 30
+    transition_start = -5
+    transition_end = 5
     ramp_length = transition_end - transition_start
 
     t = (xj_vec - transition_start) / ramp_length
@@ -104,7 +104,7 @@ def run_simulation():
     cf_combo = np.array(list(itertools.product(cf_cx, cf_cy, cf_cz)))
     num_groups = combinations.shape[0]
 
-    restart = 1
+    restart = 0
 
     U0, f = ic(cx, cy, cz, cx_vec, cy_vec, cz_vec, n_val, u_val, T_val, VELOCITY_SPACE['num_cx'], VELOCITY_SPACE['num_cy'], VELOCITY_SPACE['num_cz'], \
         numXj, num_groups, combinations)
@@ -174,15 +174,16 @@ def run_simulation():
         # 2nd order central difference using MUSCL reconstruction and slope limiters.
         if t == 0: F0 = F1
         k1_f = KT_central2(U, F1, numXj, num_groups, dt, dx, CX_LB, CX_UB)
+        # print(k1_f[95])
         # k1_f = LF_central1(U, F1, numXj, num_groups, dt/dx)
         U += (k1_f + k1_c) * dt
 
         # Save solution.
-        f1 = 'simulation_data/U{}.npy'.format(t + 2201)
+        f1 = 'simulation_data/U{}.npy'.format(t + 0)
         with open(f1, 'wb') as file:
             np.save(file, U)
 
-        print(t * dt,  t + 2201)
+        print(t * dt,  t + 0)
 
 if __name__ == '__main__':
     run_simulation()

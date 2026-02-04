@@ -88,10 +88,10 @@ icf = 121
 mu1 = calc_moment(f0[ici:icf, 0:121, 0:121], cx_s[ici:icf, 0:121, 0:121], cy_s[ici:icf, 0:121, 0:121], cz_s[ici:icf, 0:121, 0:121], \
     cx_vec_smooth[ici:icf], cy_vec_smooth[0:121], cz_vec_smooth[0:121])
 
-mu1 = np.array([0.0007763650355286552, -0.0016730375615871755, 0.00019104354358810463, 0.00018702198653392654, 0.007557816246825353])
-bounds = {'ci_cx': -5.0, 'cf_cx': -0.5, \
-        'ci_cy': 0.0, 'cf_cy': 5.5,\
-        'ci_cz': 0.0, 'cf_cz': 5.5}
+mu1 = np.array([0.1348411927461563, 0.1753345175278634, -0.10660379932271187, -0.10516301773515728, 0.3936815459027226])
+bounds = {'ci_cx': 0.6, 'cf_cx': 1.8, \
+        'ci_cy': -5.0, 'cf_cy': 0.0,\
+        'ci_cz': -5.0, 'cf_cz': 0.0}
 
 # cx_vec = np.linspace(bounds['ci_cx'], bounds['cf_cx'], num_cx, endpoint=False) + (bounds['cf_cx'] - bounds['ci_cx']) / (2 * num_cx)
 # cy_vec = np.linspace(bounds['ci_cy'], bounds['cf_cy'], num_cy, endpoint=False) + (bounds['cf_cy'] - bounds['ci_cy']) / (2 * num_cy)
@@ -108,9 +108,9 @@ bounds = {'ci_cx': -5.0, 'cf_cx': -0.5, \
 # x_sample = cx.flatten()
 # y_sample = cy.flatten()
 # z_sample = cz.flatten()
-num_sample = 2500
-l_bounds = [-5.0, 0.0, 0.0]
-u_bounds = [-0.5, 5.5, 5.5]
+num_sample = 214
+l_bounds = [0.6, -0.7906177807191871, -0.7799327551849877]
+u_bounds = [1.8, 0.0, 0.0]
 sampler = qmc.LatinHypercube(d=3)
 sample = qmc.scale(sampler.random(n=num_sample), l_bounds, u_bounds)
 
@@ -161,14 +161,14 @@ constraints = [cp.sum(x) == mu1[0], cp.sum(cp.multiply(x_sample, x)) == mu1[1], 
                cp.sum(cp.multiply(x_sample**2 + y_sample**2 + z_sample**2, x)) == mu1[4]]
 
 prob = cp.Problem(obj, constraints)
-prob.solve(verbose=True, tol_gap_abs=1e-6, tol_gap_rel=1e-6, tol_feas=1e-6)
+prob.solve(verbose=True)
 
 real_weight = x.value
 
 # Inversion.
 A, b, wx, wy, wz = invert(mu1, [0.001, 0.0, 0.0, 0.0], bounds)
 f_invert = A * np.exp(-b * ((cx_s - wx)**2 + (cy_s - wy)**2 + (cz_s - wz)**2))
-fI_invert = np.trapezoid(np.trapezoid(f_invert[0:46, 50:, 50:], cz_vec_smooth[50:], axis=2), cy_vec_smooth[50:], axis=1)
+fI_invert = np.trapezoid(np.trapezoid(f_invert[56:69, 50:, 0:51], cz_vec_smooth[0:51], axis=2), cy_vec_smooth[50:], axis=1)
 
 # Compute flux using inversion vs. integrating weights.
 flux = calc_flux(A, b, wx, wy, wz, bounds)
@@ -178,6 +178,7 @@ ux = mu1[1] / mu1[0]
 uy = mu1[2] / mu1[0]
 uz = mu1[3] / mu1[0]
 T = 2/3 * ((mu1[4] / mu1[0]) - (ux**2 + uy**2 + uz**2))
+print(T)
 print(ux - 3*np.sqrt(T), uy - 3 * np.sqrt(T), uz - 3 * np.sqrt(T))
 print(ux + 3*np.sqrt(T), uy + 3 * np.sqrt(T), uz + 3 * np.sqrt(T))
 
@@ -234,7 +235,7 @@ plt.rc('font', family='serif')
 fig = plt.figure(figsize=(6, 6))
 ax1 = fig.add_subplot(111)
 # ax1.bar(cx_vec, density, width=dx * 0.1, color='green')
-ax1.plot(cy_vec_smooth[0:46], fI_invert, color='black')
+ax1.plot(cy_vec_smooth[56:69], fI_invert, color='black')
 ax1.set_xlabel('Cy', fontsize=18)
 ax1.set_ylabel('f', fontsize=18)
 ax1.set_yscale('log')

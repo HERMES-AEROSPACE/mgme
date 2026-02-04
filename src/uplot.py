@@ -6,8 +6,8 @@ from scipy.interpolate import interp1d
 
 
 # data = np.load('simulation_data/U20.npy')
-data1 = np.load('simulation_data/U2500.npy')
-data2 = np.load('simulation_data/U2500.npy')
+data1 = np.load('simulation_data/U0.npy')
+data2 = np.load('simulation_data/U56.npy')
 dsmc = np.loadtxt('src/dsmc.txt')
 dsmcT = np.loadtxt('src/dsmcT.txt')
 
@@ -57,7 +57,9 @@ lambda_inf = 1.098
 print('DSMC:', lambda_inf/shock_thick2, 'Current:', lambda_inf/shock_thick)
 
 # Calculate some distributions and plot them.
-p = 60
+p = 95
+indices = [0, 1, 4, 5, 8, 9]
+indices2 = [2, 3, 6, 7, 10, 11]
 nx1 = np.sum(data2[p, 0:4], axis=0)[0]
 nx2 = np.sum(data2[p, 4:8], axis=0)[0]
 nx3 = np.sum(data2[p, 8:], axis=0)[0]
@@ -72,10 +74,10 @@ point = (x[p] - x.min()) / (x.max() - x.min())
 cx_vec, cy_vec, cz_vec = np.linspace(-5, 5.5, 106), np.linspace(-5, 5.5, 106), np.linspace(-5, 5.5, 106)
 cx, cy, cz = np.meshgrid(cx_vec, cy_vec, cz_vec, indexing='ij')
 
-A, b, wx, _, _ = invert([nx1, ux1, 0.0, 0.0, ex1], [1.0, 0.0, 0.0, 0.0], {'ci_cx': -5, 'cf_cx': 0.6, 'ci_cy': -5, 'cf_cy': 5.5, 'ci_cz': -5, 'cf_cz': 5.5})
+A, b, wx, _, _ = invert([nx1, ux1, 0.0, 0.0, ex1], [0.1, 0.0, 0.0, 0.0], {'ci_cx': -5, 'cf_cx': 0.6, 'ci_cy': -5, 'cf_cy': 5.5, 'ci_cz': -5, 'cf_cz': 5.5})
 fx1 = np.trapezoid(np.trapezoid(A * np.exp(-b * ((cx - wx)**2 + cy**2 + cz**2)), cz_vec, axis=2), cy_vec, axis=1)
 
-A, b, wx, _, _ = invert([nx2, ux2, 0.0, 0.0, ex2], [1.0, 0.0, 0.0, 0.0], {'ci_cx': 0.6, 'cf_cx': 1.8, 'ci_cy': -5, 'cf_cy': 5.5, 'ci_cz': -5, 'cf_cz': 5.5})
+A, b, wx, _, _ = invert([nx2, ux2, 0.0, 0.0, ex2], [0.1, 0.0, 0.0, 0.0], {'ci_cx': 0.6, 'cf_cx': 1.8, 'ci_cy': -5, 'cf_cy': 5.5, 'ci_cz': -5, 'cf_cz': 5.5})
 fx2 = np.trapezoid(np.trapezoid(A * np.exp(-b * ((cx - wx)**2 + cy**2 + cz**2)), cz_vec, axis=2), cy_vec, axis=1)
 
 A, b, wx, _, _ = invert([nx3, ux3, 0.0, 0.0, ex3], [1.0, 0.0, 0.0, 0.0], {'ci_cx': 1.8, 'cf_cx': 5.5, 'ci_cy': -5, 'cf_cy': 5.5, 'ci_cz': -5, 'cf_cz': 5.5})
@@ -112,9 +114,9 @@ x_scale_shifted = x_scale + 0.08176
 fig = plt.figure(figsize=(10, 6))
 ax1 = fig.add_subplot(111)
 # ax1.plot(x_scale, temperature1_scale, color='indigo')
-ax1.plot(x_scale-0.028, temperature2_scale, color='red')
+ax1.plot(x_scale, temperature2_scale, color='red')
 # ax1.plot(x_scale, n1_scale, color='purple')
-ax1.plot(x_scale-0.028, n2_scale, color='green')
+ax1.plot(x_scale, n2_scale, color='green')
 # ax1.plot(x_scale, vel2_scale, color='blue')
 # ax1.plot(x_scale, n_avg, '-.', color='green')
 # ax1.plot(x_scale, T_avg, '-.', color='red')
@@ -135,8 +137,8 @@ plt.savefig('plots/profile.pdf')
 
 fig3 = plt.figure(figsize=(6, 6))
 ax3 = fig3.add_subplot(111)
-ax3.plot(cx_vec[0:53], fx1[0:53], color='green')
-ax3.plot(cx_vec[52:69], fx2[52:69], color='red')
+ax3.plot(cy_vec[0:57], fx1[0:57], color='green')
+ax3.plot(cy_vec[56:69], fx2[56:69], color='red')
 ax3.plot(cx_vec[68:], fx3[68:], color='blue')
 ax3.set_xlabel(r'$C_x$', fontsize=20)
 ax3.set_ylabel(r'f', fontsize=20)
