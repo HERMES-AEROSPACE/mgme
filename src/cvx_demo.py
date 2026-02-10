@@ -78,18 +78,18 @@ cy_vec_smooth = np.linspace(-5, 5.5, 106)
 cz_vec_smooth = np.linspace(-5, 5.5, 106)
 
 cx_s, cy_s, cz_s = np.meshgrid(cx_vec_smooth, cy_vec_smooth, cz_vec_smooth, indexing='ij')
-f0 = 1 / (np.pi**1.5) * np.exp(-1 * ((cx_s - 1.8256910592827011)**2 + cy_s**2 + cz_s**2))
+f0 = 1 / (np.pi**1.5) * np.exp(-1 * ((cx_s)**2 + cy_s**2 + cz_s**2))
 # K = 1 - 0.4 * np.exp(-0/6)
 # f0 = 1 / (2 * K * (np.pi * K)**1.5) * (5 * K - 3 + 2 * (1 - K) / K * (cx_s**2 + cy_s**2 + cz_s**2)) * np.exp(-(cx_s**2 + cy_s**2 + cz_s**2) / K)
 # f0_init = np.trapezoid(np.trapezoid(f0[100:121, 0:121, 0:121], cz_vec_smooth[0:121], axis=2), cy_vec_smooth[0:121], axis=1)
 
 ici = 0
-icf = 121
-mu1 = calc_moment(f0[ici:icf, 0:121, 0:121], cx_s[ici:icf, 0:121, 0:121], cy_s[ici:icf, 0:121, 0:121], cz_s[ici:icf, 0:121, 0:121], \
-    cx_vec_smooth[ici:icf], cy_vec_smooth[0:121], cz_vec_smooth[0:121])
+icf = 51
+mu1 = calc_moment(f0[ici:icf, 0:51, 0:51], cx_s[ici:icf, 0:51, 0:51], cy_s[ici:icf, 0:51, 0:51], cz_s[ici:icf, 0:51, 0:51], \
+    cx_vec_smooth[ici:icf], cy_vec_smooth[0:51], cz_vec_smooth[0:51])
 
-mu1 = np.array([0.1348411927461563, 0.1753345175278634, -0.10660379932271187, -0.10516301773515728, 0.3936815459027226])
-bounds = {'ci_cx': 0.6, 'cf_cx': 1.8, \
+# mu1 = np.array([0.1348411927461563, 0.1753345175278634, -0.10660379932271187, -0.10516301773515728, 0.3936815459027226])
+bounds = {'ci_cx': -5.0, 'cf_cx': 0.0, \
         'ci_cy': -5.0, 'cf_cy': 0.0,\
         'ci_cz': -5.0, 'cf_cz': 0.0}
 
@@ -108,9 +108,9 @@ bounds = {'ci_cx': 0.6, 'cf_cx': 1.8, \
 # x_sample = cx.flatten()
 # y_sample = cy.flatten()
 # z_sample = cz.flatten()
-num_sample = 214
-l_bounds = [0.6, -0.7906177807191871, -0.7799327551849877]
-u_bounds = [1.8, 0.0, 0.0]
+num_sample = 500
+l_bounds = [-3, -3, -3]
+u_bounds = [0, 0.0, 0.0]
 sampler = qmc.LatinHypercube(d=3)
 sample = qmc.scale(sampler.random(n=num_sample), l_bounds, u_bounds)
 
@@ -168,7 +168,7 @@ real_weight = x.value
 # Inversion.
 A, b, wx, wy, wz = invert(mu1, [0.001, 0.0, 0.0, 0.0], bounds)
 f_invert = A * np.exp(-b * ((cx_s - wx)**2 + (cy_s - wy)**2 + (cz_s - wz)**2))
-fI_invert = np.trapezoid(np.trapezoid(f_invert[56:69, 50:, 0:51], cz_vec_smooth[0:51], axis=2), cy_vec_smooth[50:], axis=1)
+fI_invert = np.trapezoid(np.trapezoid(f_invert[0:51, 0:51, 0:51], cz_vec_smooth[0:51], axis=2), cy_vec_smooth[0:51], axis=1)
 
 # Compute flux using inversion vs. integrating weights.
 flux = calc_flux(A, b, wx, wy, wz, bounds)

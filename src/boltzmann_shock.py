@@ -1,10 +1,11 @@
 import numpy as np
 from .banner import print_banner
 from .shock_helper import calc_flux_int, ic, invert, calc_integral, calc_flux, LF_central1, KT_central2, generate_regular_samples, lookup_table, collide, calculate_velocity_grid, generate_grid
-from .config import CONSTANTS, FREESTREAM_PARAMS, PHYS_SPACE, GROUP_PARAMS, VELOCITY_SPACE, SAMPLING_PARAMS, COLLISION_PARAMS
+from .config import CONSTANTS, FREESTREAM_PARAMS, PHYS_SPACE, GROUP_PARAMS, VELOCITY_SPACE, COLLISION_PARAMS
 from matplotlib import pyplot as plt
 import itertools
 import cProfile, pstats
+from pstats import SortKey
 from scipy import interpolate
 from joblib import Parallel, delayed
 import time, sys
@@ -57,8 +58,6 @@ def run_simulation():
     t_ref = L_ref / c_ref
     print('Reference mean free path:', lam_ref, '[m]')
     print('Knudsen number:', Kn)
-    # c_ref = np.sqrt((2 * k * T1)/m_ref)
-    # T_ref = m * c_ref**2 / (2 * k)
 
     cx_vec, cy_vec, cz_vec, cx, cy, cz = calculate_velocity_grid(VELOCITY_SPACE)
     print(cx_vec[68])
@@ -72,7 +71,7 @@ def run_simulation():
     numXj = PHYS_SPACE['num_xj']
 
     cfl = 0.7
-    t_end = 80.0
+    t_end = 140.0
     tc = 1/(n2/n_ref * (d/d_ref)**2 * np.sqrt(2) * 1)
     dt = np.round(cfl/(1/tc + CX_UB/dx), 3)
     print('CFL number:', cfl)
@@ -80,8 +79,8 @@ def run_simulation():
     print('Time step:', dt)
     print('dx:', dx)
 
-    transition_start = -5
-    transition_end = 5
+    transition_start = -25
+    transition_end = 25
     ramp_length = transition_end - transition_start
 
     t = (xj_vec - transition_start) / ramp_length
@@ -109,7 +108,7 @@ def run_simulation():
     U0, f = ic(cx, cy, cz, cx_vec, cy_vec, cz_vec, n_val, u_val, T_val, VELOCITY_SPACE['num_cx'], VELOCITY_SPACE['num_cy'], VELOCITY_SPACE['num_cz'], \
         numXj, num_groups, combinations)
     if restart:
-        data = np.load('simulation_data/U2200.npy')
+        data = np.load('simulation_data/U4100.npy')
         print('Restarting from...')
         U = data
     else:
@@ -148,7 +147,6 @@ def run_simulation():
 
         return i, coll, flux
 
-    profiler = cProfile.Profile()
     for t in range(0, int(np.ceil(int(t_end / dt) / 100) * 100) + 1):
         # Boundary conditions.
         U[0, :] = U0[0, :]
@@ -159,7 +157,7 @@ def run_simulation():
         F1 = np.zeros((numXj, num_groups, 5))    
         
         # Integrate collision term and flux term separately. Integrate in time using explicit Euler.
-        step_dt = Parallel(n_jobs=16)(
+        step_dt = Parallel(n_jobs=24)(
             delayed(step)(i, U[i], bounds_list, num_groups, CX_LB, CX_UB, CY_LB, CY_UB, CZ_LB, CZ_UB, key_type, x_sample, y_sample, z_sample, offsets, num_samples)
             for i in range(0, numXj)
         )
@@ -172,14 +170,11 @@ def run_simulation():
             F1[i] = flux
 
         # 2nd order central difference using MUSCL reconstruction and slope limiters.
-        if t == 0: F0 = F1
         k1_f = KT_central2(U, F1, numXj, num_groups, dt, dx, CX_LB, CX_UB)
-        # print(k1_f[95])
-        # k1_f = LF_central1(U, F1, numXj, num_groups, dt/dx)
         U += (k1_f + k1_c) * dt
 
         # Save solution.
-        f1 = 'simulation_data/U{}.npy'.format(t + 0)
+        f1 = 'simulation_data2/U{}.npy'.format(t + 0)
         with open(f1, 'wb') as file:
             np.save(file, U)
 

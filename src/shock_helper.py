@@ -28,7 +28,7 @@ def generate_grid(bounds_list, num_groups):
         volume = (bounds_list[i, 1] - bounds_list[i, 0]) * \
             (bounds_list[i, 3] - bounds_list[i, 2]) * \
             (bounds_list[i, 5] - bounds_list[i, 4])
-        num_samples[i] = int(np.ceil(30 * volume))
+        num_samples[i] = int(np.ceil(20 * volume))
     
     x_sample = np.zeros(int(np.sum(num_samples)))
     y_sample = np.zeros(int(np.sum(num_samples)))
@@ -311,7 +311,7 @@ def calc_flux(Ak, bk, wxk, wyk, wzk, I0x, I0y, I0z, I1x, I1y, I1z, I2x, I2y, I2z
 
     return F
 
-# @jit(nopython=True)
+@jit(nopython=True)
 def calc_flux_int(num_groups, weights, offsets, x_sample, y_sample, z_sample):
     # Calculate the flux from samples generated. Requires samples to be placed at locations covering the whole domain for best results.
     F = np.zeros((num_groups, 5))
@@ -398,21 +398,6 @@ def KT_central2(U_list, F_list, numXj, n_groups, dt, dx, CX_LB, CX_UB):
         H_plus = (fR_plus + fL_plus)/2 - (a_plus/2) * (uR_plus - uL_plus)
         H_minus = (fR_minus + fL_minus)/2 - (a_minus/2) * (uR_minus - uL_minus)
 
-        if np.any(np.abs(-1/dx * (H_plus - H_minus)) > 10.0): 
-            flux_value = -1/dx * (H_plus - H_minus)
-            bad_indices = np.where(np.abs(flux_value) > 10.0)[0]
-
-            for idx in bad_indices[:5]:
-                print(f"\n--- Cell {idx} ---")
-                print(f"Flux value: {flux_value[idx]}")
-                print(f"H_plus[{idx}]: {H_plus[idx]}")
-                print(f"H_minus[{idx}]: {H_minus[idx]}")
-                print(f"Difference (H_plus - H_minus): {(H_plus[idx] - H_minus[idx])}")
-                print(fR_plus[idx])
-                print(fL_plus[idx])
-                print(fR_minus[idx])
-                print(fL_minus[idx])
-
         k[2:numXj-2, i] = -1/dx * (H_plus - H_minus)
 
         k[1, i] = -(F_list[2, i] - F_list[0, i])/(2 * dx) + 1/(2 * dx) * (a_plus * (U_list[2, i] - U_list[1, i]) - a_minus * (U_list[1, i] - U_list[0, i]))
@@ -466,9 +451,9 @@ def generate_regular_samples(p, offsets, num_samples, x_sample, y_sample, z_samp
     weights = np.zeros(int(np.sum(num_samples)))
     num_valid_samples = np.zeros(num_groups, dtype=np.int64)
 
-    x_sample_modified = x_sample.copy()
-    y_sample_modified = y_sample.copy()
-    z_sample_modified = z_sample.copy()
+    x_sample_modified = None
+    y_sample_modified = None
+    z_sample_modified = None
 
     ux = U_i[:, 1] / U_i[:, 0]
     uy = U_i[:, 2] / U_i[:, 0]
@@ -477,56 +462,14 @@ def generate_regular_samples(p, offsets, num_samples, x_sample, y_sample, z_samp
     thermal = (U_i[:, 4] / U_i[:, 0]) - (ux**2 + uy**2 + uz**2)
     sigma = np.sqrt(np.maximum(2 * thermal / 3, 1e-10))
     
-    # x_boundsl = np.maximum(bounds_list[:, 0], ux - 3*sigma)
-    # x_boundsu = np.minimum(bounds_list[:, 1], ux + 3*sigma)
+    x_boundsl = np.maximum(bounds_list[:, 0], ux - 3*sigma)
+    x_boundsu = np.minimum(bounds_list[:, 1], ux + 3*sigma)
     
-    # y_boundsl = np.maximum(bounds_list[:, 2], uy - 3*sigma)
-    # y_boundsu = np.minimum(bounds_list[:, 3], uy + 3*sigma)
+    y_boundsl = np.maximum(bounds_list[:, 2], uy - 3*sigma)
+    y_boundsu = np.minimum(bounds_list[:, 3], uy + 3*sigma)
     
-    # z_boundsl = np.maximum(bounds_list[:, 4], uz - 3*sigma)
-    # z_boundsu = np.minimum(bounds_list[:, 5], uz + 3*sigma)
-
-    x_min_global = bounds_list[:, 0].min()  # -5
-    x_max_global = bounds_list[:, 1].max()  # 5.5
-    y_min_global = bounds_list[:, 2].min()  # -5
-    y_max_global = bounds_list[:, 3].max()  # 5.5
-    z_min_global = bounds_list[:, 4].min()  # -5
-    z_max_global = bounds_list[:, 5].max()  # 5.5
-
-    # Calculate adaptive bounds
-    x_boundsl_adaptive = ux - 3*sigma
-    x_boundsu_adaptive = ux + 3*sigma
-    y_boundsl_adaptive = uy - 3*sigma
-    y_boundsu_adaptive = uy + 3*sigma
-    z_boundsl_adaptive = uz - 3*sigma
-    z_boundsu_adaptive = uz + 3*sigma
-
-    # Apply adaptive bounds ONLY to global extremes, keep interior fixed
-    x_boundsl = np.where(bounds_list[:, 0] == x_min_global, 
-                        np.maximum(x_min_global, x_boundsl_adaptive),
-                        bounds_list[:, 0])
-
-    x_boundsu = np.where(bounds_list[:, 1] == x_max_global, 
-                        np.minimum(x_max_global, x_boundsu_adaptive),
-                        bounds_list[:, 1])
-
-    y_boundsl = np.where(bounds_list[:, 2] == y_min_global, 
-                        np.maximum(y_min_global, y_boundsl_adaptive),
-                        bounds_list[:, 2])
-
-    y_boundsu = np.where(bounds_list[:, 3] == y_max_global, 
-                        np.minimum(y_max_global, y_boundsu_adaptive),
-                        bounds_list[:, 3])
-
-    z_boundsl = np.where(bounds_list[:, 4] == z_min_global, 
-                        np.maximum(z_min_global, z_boundsl_adaptive),
-                        bounds_list[:, 4])
-
-    z_boundsu = np.where(bounds_list[:, 5] == z_max_global, 
-                        np.minimum(z_max_global, z_boundsu_adaptive),
-                        bounds_list[:, 5])
-
-    # if p == 95: print(thermal)
+    z_boundsl = np.maximum(bounds_list[:, 4], uz - 3*sigma)
+    z_boundsu = np.minimum(bounds_list[:, 5], uz + 3*sigma)
 
     for i in range(num_groups):
         start_idx = int(offsets[i])
@@ -544,10 +487,12 @@ def generate_regular_samples(p, offsets, num_samples, x_sample, y_sample, z_samp
         for attempt in range(max_retries):
             # For retry attempts, regenerate samples
             if attempt > 0:
+                if x_sample_modified is None:
+                    x_sample_modified = x_sample.copy()
+                    y_sample_modified = y_sample.copy()
+                    z_sample_modified = z_sample.copy()
+
                 x_new, y_new, z_new = regenerate_group_samples(i, n_samples_group, bounds_list)
-                
-                if x_new is None:
-                    break  # Invalid bounds
                 
                 # Replace samples in modified arrays
                 x_sample_modified[start_idx:end_idx] = x_new
@@ -555,14 +500,9 @@ def generate_regular_samples(p, offsets, num_samples, x_sample, y_sample, z_samp
                 z_sample_modified[start_idx:end_idx] = z_new
             
             # Get samples (from original on first attempt, modified on retries)
-            if attempt == 0:
-                x_sample_slice = x_sample[start_idx:end_idx]
-                y_sample_slice = y_sample[start_idx:end_idx]
-                z_sample_slice = z_sample[start_idx:end_idx]
-            else:
-                x_sample_slice = x_sample_modified[start_idx:end_idx]
-                y_sample_slice = y_sample_modified[start_idx:end_idx]
-                z_sample_slice = z_sample_modified[start_idx:end_idx]
+            x_sample_slice = x_sample_modified[start_idx:end_idx] if x_sample_modified is not None else x_sample[start_idx:end_idx]
+            y_sample_slice = y_sample_modified[start_idx:end_idx] if y_sample_modified is not None else y_sample[start_idx:end_idx]
+            z_sample_slice = z_sample_modified[start_idx:end_idx] if z_sample_modified is not None else z_sample[start_idx:end_idx]
 
             # Filter samples within adaptive bounds
             mask = (
@@ -575,24 +515,6 @@ def generate_regular_samples(p, offsets, num_samples, x_sample, y_sample, z_samp
             y_sample_filter = y_sample_slice[mask]
             z_sample_filter = z_sample_slice[mask]
 
-            # n_keep = np.min([x_sample_filter.size, 1000])
-            # random_indices = np.random.choice(len(x_sample_filter), size=n_keep, replace=False)
-
-            # x_sample_filter = x_sample_filter[random_indices]
-            # y_sample_filter = y_sample_filter[random_indices]
-            # z_sample_filter = z_sample_filter[random_indices]
-
-            # Check if enough samples survived filtering
-            if x_sample_filter.size < 10:
-                if attempt == max_retries - 1:
-                    print(f'Cell {p}, Group {i}: Failed - only {x_sample_filter.size} samples after {max_retries} attempts')
-                    print(U_i[i, 0], U_i[i, 1], U_i[i, 2], U_i[i, 3], U_i[i, 4])
-                    print(x_boundsl[i], x_boundsu[i], y_boundsl[i], y_boundsu[i], z_boundsl[i], z_boundsu[i])
-                    print(x_sample_filter.size)
-                    num_valid_samples[i] = 0
-                    weights[start_idx:end_idx] = 0.0
-                continue  # Try next attempt
-
             # Try to solve
             success, solution, status = try_solve_group(
                 i, x_sample_filter, y_sample_filter, z_sample_filter, U_i
@@ -601,8 +523,6 @@ def generate_regular_samples(p, offsets, num_samples, x_sample, y_sample, z_samp
             if success:
                 # Accept solution
                 mask_indices = np.where(mask)[0]
-                # selected_mask_indices = mask_indices[random_indices]
-                # absolute_indices = start_idx + selected_mask_indices
                 absolute_indices = start_idx + mask_indices
                 weights[absolute_indices] = solution
                 num_valid_samples[i] = np.sum(solution > 1e-12)
@@ -618,7 +538,10 @@ def generate_regular_samples(p, offsets, num_samples, x_sample, y_sample, z_samp
                     weights[start_idx:end_idx] = 0.0
                     sys.exit()
 
-    return weights, num_valid_samples, x_sample_modified, y_sample_modified, z_sample_modified
+    return (weights, num_valid_samples, 
+        x_sample_modified if x_sample_modified is not None else x_sample,
+        y_sample_modified if y_sample_modified is not None else y_sample,
+        z_sample_modified if z_sample_modified is not None else z_sample)
 
 @jit(nopython=True)
 def collide(x_sample, y_sample, z_sample, weights, num_valid_samples, bounds_list, n_groups, n_coll, CX_LB, CX_UB, CY_LB, CY_UB, CZ_LB, CZ_UB, key_type):

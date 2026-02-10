@@ -1,7 +1,7 @@
 import numpy as np
 from scipy import special
 from scipy import optimize
-from .config import GROUP_PARAMS, LOOKUP_TABLE, VELOCITY_SPACE
+from .config import GROUP_PARAMS, VELOCITY_SPACE
 from matplotlib import pyplot as plt
 
         

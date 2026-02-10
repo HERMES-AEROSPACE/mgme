@@ -12,8 +12,8 @@ VELOCITY_SPACE = {
 }
 
 PHYS_SPACE = {
-    'num_xj': 201,
-    'xj_range': [-30, 30]
+    'num_xj': 251,
+    'xj_range': [-25, 25]
 }
 
 # Group parameters
@@ -27,24 +27,15 @@ GROUP_PARAMS = {
     # 'ci_cz': np.array([-5.0, -0.5, 0.0, 0.5]),
     # 'cf_cz': np.array([-0.5, 0.0, 0.5, 5.0]),
     # 'group_bounds_cz': np.array([[0, 109], [108, 121], [120, 133], [132, 241]])
-    'ci_cx': np.array([-5.0, 0.6, 1.8]),
-    'cf_cx': np.array([0.6, 1.8, 5.5]),
-    'group_bounds_cx': np.array([[0, 57], [56, 69], [68, 106]]),
+    'ci_cx': np.array([-5.0, -2.0, 0.0, 1.6, 2.2]),
+    'cf_cx': np.array([-2.0, 0.0, 1.6, 2.2, 5.5]),
+    'group_bounds_cx': np.array([[0, 31], [30, 51], [50, 67], [66, 73], [72, 106]]),
     'ci_cy': np.array([-5.0, 0]), 
     'cf_cy': np.array([0, 5.5]),
     'group_bounds_cy': np.array([[0, 51], [50, 106]]),
     'ci_cz': np.array([-5.0, 0]), 
     'cf_cz': np.array([0, 5.5]),
     'group_bounds_cz': np.array([[0, 51], [50, 106]])
-    # 'ci_cx': np.array([-3, -1.0, 0.0, 1.0]),
-    # 'cf_cx': np.array([-1.0, 0.0, 1.0, 3.0]),
-    # 'group_bounds_cx': np.array([[0, 81], [80, 121], [120, 161], [160, 241]]),
-    # 'ci_cy': np.array([-3, 0.0]),
-    # 'cf_cy': np.array([0.0, 3.0]),
-    # 'group_bounds_cy': np.array([[0, 121], [120, 241]]),
-    # 'ci_cz': np.array([-3, 0.0]),
-    # 'cf_cz': np.array([0.0, 3.0]),
-    # 'group_bounds_cz': np.array([[0, 121], [120, 241]])
 }
 
 # AMR parameters
@@ -55,16 +46,6 @@ AMR = {
 # Collision parameters
 COLLISION_PARAMS = {
     'n_coll': 50000
-}
-
-LOOKUP_TABLE = {
-    'n_points': 600
-}
-
-SAMPLING_PARAMS = {
-    'n_samples_x': 24,
-    'n_samples_y': 20,
-    'n_samples_z': 20
 }
 
 CONSTANTS = {
