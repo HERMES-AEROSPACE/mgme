@@ -28,7 +28,7 @@ def generate_grid(bounds_list, num_groups):
         volume = (bounds_list[i, 1] - bounds_list[i, 0]) * \
             (bounds_list[i, 3] - bounds_list[i, 2]) * \
             (bounds_list[i, 5] - bounds_list[i, 4])
-        num_samples[i] = int(np.ceil(20 * volume))
+        num_samples[i] = int(np.ceil(30 * volume))
     
     x_sample = np.zeros(int(np.sum(num_samples)))
     y_sample = np.zeros(int(np.sum(num_samples)))
@@ -42,7 +42,7 @@ def generate_grid(bounds_list, num_groups):
         start_idx = int(offsets[i])
         end_idx = int(offsets[i+1])
 
-        sampler = qmc.LatinHypercube(d=3)
+        sampler = qmc.LatinHypercube(d=3, seed=6767)
         sample = qmc.scale(sampler.random(n=int(num_samples[i])), l_bounds, u_bounds)
     
         x_sample[start_idx:end_idx] = sample[:, 0]
@@ -378,7 +378,7 @@ def KT_central2(U_list, F_list, numXj, n_groups, dt, dx, CX_LB, CX_UB):
     k = np.zeros((numXj, n_groups, 5))
 
     p = np.arange(2, numXj - 2, 1)
-    theta = 1.5
+    theta = 2.0
 
     a_plus = np.abs(CX_UB)
     a_minus = np.abs(CX_UB)
@@ -422,7 +422,7 @@ def try_solve_group(i, x_sample_filter, y_sample_filter, z_sample_filter, U_i, f
         prob = cp.Problem(obj, constraints)
         prob.solve(solver=cp.CLARABEL, verbose=False)
 
-        if prob.status == cp.OPTIMAL and x.value is not None and not np.any(np.isnan(x.value)):
+        if x.value is not None and not np.any(np.isnan(x.value)):
             predicted_flux = np.sum(x_sample_filter * x.value)
             
             if np.abs(predicted_flux) < flux_limit:
@@ -437,7 +437,7 @@ def try_solve_group(i, x_sample_filter, y_sample_filter, z_sample_filter, U_i, f
 
 def regenerate_group_samples(i, n_samples, bounds_list):
     """Generate new samples for a group"""
-    sampler = qmc.LatinHypercube(d=3)
+    sampler = qmc.LatinHypercube(d=3, seed=6768)
     l_bounds = [bounds_list[i, 0], bounds_list[i, 2], bounds_list[i, 4]]
     u_bounds = [bounds_list[i, 1], bounds_list[i, 3], bounds_list[i, 5]]
     
@@ -470,6 +470,12 @@ def generate_regular_samples(p, offsets, num_samples, x_sample, y_sample, z_samp
     
     z_boundsl = np.maximum(bounds_list[:, 4], uz - 3*sigma)
     z_boundsu = np.minimum(bounds_list[:, 5], uz + 3*sigma)
+
+    # if np.any(2 * thermal/3 < 0):
+    #     bad_idx = np.where(2*thermal/3 < 0)
+    #     for i in bad_idx:
+    #         print(p, i, U_i[i, :])
+        # sys.exit()
 
     for i in range(num_groups):
         start_idx = int(offsets[i])
@@ -533,10 +539,10 @@ def generate_regular_samples(p, offsets, num_samples, x_sample, y_sample, z_samp
                     print(f'Cell {p}, Group {i}: Failed after {max_retries} attempts - {status}')
                     print(U_i[i, 0], U_i[i, 1], U_i[i, 2], U_i[i, 3], U_i[i, 4])
                     print(x_boundsl[i], x_boundsu[i], y_boundsl[i], y_boundsu[i], z_boundsl[i], z_boundsu[i])
-                    print(x_sample_filter.size)
+                    print(x_sample_filter.size, sigma, 2/3 * thermal, status)
                     num_valid_samples[i] = 0
                     weights[start_idx:end_idx] = 0.0
-                    sys.exit()
+                    
 
     return (weights, num_valid_samples, 
         x_sample_modified if x_sample_modified is not None else x_sample,

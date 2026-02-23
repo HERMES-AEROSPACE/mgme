@@ -6,8 +6,8 @@ from scipy.interpolate import interp1d
 
 
 # data = np.load('simulation_data/U20.npy')
-data1 = np.load('simulation_data/U3000.npy')
-data2 = np.load('simulation_data2/U1500.npy')
+data1 = np.load('simulation_data/U2400.npy')
+data2 = np.load('simulation_data/U3300.npy')
 dsmc = np.loadtxt('src/dsmc.txt')
 dsmcT = np.loadtxt('src/dsmcT.txt')
 dsmc_hard = np.loadtxt('src/dsmc_hard.txt')
@@ -20,7 +20,7 @@ dsmcT_hard = np.loadtxt('src/dsmcT_hard.txt')
 
 x = np.linspace(*PHYS_SPACE['xj_range'], PHYS_SPACE['num_xj'])
 # x = np.linspace(-20, 20, 201)
-x2 = np.linspace(-25, 25, 251)
+x2 = np.linspace(-30, 30, 261)
 x_scale = (x - x.min()) / (x.max() - x.min())
 x2_scale = (x2 - x2.min()) / (x2.max() - x2.min())
 
@@ -40,7 +40,7 @@ u2_scale = (u2 - u2[0]) / (u2[-1] - u2[0])
 T1_scale = (T1 - T1[0]) / (T1[-1] - T1[0])
 T2_scale = (T2 - T2[0]) / (T2[-1] - T2[0])
 temperature1_scale = (temperature1 - temperature1[0]) / (temperature1[-1] - temperature1[0])
-temperature2_scale = (temperature2 - temperature2[0]) / (temperature2[-1] - temperature2[0])
+temperature2_scale = (temperature2 - temperature2.min()) / (temperature2.max() - temperature2.min())
 vel2_scale = (vel2 - vel2[-1]) / (vel2[0] - vel2[-1])
 
 shock_thick = (np.max(n2_scale) - np.min(n2_scale)) / np.max(np.abs(np.gradient(n2_scale, x2_scale)))
@@ -65,31 +65,31 @@ indices = [0, 1, 4, 5, 8, 9]
 indices2 = [2, 3, 6, 7, 10, 11]
 nx1 = np.sum(data2[p, 0:4], axis=0)[0]
 nx2 = np.sum(data2[p, 4:8], axis=0)[0]
-nx3 = np.sum(data2[p, 8:], axis=0)[0]
+nx3 = np.sum(data2[p, 8:12], axis=0)[0]
 ux1 = np.sum(data2[p, 0:4], axis=0)[1]
 ux2 = np.sum(data2[p, 4:8], axis=0)[1]
-ux3 = np.sum(data2[p, 8:], axis=0)[1]
+ux3 = np.sum(data2[p, 8:12], axis=0)[1]
 ex1 = np.sum(data2[p, 0:4], axis=0)[4]
 ex2 = np.sum(data2[p, 4:8], axis=0)[4]
-ex3 = np.sum(data2[p, 8:], axis=0)[4]
+ex3 = np.sum(data2[p, 8:12], axis=0)[4]
 
 point = (x[p] - x.min()) / (x.max() - x.min())
 cx_vec, cy_vec, cz_vec = np.linspace(-5, 5.5, 106), np.linspace(-5, 5.5, 106), np.linspace(-5, 5.5, 106)
 cx, cy, cz = np.meshgrid(cx_vec, cy_vec, cz_vec, indexing='ij')
 
-A, b, wx, _, _ = invert([nx1, ux1, 0.0, 0.0, ex1], [0.1, 0.0, 0.0, 0.0], {'ci_cx': -5, 'cf_cx': -2.0, 'ci_cy': -5, 'cf_cy': 5.5, 'ci_cz': -5, 'cf_cz': 5.5})
+A, b, wx, _, _ = invert([nx1, ux1, 0.0, 0.0, ex1], [0.1, 0.0, 0.0, 0.0], {'ci_cx': -5, 'cf_cx': -1.5, 'ci_cy': -5, 'cf_cy': 5.5, 'ci_cz': -5, 'cf_cz': 5.5})
 fx1 = np.trapezoid(np.trapezoid(A * np.exp(-b * ((cx - wx)**2 + cy**2 + cz**2)), cz_vec, axis=2), cy_vec, axis=1)
 
-A, b, wx, _, _ = invert([nx2, ux2, 0.0, 0.0, ex2], [0.1, 0.0, 0.0, 0.0], {'ci_cx': -2.0, 'cf_cx': 1.8, 'ci_cy': -5, 'cf_cy': 5.5, 'ci_cz': -5, 'cf_cz': 5.5})
+A, b, wx, _, _ = invert([nx2, ux2, 0.0, 0.0, ex2], [0.1, 0.0, 0.0, 0.0], {'ci_cx': -1.5, 'cf_cx': 0.5, 'ci_cy': -5, 'cf_cy': 5.5, 'ci_cz': -5, 'cf_cz': 5.5})
 fx2 = np.trapezoid(np.trapezoid(A * np.exp(-b * ((cx - wx)**2 + cy**2 + cz**2)), cz_vec, axis=2), cy_vec, axis=1)
 
-A, b, wx, _, _ = invert([nx3, ux3, 0.0, 0.0, ex3], [1.0, 0.0, 0.0, 0.0], {'ci_cx': 1.8, 'cf_cx': 5.5, 'ci_cy': -5, 'cf_cy': 5.5, 'ci_cz': -5, 'cf_cz': 5.5})
+A, b, wx, _, _ = invert([nx3, ux3, 0.0, 0.0, ex3], [1.0, 0.0, 0.0, 0.0], {'ci_cx': 0.5, 'cf_cx': 1.8, 'ci_cy': -5, 'cf_cy': 5.5, 'ci_cz': -5, 'cf_cz': 5.5})
 fx3 = np.trapezoid(np.trapezoid(A * np.exp(-b * ((cx - wx)**2 + cy**2 + cz**2)), cz_vec, axis=2), cy_vec, axis=1)
 
 # Interpolate to get smooth curves of the DSMC data.
 f = interp1d(1 - dsmc[:, 0], dsmc[:, 1], kind='cubic')
 ft = interp1d(1 - dsmcT[:, 0], dsmcT[:, 1], kind='cubic')
-x_new = np.linspace(0.03, 0.99, 20)
+x_new = np.linspace(0.04, 0.97, 40)
 
 # Time average the data for anything noisy due to low collisions.
 # n_avg = np.zeros(PHYS_SPACE['num_xj'])
@@ -116,10 +116,10 @@ x_scale_shifted = x_scale + 0.08176
 
 fig = plt.figure(figsize=(10, 6))
 ax1 = fig.add_subplot(111)
-# ax1.plot(x_scale, temperature1_scale, color='indigo')
-ax1.plot(x2_scale, temperature2_scale, color='red')
-# ax1.plot(x_scale + 0.055, n1_scale, color='purple')
-ax1.plot(x2_scale, n2_scale, color='green')
+# ax1.plot(x2_scale + 0.0, temperature1_scale, color='indigo')
+ax1.plot(x2_scale + 0.027, temperature2_scale, color='red')
+# ax1.plot(x2_scale + 0.0, n1_scale, color='purple')
+ax1.plot(x2_scale + 0.027, n2_scale, color='green')
 # ax1.plot(x_scale, vel2_scale, color='blue')
 # ax1.plot(x_scale, n_avg, '-.', color='green')
 # ax1.plot(x_scale, T_avg, '-.', color='red')
@@ -142,9 +142,9 @@ plt.savefig('plots/profile.pdf')
 
 fig3 = plt.figure(figsize=(6, 6))
 ax3 = fig3.add_subplot(111)
-ax3.plot(cy_vec[0:31], fx1[0:31], color='green')
-ax3.plot(cy_vec[30:69], fx2[30:69], color='red')
-ax3.plot(cx_vec[68:], fx3[68:], color='blue')
+ax3.plot(cy_vec[0:36], fx1[0:36], color='green')
+ax3.plot(cy_vec[35:56], fx2[35:56], color='red')
+ax3.plot(cx_vec[55:69], fx3[55:69], color='blue')
 ax3.set_xlabel(r'$C_x$', fontsize=20)
 ax3.set_ylabel(r'f', fontsize=20)
 ax3.tick_params(axis='both',labelsize=16)

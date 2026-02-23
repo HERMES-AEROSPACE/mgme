@@ -79,8 +79,8 @@ def run_simulation():
     print('Time step:', dt)
     print('dx:', dx)
 
-    transition_start = -25
-    transition_end = 25
+    transition_start = -30
+    transition_end = 30
     ramp_length = transition_end - transition_start
 
     t = (xj_vec - transition_start) / ramp_length
@@ -103,12 +103,12 @@ def run_simulation():
     cf_combo = np.array(list(itertools.product(cf_cx, cf_cy, cf_cz)))
     num_groups = combinations.shape[0]
 
-    restart = 0
+    restart = 1
 
     U0, f = ic(cx, cy, cz, cx_vec, cy_vec, cz_vec, n_val, u_val, T_val, VELOCITY_SPACE['num_cx'], VELOCITY_SPACE['num_cy'], VELOCITY_SPACE['num_cz'], \
         numXj, num_groups, combinations)
     if restart:
-        data = np.load('simulation_data/U4100.npy')
+        data = np.load('simulation_data/U2900.npy')
         print('Restarting from...')
         U = data
     else:
@@ -123,6 +123,7 @@ def run_simulation():
     # plt.plot(cx_vec, np.trapezoid(np.trapezoid(n_val[-1] * f[-1], cz_vec, axis=2), cy_vec, axis=1))
     # plt.plot(cz_vec, np.trapezoid(np.trapezoid(n_val[-1] * f[-1], cy_vec, axis=1), cx_vec, axis=0))
     # plt.plot(cx_vec, np.trapezoid(np.trapezoid(f[0], cz_vec, axis=2), cy_vec, axis=1))
+    # plt.savefig('plots/icdist.pdf')
     # plt.show()
 
     bounds_list = np.zeros((num_groups, 6))
@@ -154,10 +155,10 @@ def run_simulation():
 
         # RK1 integration.
         k1_c = np.zeros((numXj, num_groups, 5))
-        F1 = np.zeros((numXj, num_groups, 5))    
+        F1 = np.zeros((numXj, num_groups, 5))
         
         # Integrate collision term and flux term separately. Integrate in time using explicit Euler.
-        step_dt = Parallel(n_jobs=24)(
+        step_dt = Parallel(n_jobs=26)(
             delayed(step)(i, U[i], bounds_list, num_groups, CX_LB, CX_UB, CY_LB, CY_UB, CZ_LB, CZ_UB, key_type, x_sample, y_sample, z_sample, offsets, num_samples)
             for i in range(0, numXj)
         )
@@ -174,11 +175,11 @@ def run_simulation():
         U += (k1_f + k1_c) * dt
 
         # Save solution.
-        f1 = 'simulation_data2/U{}.npy'.format(t + 0)
+        f1 = 'simulation_data/U{}.npy'.format(t + 2901)
         with open(f1, 'wb') as file:
             np.save(file, U)
 
-        print(t * dt,  t + 0)
+        print(t * dt,  t + 2901)
 
 if __name__ == '__main__':
     run_simulation()

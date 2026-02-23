@@ -30,6 +30,7 @@ ax.set_ylim(-0.05, 1.15)
 ax.tick_params(axis='both', labelsize=14)
 plt.locator_params(axis='both', nbins=10)
 ax.minorticks_on()
+ax.grid()
 title = ax.set_title('', fontsize=18)
 
 anim_running = True
@@ -82,7 +83,7 @@ def update(i):
     # if i > 115169
     #     title.set_text(f't = {t:.2f}')
     # else:
-    t = i * 0.032
+    t = i * 0.027
     title.set_text(f't = {t:.3f}, $u1$ = {posx_u/posx_n:.3f}, $u0$ = {negx_u/negx_n:.3f}')
 
     return lines, title
@@ -97,7 +98,7 @@ def on_key(event):
             anim.resume()
             anim_running = True
 
-anim = FuncAnimation(fig, update, init_func=init, frames=2200, blit=False, interval=50)
+anim = FuncAnimation(fig, update, init_func=init, frames=1400, blit=False, interval=30)
 anim.save('plots/evo.gif')
 fig.canvas.mpl_connect('key_press_event', on_key)
 plt.show()

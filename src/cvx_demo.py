@@ -88,8 +88,8 @@ icf = 51
 mu1 = calc_moment(f0[ici:icf, 0:51, 0:51], cx_s[ici:icf, 0:51, 0:51], cy_s[ici:icf, 0:51, 0:51], cz_s[ici:icf, 0:51, 0:51], \
     cx_vec_smooth[ici:icf], cy_vec_smooth[0:51], cz_vec_smooth[0:51])
 
-# mu1 = np.array([0.1348411927461563, 0.1753345175278634, -0.10660379932271187, -0.10516301773515728, 0.3936815459027226])
-bounds = {'ci_cx': -5.0, 'cf_cx': 0.0, \
+mu1 = np.array([1.0440300263077499e-05, -2.195197698210777e-05, -5.8927142220295e-06, -6.149522306505281e-06, 5.674126860142924e-05])
+bounds = {'ci_cx': -3.5, 'cf_cx': -2.0, \
         'ci_cy': -5.0, 'cf_cy': 0.0,\
         'ci_cz': -5.0, 'cf_cz': 0.0}
 
@@ -108,9 +108,9 @@ bounds = {'ci_cx': -5.0, 'cf_cx': 0.0, \
 # x_sample = cx.flatten()
 # y_sample = cy.flatten()
 # z_sample = cz.flatten()
-num_sample = 500
-l_bounds = [-3, -3, -3]
-u_bounds = [0, 0.0, 0.0]
+num_sample = 200
+l_bounds = [-3.5, -2.0100574311308996, -2.034655199203145]
+u_bounds = [-2.0, 0.0, 0.0]
 sampler = qmc.LatinHypercube(d=3)
 sample = qmc.scale(sampler.random(n=num_sample), l_bounds, u_bounds)
 
