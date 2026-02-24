@@ -28,7 +28,7 @@ def generate_grid(bounds_list, num_groups):
         volume = (bounds_list[i, 1] - bounds_list[i, 0]) * \
             (bounds_list[i, 3] - bounds_list[i, 2]) * \
             (bounds_list[i, 5] - bounds_list[i, 4])
-        num_samples[i] = int(np.ceil(30 * volume))
+        num_samples[i] = np.max((300, int(np.ceil(10 * volume))))
     
     x_sample = np.zeros(int(np.sum(num_samples)))
     y_sample = np.zeros(int(np.sum(num_samples)))
@@ -36,8 +36,10 @@ def generate_grid(bounds_list, num_groups):
     offsets = np.concatenate([[0], np.cumsum(num_samples)])
 
     for i in range(0, num_groups):
-        l_bounds = [bounds_list[i, 0], bounds_list[i, 2], bounds_list[i, 4]]
-        u_bounds = [bounds_list[i, 1], bounds_list[i, 3], bounds_list[i, 5]]
+        l_bounds = np.array([bounds_list[i, 0], bounds_list[i, 2], bounds_list[i, 4]])
+        u_bounds = np.array([bounds_list[i, 1], bounds_list[i, 3], bounds_list[i, 5]])
+
+        if np.any(l_bounds > u_bounds): continue
 
         start_idx = int(offsets[i])
         end_idx = int(offsets[i+1])
@@ -447,8 +449,7 @@ def regenerate_group_samples(i, n_samples, bounds_list):
     else:
         return None, None, None
 
-def generate_regular_samples(p, offsets, num_samples, x_sample, y_sample, z_sample, U_i, num_groups, bounds_list, max_retries=10):
-    weights = np.zeros(int(np.sum(num_samples)))
+def generate_regular_samples(p, U_i, num_groups, bounds_list, max_retries=10):
     num_valid_samples = np.zeros(num_groups, dtype=np.int64)
 
     x_sample_modified = None
@@ -471,11 +472,10 @@ def generate_regular_samples(p, offsets, num_samples, x_sample, y_sample, z_samp
     z_boundsl = np.maximum(bounds_list[:, 4], uz - 3*sigma)
     z_boundsu = np.minimum(bounds_list[:, 5], uz + 3*sigma)
 
-    # if np.any(2 * thermal/3 < 0):
-    #     bad_idx = np.where(2*thermal/3 < 0)
-    #     for i in bad_idx:
-    #         print(p, i, U_i[i, :])
-        # sys.exit()
+    adaptive_bounds = np.vstack((x_boundsl, x_boundsu, y_boundsl, y_boundsu, z_boundsl, z_boundsu)).T
+    x_sample, y_sample, z_sample, offsets, num_samples = generate_grid(adaptive_bounds, num_groups)
+
+    weights = np.zeros(int(np.sum(num_samples)))
 
     for i in range(num_groups):
         start_idx = int(offsets[i])
@@ -498,7 +498,7 @@ def generate_regular_samples(p, offsets, num_samples, x_sample, y_sample, z_samp
                     y_sample_modified = y_sample.copy()
                     z_sample_modified = z_sample.copy()
 
-                x_new, y_new, z_new = regenerate_group_samples(i, n_samples_group, bounds_list)
+                x_new, y_new, z_new = regenerate_group_samples(i, n_samples_group, adaptive_bounds)
                 
                 # Replace samples in modified arrays
                 x_sample_modified[start_idx:end_idx] = x_new
@@ -544,7 +544,7 @@ def generate_regular_samples(p, offsets, num_samples, x_sample, y_sample, z_samp
                     weights[start_idx:end_idx] = 0.0
                     
 
-    return (weights, num_valid_samples, 
+    return (weights, num_valid_samples, offsets,
         x_sample_modified if x_sample_modified is not None else x_sample,
         y_sample_modified if y_sample_modified is not None else y_sample,
         z_sample_modified if z_sample_modified is not None else z_sample)

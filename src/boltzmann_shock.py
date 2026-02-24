@@ -103,12 +103,12 @@ def run_simulation():
     cf_combo = np.array(list(itertools.product(cf_cx, cf_cy, cf_cz)))
     num_groups = combinations.shape[0]
 
-    restart = 1
+    restart = 0
 
     U0, f = ic(cx, cy, cz, cx_vec, cy_vec, cz_vec, n_val, u_val, T_val, VELOCITY_SPACE['num_cx'], VELOCITY_SPACE['num_cy'], VELOCITY_SPACE['num_cz'], \
         numXj, num_groups, combinations)
     if restart:
-        data = np.load('simulation_data/U2900.npy')
+        data = np.load('simulation_data/U23.npy')
         print('Restarting from...')
         U = data
     else:
@@ -130,21 +130,19 @@ def run_simulation():
     for i in range(num_groups):
         bounds_list[i] = np.array([ci_combo[i, 0], cf_combo[i, 0], ci_combo[i, 1], cf_combo[i, 1], ci_combo[i, 2], cf_combo[i, 2]])
     
-    x_sample, y_sample, z_sample, offsets, num_samples = generate_grid(bounds_list, num_groups)
+    # x_sample, y_sample, z_sample, offsets, num_samples = generate_grid(bounds_list, num_groups)
     print(bounds_list)
     print("--------------------------------BEGIN SIMULATION----------------------------------")
 
-    def step(i, U_i, bounds_list, num_groups, CX_LB, CX_UB, CY_LB, CY_UB, CZ_LB, CZ_UB, key_type, x_sample, y_sample, z_sample, offsets, num_samples):
+    def step(i, U_i, bounds_list, num_groups, CX_LB, CX_UB, CY_LB, CY_UB, CZ_LB, CZ_UB, key_type):
         # Calculate weights through convex optimization.
-        weights, num_valid_samples, x_sample_mod, y_sample_mod, z_sample_mod = generate_regular_samples(
-            i, offsets, num_samples, x_sample, y_sample, z_sample, U_i, num_groups, bounds_list,
-            max_retries=10
-        )
+        weights, num_valid_samples, offsets, x_sample, y_sample, z_sample = generate_regular_samples(
+            i, U_i, num_groups, bounds_list, max_retries=10)
 
         # Advance the collision and flux forward.
-        coll = collide(x_sample_mod, y_sample_mod, z_sample_mod, weights, num_valid_samples, bounds_list, num_groups, \
+        coll = collide(x_sample, y_sample, z_sample, weights, num_valid_samples, bounds_list, num_groups, \
                         n_coll, CX_LB, CX_UB, CY_LB, CY_UB, CZ_LB, CZ_UB, key_type)
-        flux = calc_flux_int(num_groups, weights, offsets, x_sample_mod, y_sample_mod, z_sample_mod)
+        flux = calc_flux_int(num_groups, weights, offsets, x_sample, y_sample, z_sample)
 
         return i, coll, flux
 
@@ -159,7 +157,7 @@ def run_simulation():
         
         # Integrate collision term and flux term separately. Integrate in time using explicit Euler.
         step_dt = Parallel(n_jobs=26)(
-            delayed(step)(i, U[i], bounds_list, num_groups, CX_LB, CX_UB, CY_LB, CY_UB, CZ_LB, CZ_UB, key_type, x_sample, y_sample, z_sample, offsets, num_samples)
+            delayed(step)(i, U[i], bounds_list, num_groups, CX_LB, CX_UB, CY_LB, CY_UB, CZ_LB, CZ_UB, key_type)
             for i in range(0, numXj)
         )
         for i, coll, flux in step_dt:
@@ -175,11 +173,11 @@ def run_simulation():
         U += (k1_f + k1_c) * dt
 
         # Save solution.
-        f1 = 'simulation_data/U{}.npy'.format(t + 2901)
+        f1 = 'simulation_data/U{}.npy'.format(t + 0)
         with open(f1, 'wb') as file:
             np.save(file, U)
 
-        print(t * dt,  t + 2901)
+        print(t * dt,  t + 0)
 
 if __name__ == '__main__':
     run_simulation()
