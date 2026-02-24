@@ -83,7 +83,7 @@ def update(i):
     # if i > 115169
     #     title.set_text(f't = {t:.2f}')
     # else:
-    t = i * 0.027
+    t = i * 0.023
     title.set_text(f't = {t:.3f}, $u1$ = {posx_u/posx_n:.3f}, $u0$ = {negx_u/negx_n:.3f}')
 
     return lines, title
@@ -98,7 +98,7 @@ def on_key(event):
             anim.resume()
             anim_running = True
 
-anim = FuncAnimation(fig, update, init_func=init, frames=1400, blit=False, interval=30)
+anim = FuncAnimation(fig, update, init_func=init, frames=555, blit=False, interval=30)
 anim.save('plots/evo.gif')
 fig.canvas.mpl_connect('key_press_event', on_key)
 plt.show()

@@ -380,7 +380,7 @@ def KT_central2(U_list, F_list, numXj, n_groups, dt, dx, CX_LB, CX_UB):
     k = np.zeros((numXj, n_groups, 5))
 
     p = np.arange(2, numXj - 2, 1)
-    theta = 2.0
+    theta = 1.0
 
     a_plus = np.abs(CX_UB)
     a_minus = np.abs(CX_UB)
@@ -483,7 +483,7 @@ def generate_regular_samples(p, U_i, num_groups, bounds_list, max_retries=10):
         n_samples_group = end_idx - start_idx
 
         # Skip if density too small
-        if U_i[i, 0] <= 1e-6:
+        if U_i[i, 0] <= 1e-4:
             num_valid_samples[i] = 0
             weights[start_idx:end_idx] = 0.0
             continue
@@ -671,7 +671,7 @@ def collide(x_sample, y_sample, z_sample, weights, num_valid_samples, bounds_lis
         else: key = (group_idx2, group_idx1)
         n_coll_group = depl_tracker[key]
 
-        Li = 0.5 * weights[d_idx1] * weights[d_idx2] * num_valid_samples[group_idx1] * num_valid_samples[group_idx2] / n_coll_group
+        Li = 0.5 * weights[d_idx1] * weights[d_idx2] * g * num_valid_samples[group_idx1] * num_valid_samples[group_idx2] / n_coll_group
         group_n[group_idx1] -= Li
         group_px[group_idx1] -= Li * vx1
         group_py[group_idx1] -= Li * vy1
@@ -684,7 +684,7 @@ def collide(x_sample, y_sample, z_sample, weights, num_valid_samples, bounds_lis
         group_pz[group_idx2] -= Li * vz2
         group_e[group_idx2] -= Li * (vx2**2 + vy2**2 + vz2**2)
 
-        Gi = 0.5 * weights[d_idx1] * weights[d_idx2] * num_valid_samples[group_idx1] * num_valid_samples[group_idx2] / n_coll_group
+        Gi = 0.5 * weights[d_idx1] * weights[d_idx2] * np.sqrt(2/np.pi) * num_valid_samples[group_idx1] * num_valid_samples[group_idx2] / n_coll_group
         group_n[group_idx1r] += Gi
         group_px[group_idx1r] += Gi * vx1p
         group_py[group_idx1r] += Gi * vy1p

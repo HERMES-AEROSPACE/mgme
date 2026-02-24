@@ -6,8 +6,8 @@ from scipy.interpolate import interp1d
 
 
 # data = np.load('simulation_data/U20.npy')
-data1 = np.load('simulation_data/U2400.npy')
-data2 = np.load('simulation_data/U200.npy')
+data1 = np.load('simulation_data/U1800.npy')
+data2 = np.load('simulation_data/U2930.npy')
 dsmc = np.loadtxt('src/dsmc.txt')
 dsmcT = np.loadtxt('src/dsmcT.txt')
 dsmc_hard = np.loadtxt('src/dsmc_hard.txt')
@@ -20,7 +20,7 @@ dsmcT_hard = np.loadtxt('src/dsmcT_hard.txt')
 
 x = np.linspace(*PHYS_SPACE['xj_range'], PHYS_SPACE['num_xj'])
 # x = np.linspace(-20, 20, 201)
-x2 = np.linspace(-30, 30, 261)
+x2 = np.linspace(-25, 25, 251)
 x_scale = (x - x.min()) / (x.max() - x.min())
 x2_scale = (x2 - x2.min()) / (x2.max() - x2.min())
 
@@ -43,7 +43,7 @@ temperature1_scale = (temperature1 - temperature1[0]) / (temperature1[-1] - temp
 temperature2_scale = (temperature2 - temperature2.min()) / (temperature2.max() - temperature2.min())
 vel2_scale = (vel2 - vel2[-1]) / (vel2[0] - vel2[-1])
 
-shock_thick = (np.max(n2_scale) - np.min(n2_scale)) / np.max(np.abs(np.gradient(n2_scale, x2_scale)))
+shock_thick = 2 / (n2[-1] - n2[0]) / np.max(np.abs(np.gradient(n2, x2)))
 
 gamma = CONSTANTS['gamma']
 R = CONSTANTS['R']
@@ -116,18 +116,18 @@ x_scale_shifted = x_scale + 0.08176
 
 fig = plt.figure(figsize=(10, 6))
 ax1 = fig.add_subplot(111)
-# ax1.plot(x2_scale + 0.0, temperature1_scale, color='indigo')
-ax1.plot(x2_scale + 0.0, temperature2_scale, color='red')
-# ax1.plot(x2_scale + 0.0, n1_scale, color='purple')
-ax1.plot(x2_scale + 0.0, n2_scale, color='green')
+# ax1.plot(x2_scale + 0.044, temperature1_scale, color='indigo')
+ax1.plot(x2_scale + 0.038, temperature2_scale, color='red')
+# ax1.plot(x2_scale + 0.044, n1_scale, color='purple')
+ax1.plot(x2_scale + 0.038, n2_scale, color='green')
 # ax1.plot(x_scale, vel2_scale, color='blue')
 # ax1.plot(x_scale, n_avg, '-.', color='green')
 # ax1.plot(x_scale, T_avg, '-.', color='red')
-ax1.plot(1 - dsmc[:, 0], dsmc[:, 1], '--', color='green')
-# ax1.plot(1 - dsmc_hard[:, 0], dsmc_hard[:, 1], '--', color='green')
+# ax1.plot(1 - dsmc[:, 0], dsmc[:, 1], '--', color='green')
+ax1.plot(1 - dsmc_hard[:, 0], dsmc_hard[:, 1], '--', color='green')
 # ax1.scatter(x_new, f(x_new), color='green', marker='s', facecolors='none')
-ax1.plot(1 - dsmcT[:, 0], dsmcT[:, 1], '--', color='red')
-# ax1.plot(1 - dsmcT_hard[:, 0], dsmcT_hard[:, 1], '--', color='red')
+# ax1.plot(1 - dsmcT[:, 0], dsmcT[:, 1], '--', color='red')
+ax1.plot(1 - dsmcT_hard[:, 0], dsmcT_hard[:, 1], '--', color='red')
 # ax1.scatter(x_new, ft(x_new), color='red', marker='s', facecolors='none')
 
 ax1.set_xlabel(r'Scaled Location', fontsize=20)

@@ -79,8 +79,8 @@ def run_simulation():
     print('Time step:', dt)
     print('dx:', dx)
 
-    transition_start = -30
-    transition_end = 30
+    transition_start = -5
+    transition_end = 5
     ramp_length = transition_end - transition_start
 
     t = (xj_vec - transition_start) / ramp_length
@@ -108,7 +108,7 @@ def run_simulation():
     U0, f = ic(cx, cy, cz, cx_vec, cy_vec, cz_vec, n_val, u_val, T_val, VELOCITY_SPACE['num_cx'], VELOCITY_SPACE['num_cy'], VELOCITY_SPACE['num_cz'], \
         numXj, num_groups, combinations)
     if restart:
-        data = np.load('simulation_data/U23.npy')
+        data = np.load('simulation_data3/U2726.npy')
         print('Restarting from...')
         U = data
     else:

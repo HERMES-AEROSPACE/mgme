@@ -12,8 +12,8 @@ VELOCITY_SPACE = {
 }
 
 PHYS_SPACE = {
-    'num_xj': 261,
-    'xj_range': [-40, 40]
+    'num_xj': 251,
+    'xj_range': [-25, 25]
 }
 
 # Group parameters
