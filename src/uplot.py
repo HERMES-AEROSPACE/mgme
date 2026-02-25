@@ -6,12 +6,14 @@ from scipy.interpolate import interp1d
 
 
 # data = np.load('simulation_data/U20.npy')
-data1 = np.load('simulation_data/U1800.npy')
-data2 = np.load('simulation_data/U2930.npy')
+data1 = np.load('simulation_data/U2400.npy')
+data2 = np.load('simulation_data/U50.npy')
 dsmc = np.loadtxt('src/dsmc.txt')
 dsmcT = np.loadtxt('src/dsmcT.txt')
 dsmc_hard = np.loadtxt('src/dsmc_hard.txt')
 dsmcT_hard = np.loadtxt('src/dsmcT_hard.txt')
+dsmc_vhs = np.loadtxt('src/dsmc_vhs.txt')
+dsmcT_vhs = np.loadtxt('src/dsmcT_vhs.txt')
 
 # plt.plot([1, 2, 4, 8, 14], [65.3/65.3, 65.3/37.7, 65.3/24.8, 65.3/22.1, 65.3/19.9], '^-', color='black')
 # plt.xlabel('Threads', fontsize=16)
@@ -43,21 +45,16 @@ temperature1_scale = (temperature1 - temperature1[0]) / (temperature1[-1] - temp
 temperature2_scale = (temperature2 - temperature2.min()) / (temperature2.max() - temperature2.min())
 vel2_scale = (vel2 - vel2[-1]) / (vel2[0] - vel2[-1])
 
-shock_thick = 2 / (n2[-1] - n2[0]) / np.max(np.abs(np.gradient(n2, x2)))
+shock_thick = 1 / ((np.max(n2) - np.min(n2)) / np.max(np.abs(np.gradient(n2, x2))))
 
 gamma = CONSTANTS['gamma']
 R = CONSTANTS['R']
 T1 = FREESTREAM_PARAMS['T1']
 P1 = FREESTREAM_PARAMS['P1']
 
-a1 = np.sqrt(gamma * R * T1)
-rho1 = P1/(R * T1)
-mu1 = 2.26e-5  # [Pa * s]
-
-shock_thick2 = (np.max(dsmc_hard[:, 1]) - np.min(dsmc_hard[:, 1])) / np.max(np.abs(np.gradient(dsmc_hard[:, 1], dsmc_hard[:, 0])))
-# lambda_inf = 16/5 * (gamma / (2 * np.pi))**0.5 * mu1 / (rho1 * a1) * 1000
-lambda_inf = 1.098
-print('DSMC:', lambda_inf/shock_thick2, 'Current:', lambda_inf/shock_thick)
+shock_thick_dsmc = np.max(np.abs(np.gradient(dsmc[:, 1], dsmc[:, 0]))) / 50.0
+shock_thick_vhs = np.max(np.abs(np.gradient(dsmc_vhs[:, 1], dsmc_vhs[:, 0]))) / 50.0
+print('DSMC:', shock_thick_dsmc, 'Current:', shock_thick)
 
 # Calculate some distributions and plot them.
 p = 100
@@ -77,13 +74,13 @@ point = (x[p] - x.min()) / (x.max() - x.min())
 cx_vec, cy_vec, cz_vec = np.linspace(-5, 5.5, 106), np.linspace(-5, 5.5, 106), np.linspace(-5, 5.5, 106)
 cx, cy, cz = np.meshgrid(cx_vec, cy_vec, cz_vec, indexing='ij')
 
-A, b, wx, _, _ = invert([nx1, ux1, 0.0, 0.0, ex1], [0.1, 0.0, 0.0, 0.0], {'ci_cx': -5, 'cf_cx': -1.5, 'ci_cy': -5, 'cf_cy': 5.5, 'ci_cz': -5, 'cf_cz': 5.5})
+A, b, wx, _, _ = invert([nx1, ux1, 0.0, 0.0, ex1], [0.1, 0.0, 0.0, 0.0], {'ci_cx': -5, 'cf_cx': -3.5, 'ci_cy': -5, 'cf_cy': 5.5, 'ci_cz': -5, 'cf_cz': 5.5})
 fx1 = np.trapezoid(np.trapezoid(A * np.exp(-b * ((cx - wx)**2 + cy**2 + cz**2)), cz_vec, axis=2), cy_vec, axis=1)
 
-A, b, wx, _, _ = invert([nx2, ux2, 0.0, 0.0, ex2], [0.1, 0.0, 0.0, 0.0], {'ci_cx': -1.5, 'cf_cx': 0.5, 'ci_cy': -5, 'cf_cy': 5.5, 'ci_cz': -5, 'cf_cz': 5.5})
+A, b, wx, _, _ = invert([nx2, ux2, 0.0, 0.0, ex2], [0.1, 0.0, 0.0, 0.0], {'ci_cx': -3.5, 'cf_cx': -2.0, 'ci_cy': -5, 'cf_cy': 5.5, 'ci_cz': -5, 'cf_cz': 5.5})
 fx2 = np.trapezoid(np.trapezoid(A * np.exp(-b * ((cx - wx)**2 + cy**2 + cz**2)), cz_vec, axis=2), cy_vec, axis=1)
 
-A, b, wx, _, _ = invert([nx3, ux3, 0.0, 0.0, ex3], [1.0, 0.0, 0.0, 0.0], {'ci_cx': 0.5, 'cf_cx': 1.8, 'ci_cy': -5, 'cf_cy': 5.5, 'ci_cz': -5, 'cf_cz': 5.5})
+A, b, wx, _, _ = invert([nx3, ux3, 0.0, 0.0, ex3], [1.0, 0.0, 0.0, 0.0], {'ci_cx': -2.0, 'cf_cx': -0.5, 'ci_cy': -5, 'cf_cy': 5.5, 'ci_cz': -5, 'cf_cz': 5.5})
 fx3 = np.trapezoid(np.trapezoid(A * np.exp(-b * ((cx - wx)**2 + cy**2 + cz**2)), cz_vec, axis=2), cy_vec, axis=1)
 
 # Interpolate to get smooth curves of the DSMC data.
@@ -116,18 +113,20 @@ x_scale_shifted = x_scale + 0.08176
 
 fig = plt.figure(figsize=(10, 6))
 ax1 = fig.add_subplot(111)
-# ax1.plot(x2_scale + 0.044, temperature1_scale, color='indigo')
-ax1.plot(x2_scale + 0.038, temperature2_scale, color='red')
-# ax1.plot(x2_scale + 0.044, n1_scale, color='purple')
-ax1.plot(x2_scale + 0.038, n2_scale, color='green')
+# ax1.plot(x2_scale + 0.055, temperature1_scale, color='indigo')
+ax1.plot(x2_scale + 0.044, temperature2_scale, color='red')
+# ax1.plot(x2_scale + 0.07, n1_scale, color='purple')
+ax1.plot(x2_scale + 0.044, n2_scale, color='green')
 # ax1.plot(x_scale, vel2_scale, color='blue')
 # ax1.plot(x_scale, n_avg, '-.', color='green')
 # ax1.plot(x_scale, T_avg, '-.', color='red')
 # ax1.plot(1 - dsmc[:, 0], dsmc[:, 1], '--', color='green')
-ax1.plot(1 - dsmc_hard[:, 0], dsmc_hard[:, 1], '--', color='green')
+# ax1.plot(1 - dsmc_hard[:, 0], dsmc_hard[:, 1], '--', color='green')
+ax1.plot(1 - dsmc_vhs[:, 0], dsmc_vhs[:, 1], '--', color='green')
 # ax1.scatter(x_new, f(x_new), color='green', marker='s', facecolors='none')
 # ax1.plot(1 - dsmcT[:, 0], dsmcT[:, 1], '--', color='red')
-ax1.plot(1 - dsmcT_hard[:, 0], dsmcT_hard[:, 1], '--', color='red')
+# ax1.plot(1 - dsmcT_hard[:, 0], dsmcT_hard[:, 1], '--', color='red')
+ax1.plot(1 - dsmcT_vhs[:, 0], dsmcT_vhs[:, 1], '--', color='red')
 # ax1.scatter(x_new, ft(x_new), color='red', marker='s', facecolors='none')
 
 ax1.set_xlabel(r'Scaled Location', fontsize=20)
@@ -142,9 +141,9 @@ plt.savefig('plots/profile.pdf')
 
 fig3 = plt.figure(figsize=(6, 6))
 ax3 = fig3.add_subplot(111)
-ax3.plot(cy_vec[0:36], fx1[0:36], color='green')
-ax3.plot(cy_vec[35:56], fx2[35:56], color='red')
-ax3.plot(cx_vec[55:69], fx3[55:69], color='blue')
+ax3.plot(cy_vec[0:16], fx1[0:16], color='green')
+ax3.plot(cy_vec[15:31], fx2[15:31], color='red')
+ax3.plot(cx_vec[30:46], fx3[30:46], color='blue')
 ax3.set_xlabel(r'$C_x$', fontsize=20)
 ax3.set_ylabel(r'f', fontsize=20)
 ax3.tick_params(axis='both',labelsize=16)

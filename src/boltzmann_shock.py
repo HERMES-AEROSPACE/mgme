@@ -6,7 +6,7 @@ from matplotlib import pyplot as plt
 import itertools
 import cProfile, pstats
 from pstats import SortKey
-from scipy import interpolate
+from scipy import interpolate, special
 from joblib import Parallel, delayed
 import time, sys
 from numba import types
@@ -56,11 +56,15 @@ def run_simulation():
     L_ref = lam_ref
     Kn = lam_ref / L_ref
     t_ref = L_ref / c_ref
+    omega = 0.811  # Variable Hard Sphere Model: 1.0 - Pseudo-Maxwell, 0.5 - Hard Sphere, 0.811 - VHS Argon
+    gamma_omega = special.gamma(5/2 - omega)
+    sigma_coeff_hat = 1/gamma_omega * (0.5)**(0.5 - omega)
     print('Reference mean free path:', lam_ref, '[m]')
+    print('Characteristic length:', L_ref, '[m]')
     print('Knudsen number:', Kn)
+    print('Collision cross section omega:', omega)
 
     cx_vec, cy_vec, cz_vec, cx, cy, cz = calculate_velocity_grid(VELOCITY_SPACE)
-    print(cx_vec[68])
     xj_vec = np.linspace(PHYS_SPACE['xj_range'][0], PHYS_SPACE['xj_range'][1], PHYS_SPACE['num_xj'])
     dx = np.abs(xj_vec[1] - xj_vec[0])
     dcx = np.abs(cx_vec[1] - cx_vec[0])
@@ -118,7 +122,7 @@ def run_simulation():
     # plt.plot(xj_vec, T_val, '--')
     # plt.xlabel('xj', fontsize=16)
     # plt.ylabel('T', fontsize=16)
-    # plt.show()
+    # plt.savefig('plots/ic.pdf')
     # f[f < 1e-12] = 0.0
     # plt.plot(cx_vec, np.trapezoid(np.trapezoid(n_val[-1] * f[-1], cz_vec, axis=2), cy_vec, axis=1))
     # plt.plot(cz_vec, np.trapezoid(np.trapezoid(n_val[-1] * f[-1], cy_vec, axis=1), cx_vec, axis=0))
@@ -134,14 +138,14 @@ def run_simulation():
     print(bounds_list)
     print("--------------------------------BEGIN SIMULATION----------------------------------")
 
-    def step(i, U_i, bounds_list, num_groups, CX_LB, CX_UB, CY_LB, CY_UB, CZ_LB, CZ_UB, key_type):
+    def step(i, U_i, bounds_list, num_groups, CX_LB, CX_UB, CY_LB, CY_UB, CZ_LB, CZ_UB, key_type, sigma_coeff_hat, omega):
         # Calculate weights through convex optimization.
         weights, num_valid_samples, offsets, x_sample, y_sample, z_sample = generate_regular_samples(
             i, U_i, num_groups, bounds_list, max_retries=10)
 
         # Advance the collision and flux forward.
         coll = collide(x_sample, y_sample, z_sample, weights, num_valid_samples, bounds_list, num_groups, \
-                        n_coll, CX_LB, CX_UB, CY_LB, CY_UB, CZ_LB, CZ_UB, key_type)
+                        n_coll, CX_LB, CX_UB, CY_LB, CY_UB, CZ_LB, CZ_UB, key_type, sigma_coeff_hat, omega)
         flux = calc_flux_int(num_groups, weights, offsets, x_sample, y_sample, z_sample)
 
         return i, coll, flux
@@ -157,7 +161,7 @@ def run_simulation():
         
         # Integrate collision term and flux term separately. Integrate in time using explicit Euler.
         step_dt = Parallel(n_jobs=26)(
-            delayed(step)(i, U[i], bounds_list, num_groups, CX_LB, CX_UB, CY_LB, CY_UB, CZ_LB, CZ_UB, key_type)
+            delayed(step)(i, U[i], bounds_list, num_groups, CX_LB, CX_UB, CY_LB, CY_UB, CZ_LB, CZ_UB, key_type, sigma_coeff_hat, omega)
             for i in range(0, numXj)
         )
         for i, coll, flux in step_dt:
