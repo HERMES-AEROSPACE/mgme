@@ -10,6 +10,7 @@ from scipy import interpolate, special
 from joblib import Parallel, delayed
 import time, sys
 from numba import types
+from scipy.stats import norm, qmc
 
 
 def run_simulation():
@@ -56,7 +57,7 @@ def run_simulation():
     L_ref = lam_ref
     Kn = lam_ref / L_ref
     t_ref = L_ref / c_ref
-    omega = 0.811  # Variable Hard Sphere Model: 1.0 - Pseudo-Maxwell, 0.5 - Hard Sphere, 0.811 - VHS Argon
+    omega = 1.0  # Variable Hard Sphere Model: 1.0 - Pseudo-Maxwell, 0.5 - Hard Sphere, 0.811 - VHS Argon
     gamma_omega = special.gamma(5/2 - omega)
     sigma_coeff_hat = 1/gamma_omega * (0.5)**(0.5 - omega)
     print('Reference mean free path:', lam_ref, '[m]')
@@ -75,9 +76,10 @@ def run_simulation():
     numXj = PHYS_SPACE['num_xj']
 
     cfl = 0.7
-    t_end = 140.0
+    t_end = 60.0
     tc = 1/(n2/n_ref * (d/d_ref)**2 * np.sqrt(2) * 1)
     dt = np.round(cfl/(1/tc + CX_UB/dx), 3)
+    sampler = qmc.LatinHypercube(d=3)
     print('CFL number:', cfl)
     print('Collision time scale:', tc * t_ref, '[s]')
     print('Time step:', dt)
@@ -107,12 +109,12 @@ def run_simulation():
     cf_combo = np.array(list(itertools.product(cf_cx, cf_cy, cf_cz)))
     num_groups = combinations.shape[0]
 
-    restart = 0
+    restart = 1
 
     U0, f = ic(cx, cy, cz, cx_vec, cy_vec, cz_vec, n_val, u_val, T_val, VELOCITY_SPACE['num_cx'], VELOCITY_SPACE['num_cy'], VELOCITY_SPACE['num_cz'], \
         numXj, num_groups, combinations)
     if restart:
-        data = np.load('simulation_data3/U2726.npy')
+        data = np.load('simulation_data/U2700.npy')
         print('Restarting from...')
         U = data
     else:
@@ -138,10 +140,10 @@ def run_simulation():
     print(bounds_list)
     print("--------------------------------BEGIN SIMULATION----------------------------------")
 
-    def step(i, U_i, bounds_list, num_groups, CX_LB, CX_UB, CY_LB, CY_UB, CZ_LB, CZ_UB, key_type, sigma_coeff_hat, omega):
+    def step(i, U_i, bounds_list, num_groups, CX_LB, CX_UB, CY_LB, CY_UB, CZ_LB, CZ_UB, key_type, sigma_coeff_hat, omega, sampler):
         # Calculate weights through convex optimization.
         weights, num_valid_samples, offsets, x_sample, y_sample, z_sample = generate_regular_samples(
-            i, U_i, num_groups, bounds_list, max_retries=10)
+            i, U_i, num_groups, bounds_list, sampler, max_retries=10)
 
         # Advance the collision and flux forward.
         coll = collide(x_sample, y_sample, z_sample, weights, num_valid_samples, bounds_list, num_groups, \
@@ -161,7 +163,7 @@ def run_simulation():
         
         # Integrate collision term and flux term separately. Integrate in time using explicit Euler.
         step_dt = Parallel(n_jobs=26)(
-            delayed(step)(i, U[i], bounds_list, num_groups, CX_LB, CX_UB, CY_LB, CY_UB, CZ_LB, CZ_UB, key_type, sigma_coeff_hat, omega)
+            delayed(step)(i, U[i], bounds_list, num_groups, CX_LB, CX_UB, CY_LB, CY_UB, CZ_LB, CZ_UB, key_type, sigma_coeff_hat, omega, sampler)
             for i in range(0, numXj)
         )
         for i, coll, flux in step_dt:
@@ -176,12 +178,15 @@ def run_simulation():
         k1_f = KT_central2(U, F1, numXj, num_groups, dt, dx, CX_LB, CX_UB)
         U += (k1_f + k1_c) * dt
 
+        # print(U[5, 0:4, :])
+        # print(U[5, 4:8, :])
+
         # Save solution.
-        f1 = 'simulation_data/U{}.npy'.format(t + 0)
+        f1 = 'simulation_data/U{}.npy'.format(t + 2701)
         with open(f1, 'wb') as file:
             np.save(file, U)
 
-        print(t * dt,  t + 0)
+        print(t * dt,  t + 2701)
 
 if __name__ == '__main__':
     run_simulation()

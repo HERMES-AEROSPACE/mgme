@@ -19,16 +19,13 @@ def calculate_velocity_grid(velocity_space):
 
     return cx_vec, cy_vec, cz_vec, cx, cy, cz 
 
-def generate_grid(bounds_list, num_groups):
-    def gen_group_sample(a, b, n):
-        return np.linspace(a, b, n, endpoint=False) + (b - a) / (2 * n)
-
+def generate_grid(bounds_list, num_groups, sampler):
     num_samples = np.zeros(num_groups)
     for i in range(0, num_groups):
         volume = (bounds_list[i, 1] - bounds_list[i, 0]) * \
             (bounds_list[i, 3] - bounds_list[i, 2]) * \
             (bounds_list[i, 5] - bounds_list[i, 4])
-        num_samples[i] = np.max((300, int(np.ceil(10 * volume))))
+        num_samples[i] = np.max((300, int(np.ceil(30 * volume))))
     
     x_sample = np.zeros(int(np.sum(num_samples)))
     y_sample = np.zeros(int(np.sum(num_samples)))
@@ -44,7 +41,6 @@ def generate_grid(bounds_list, num_groups):
         start_idx = int(offsets[i])
         end_idx = int(offsets[i+1])
 
-        sampler = qmc.LatinHypercube(d=3, seed=6767)
         sample = qmc.scale(sampler.random(n=int(num_samples[i])), l_bounds, u_bounds)
     
         x_sample[start_idx:end_idx] = sample[:, 0]
@@ -437,9 +433,8 @@ def try_solve_group(i, x_sample_filter, y_sample_filter, z_sample_filter, U_i, f
     except Exception as e:
         return False, None, str(e)
 
-def regenerate_group_samples(i, n_samples, bounds_list):
+def regenerate_group_samples(i, n_samples, bounds_list, sampler):
     """Generate new samples for a group"""
-    sampler = qmc.LatinHypercube(d=3, seed=6768)
     l_bounds = [bounds_list[i, 0], bounds_list[i, 2], bounds_list[i, 4]]
     u_bounds = [bounds_list[i, 1], bounds_list[i, 3], bounds_list[i, 5]]
     
@@ -449,7 +444,7 @@ def regenerate_group_samples(i, n_samples, bounds_list):
     else:
         return None, None, None
 
-def generate_regular_samples(p, U_i, num_groups, bounds_list, max_retries=10):
+def generate_regular_samples(p, U_i, num_groups, bounds_list, sampler, max_retries=10):
     num_valid_samples = np.zeros(num_groups, dtype=np.int64)
 
     x_sample_modified = None
@@ -473,7 +468,7 @@ def generate_regular_samples(p, U_i, num_groups, bounds_list, max_retries=10):
     z_boundsu = np.minimum(bounds_list[:, 5], uz + 3*sigma)
 
     adaptive_bounds = np.vstack((x_boundsl, x_boundsu, y_boundsl, y_boundsu, z_boundsl, z_boundsu)).T
-    x_sample, y_sample, z_sample, offsets, num_samples = generate_grid(adaptive_bounds, num_groups)
+    x_sample, y_sample, z_sample, offsets, num_samples = generate_grid(adaptive_bounds, num_groups, sampler)
 
     weights = np.zeros(int(np.sum(num_samples)))
 
@@ -498,7 +493,7 @@ def generate_regular_samples(p, U_i, num_groups, bounds_list, max_retries=10):
                     y_sample_modified = y_sample.copy()
                     z_sample_modified = z_sample.copy()
 
-                x_new, y_new, z_new = regenerate_group_samples(i, n_samples_group, adaptive_bounds)
+                x_new, y_new, z_new = regenerate_group_samples(i, n_samples_group, adaptive_bounds, sampler)
                 
                 # Replace samples in modified arrays
                 x_sample_modified[start_idx:end_idx] = x_new
@@ -535,13 +530,13 @@ def generate_regular_samples(p, U_i, num_groups, bounds_list, max_retries=10):
                 
                 break  # Exit retry loop
             else:
-                if attempt == max_retries - 1:
-                    print(f'Cell {p}, Group {i}: Failed after {max_retries} attempts - {status}')
-                    print(U_i[i, 0], U_i[i, 1], U_i[i, 2], U_i[i, 3], U_i[i, 4])
-                    print(x_boundsl[i], x_boundsu[i], y_boundsl[i], y_boundsu[i], z_boundsl[i], z_boundsu[i])
-                    print(x_sample_filter.size, sigma, 2/3 * thermal, status)
-                    num_valid_samples[i] = 0
-                    weights[start_idx:end_idx] = 0.0
+                # if attempt == max_retries - 1:
+                print(f'Cell {p}, Group {i}: Failed after {max_retries} attempts - {status}')
+                print(U_i[i, 0], U_i[i, 1], U_i[i, 2], U_i[i, 3], U_i[i, 4])
+                print(x_boundsl[i], x_boundsu[i], y_boundsl[i], y_boundsu[i], z_boundsl[i], z_boundsu[i])
+                print(x_sample_filter.size, sigma, 2/3 * thermal, status)
+                num_valid_samples[i] = 0
+                weights[start_idx:end_idx] = 0.0
                     
 
     return (weights, num_valid_samples, offsets,
