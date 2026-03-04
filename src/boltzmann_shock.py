@@ -1,16 +1,13 @@
 import numpy as np
 from .banner import print_banner
-from .shock_helper import calc_flux_int, ic, invert, calc_integral, calc_flux, LF_central1, KT_central2, generate_regular_samples, lookup_table, collide, calculate_velocity_grid, generate_grid
+from .shock_helper import calc_flux_int, ic, LF_central1, KT_central2, generate_regular_samples, collide, calculate_velocity_grid
 from .config import CONSTANTS, FREESTREAM_PARAMS, PHYS_SPACE, GROUP_PARAMS, VELOCITY_SPACE, COLLISION_PARAMS
-from matplotlib import pyplot as plt
 import itertools
-import cProfile, pstats
-from pstats import SortKey
-from scipy import interpolate, special
+from scipy import special
 from joblib import Parallel, delayed
 import time, sys
 from numba import types
-from scipy.stats import norm, qmc
+from scipy.stats import qmc
 
 
 def run_simulation():
@@ -136,7 +133,6 @@ def run_simulation():
     for i in range(num_groups):
         bounds_list[i] = np.array([ci_combo[i, 0], cf_combo[i, 0], ci_combo[i, 1], cf_combo[i, 1], ci_combo[i, 2], cf_combo[i, 2]])
     
-    # x_sample, y_sample, z_sample, offsets, num_samples = generate_grid(bounds_list, num_groups)
     print(bounds_list)
     print("--------------------------------BEGIN SIMULATION----------------------------------")
 

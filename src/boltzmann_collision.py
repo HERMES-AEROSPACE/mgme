@@ -10,8 +10,9 @@ from .config import (
     COLLISION_PARAMS, 
     SAMPLING_PARAMS
 )
-from .moment_utils import calc_moment
-from .sampling import generate_regular_samples, generate_grid, calculate_volume_elements, calculate_velocity_grid
+from .collision_helper import calculate_velocity_grid, calc_moment
+
+from .sampling import generate_regular_samples, generate_grid, calculate_volume_elements
 from .virtual_collisions import collide
 from .data_utils import save_simulation_data
 from .banner import print_banner
@@ -25,16 +26,16 @@ def run_simulation():
     
     # Get velocity space grid.
     cx_vec, cy_vec, cz_vec, cx, cy, cz = calculate_velocity_grid()
-    dx = cx_vec[1] - cx_vec[0]
-    dy = cy_vec[1] - cy_vec[0]
-    dz = cz_vec[1] - cz_vec[0]
+    dx = np.abs(cx_vec[1] - cx_vec[0])
+    dy = np.abs(cy_vec[1] - cy_vec[0])
+    dz = np.abs(cz_vec[1] - cz_vec[0])
 
     # Initial distribution function. Still have to uncomment the correct one.
-    Ak = 0.00384934
-    bk = 0.03110795
-    wxk = 2.36981369
-    wyk = 0.0
-    wzk = 0.0
+    # Ak = 0.00384934
+    # bk = 0.03110795
+    # wxk = 2.36981369
+    # wyk = 0.0
+    # wzk = 0.0
     # K = 1 - 0.4 * np.exp(-0/6)
     # f0 = 1 / (2 * K * (np.pi * K)**1.5) * (5 * K - 3 + 2 * (1 - K) / K * (cx**2 + cy**2 + cz**2)) * np.exp(-(cx**2 + cy**2 + cz**2) / K)
     f0 = 1 / (np.pi**1.5) * np.exp(-1 * (cx**2 + cy**2 + cz**2))

@@ -18,15 +18,6 @@ PHYS_SPACE = {
 
 # Group parameters
 GROUP_PARAMS = {
-    # 'ci_cx': np.array([-5.0, -0.5, 0.0, 0.5]),
-    # 'cf_cx': np.array([-0.5, 0.0, 0.5, 5.0]),
-    # 'group_bounds_cx': np.array([[0, 109], [108, 121], [120, 133], [132, 241]]),
-    # 'ci_cy': np.array([-5.0, -0.5, 0.0, 0.5]),
-    # 'cf_cy': np.array([-0.5, 0.0, 0.5, 5.0]),
-    # 'group_bounds_cy': np.array([[0, 109], [108, 121], [120, 133], [132, 241]]),
-    # 'ci_cz': np.array([-5.0, -0.5, 0.0, 0.5]),
-    # 'cf_cz': np.array([-0.5, 0.0, 0.5, 5.0]),
-    # 'group_bounds_cz': np.array([[0, 109], [108, 121], [120, 133], [132, 241]])
     'ci_cx': np.array([-5.0, -2.0, -0.5, 1.0, 2.5]),
     'cf_cx': np.array([-2.0, -0.5, 1.0, 2.5, 5.5]),
     'group_bounds_cx': np.array([[0, 31], [30, 46], [45, 61], [60, 76], [75, 106]]),
@@ -36,11 +27,6 @@ GROUP_PARAMS = {
     'ci_cz': np.array([-5.0, 0]), 
     'cf_cz': np.array([0, 5.5]),
     'group_bounds_cz': np.array([[0, 51], [50, 106]])
-}
-
-# AMR parameters
-AMR = {
-    'threshold': 0.01
 }
 
 # Collision parameters
