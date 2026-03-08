@@ -1,22 +1,14 @@
 import numpy as np
-from matplotlib import pyplot as plt
 from scipy import special
-from scipy import optimize
 from scipy.stats import qmc, norm
-from .config import (
+from .config_0d import (
     VELOCITY_SPACE,
     GROUP_PARAMS, 
     AMR,
-    COLLISION_PARAMS, 
-    SAMPLING_PARAMS
+    COLLISION_PARAMS
 )
-from .collision_helper import calculate_velocity_grid, calc_moment
-
-from .sampling import generate_regular_samples, generate_grid, calculate_volume_elements
-from .virtual_collisions import collide
-from .data_utils import save_simulation_data
+from .collision_helper import calculate_velocity_grid, calc_moment, GroupNode, refine_init
 from .banner import print_banner
-from .amr import calculate_hellinger_distance, GroupNode, refine_init, get_current_groups, custom_groups
 import copy
 import sys
 
@@ -25,7 +17,7 @@ def run_simulation():
     print_banner()
     
     # Get velocity space grid.
-    cx_vec, cy_vec, cz_vec, cx, cy, cz = calculate_velocity_grid()
+    cx_vec, cy_vec, cz_vec, cx, cy, cz = calculate_velocity_grid(VELOCITY_SPACE)
     dx = np.abs(cx_vec[1] - cx_vec[0])
     dy = np.abs(cy_vec[1] - cy_vec[0])
     dz = np.abs(cz_vec[1] - cz_vec[0])
@@ -42,22 +34,22 @@ def run_simulation():
     # f0 = 0.5 * (3 / np.pi)**1.5 * (np.exp(-3.0 * (cx - 1)**2) + np.exp(-3.0 * (cx + 1)**2)) * np.exp(-3 * (cy**2 + cz**2))
     # f0 = Ak * np.exp(-bk * ((cx - wxk)**2 + (cy - wyk)**2 + (cz - wzk)**2))
 
+    # Latin Hypercube sampler for generating group samples.
+    sampler = qmc.LatinHypercube(d=3)
+
     # Create the root node of the AMR tree.
-    root = GroupNode({'ci_cx': VELOCITY_SPACE['cx_range'][0], 'cf_cx': VELOCITY_SPACE['cx_range'][1], 'group_bounds_cx': np.array([0, VELOCITY_SPACE['num_cx']]),
-                      'ci_cy': VELOCITY_SPACE['cy_range'][0], 'cf_cy': VELOCITY_SPACE['cy_range'][1], 'group_bounds_cy': np.array([0, VELOCITY_SPACE['num_cy']]), 
-                      'ci_cz': VELOCITY_SPACE['cz_range'][0], 'cf_cz': VELOCITY_SPACE['cz_range'][1], 'group_bounds_cz': np.array([0, VELOCITY_SPACE['num_cz']])})
+    root = GroupNode(np.array([-3, 3, -3, 3, -3, 3]))
     mu = calc_moment(f0, cx, cy, cz, cx_vec, cy_vec, cz_vec)
     root.set_mu(mu)
-    root._update_group_dist_params([1.0, 0.0, 0.0, 0.0])
-    root_f = root.A * np.exp(-root.b * ((cx - root.wx)**2 + (cy - root.wy)**2 + (cz - root.wz)**2))
-    dist = calculate_hellinger_distance(f0, root_f, cx_vec, cy_vec, cz_vec)
-    root.set_hellinger_distance(dist)
+    root.generate_samples(sampler)
+    root.optimize_weights()
 
+    print(root.entropy)
     print('Running AMR to get initial groups...\n')
 
     # Choose between using custom groups or AMR to get initial groups.
-    custom_groups(f0, cx, cy, cz, cx_vec, cy_vec, cz_vec, root, GROUP_PARAMS)
-    # refine_init(f0, cx, cy, cz, cx_vec, cy_vec, cz_vec, root, 4)
+    # custom_groups(f0, cx, cy, cz, cx_vec, cy_vec, cz_vec, root, GROUP_PARAMS)
+    refine_init(f0, cx, cy, cz, cx_vec, cy_vec, cz_vec, root, 4)
     curr_groups = get_current_groups(root)
     n_groups = len(curr_groups)
     print('# of groups:', n_groups)

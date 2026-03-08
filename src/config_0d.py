@@ -26,7 +26,7 @@ GROUP_PARAMS = {
 
 # AMR parameters
 AMR = {
-    'threshold': 0.01
+    'entropy_threshold': 0.01
 }
 
 # Collision parameters

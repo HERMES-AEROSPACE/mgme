@@ -403,25 +403,25 @@ def KT_central2(U_list, F_list, numXj, n_groups, dt, dx, CX_LB, CX_UB):
 
     return k
 
-def try_solve_group(i, x_sample_filter, y_sample_filter, z_sample_filter, U_i, flux_limit=10.0):
+def try_solve_group(i, x_sample, y_sample, z_sample, U_i, flux_limit=10.0):
     """Attempt to solve for one group"""
     try:
-        x = cp.Variable(shape=int(x_sample_filter.size), nonneg=True)
+        x = cp.Variable(shape=int(x_sample.size), nonneg=True)
         obj = cp.Maximize(cp.sum(cp.entr(x)))
 
         constraints = [
             cp.sum(x) == U_i[i, 0],
-            cp.sum(cp.multiply(x_sample_filter, x)) == U_i[i, 1],
-            cp.sum(cp.multiply(y_sample_filter, x)) == U_i[i, 2],
-            cp.sum(cp.multiply(z_sample_filter, x)) == U_i[i, 3],
-            cp.sum(cp.multiply(x_sample_filter**2 + y_sample_filter**2 + z_sample_filter**2, x)) == U_i[i, 4]
+            cp.sum(cp.multiply(x_sample, x)) == U_i[i, 1],
+            cp.sum(cp.multiply(y_sample, x)) == U_i[i, 2],
+            cp.sum(cp.multiply(z_sample, x)) == U_i[i, 3],
+            cp.sum(cp.multiply(x_sample**2 + y_sample**2 + z_sample**2, x)) == U_i[i, 4]
         ]
         
         prob = cp.Problem(obj, constraints)
         prob.solve(solver=cp.CLARABEL, verbose=False)
 
         if x.value is not None and not np.any(np.isnan(x.value)):
-            predicted_flux = np.sum(x_sample_filter * x.value)
+            predicted_flux = np.sum(x_sample * x.value)
             
             if np.abs(predicted_flux) < flux_limit:
                 return True, x.value, predicted_flux
@@ -505,20 +505,9 @@ def generate_regular_samples(p, U_i, num_groups, bounds_list, sampler, max_retri
             y_sample_slice = y_sample_modified[start_idx:end_idx] if y_sample_modified is not None else y_sample[start_idx:end_idx]
             z_sample_slice = z_sample_modified[start_idx:end_idx] if z_sample_modified is not None else z_sample[start_idx:end_idx]
 
-            # Filter samples within adaptive bounds
-            mask = (
-                (x_sample_slice > x_boundsl[i]) & (x_sample_slice < x_boundsu[i]) &
-                (y_sample_slice > y_boundsl[i]) & (y_sample_slice < y_boundsu[i]) &
-                (z_sample_slice > z_boundsl[i]) & (z_sample_slice < z_boundsu[i])
-            )
-
-            x_sample_filter = x_sample_slice[mask]
-            y_sample_filter = y_sample_slice[mask]
-            z_sample_filter = z_sample_slice[mask]
-
             # Try to solve
             success, solution, status = try_solve_group(
-                i, x_sample_filter, y_sample_filter, z_sample_filter, U_i
+                i, x_sample_slice, y_sample_slice, z_sample_slice, U_i
             )
             
             if success:

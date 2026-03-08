@@ -1,9 +1,132 @@
 import numpy as np
 from matplotlib import pyplot as plt
 import matplotlib.animation as animation
-from .moment_utils import invert, calc_moment
-from .amr import calculate_hellinger_distance
+from scipy import optimize, special
+import h5py
 
+
+def moment_eq(x, ux, uy, uz, e, ci_cx, cf_cx, ci_cy, cf_cy, ci_cz, cf_cz):
+    """
+    Moment equation for solving distribution parameters.
+    
+    Args:
+        x: Array containing [beta, wx, wy, wz]
+        u: Target velocity
+        e: Target energy
+        ci: Lower bound
+        cf: Upper bound
+    
+    Returns:
+        Array of moment equations
+    """
+    I0x = np.sqrt(np.pi / (4 * x[0])) * (special.erf(np.sqrt(x[0]) * (cf_cx - x[1])) - special.erf(np.sqrt(x[0]) * (ci_cx - x[1])))
+    I0y = np.sqrt(np.pi / (4 * x[0])) * (special.erf(np.sqrt(x[0]) * (cf_cy - x[2])) - special.erf(np.sqrt(x[0]) * (ci_cy - x[2])))
+    I0z = np.sqrt(np.pi / (4 * x[0])) * (special.erf(np.sqrt(x[0]) * (cf_cz - x[3])) - special.erf(np.sqrt(x[0]) * (ci_cz - x[3])))
+
+    I1x = (np.exp(-x[0] * (ci_cx - x[1])**2) - np.exp(-x[0] * (cf_cx - x[1])**2)) / (2 * x[0])
+    I1y = (np.exp(-x[0] * (ci_cy - x[2])**2) - np.exp(-x[0] * (cf_cy - x[2])**2)) / (2 * x[0])
+    I1z = (np.exp(-x[0] * (ci_cz - x[3])**2) - np.exp(-x[0] * (cf_cz - x[3])**2)) / (2 * x[0])
+
+    I2x = -np.sqrt(np.pi) / (2 * np.sqrt(x[0])) * \
+        ((np.exp(-x[0] * (cf_cx - x[1])**2) * (cf_cx - x[1]))/np.sqrt(np.pi * x[0]) - (np.exp(-x[0] * (ci_cx - x[1])**2) * (ci_cx - x[1])) / np.sqrt(np.pi * x[0])) + \
+            np.sqrt(np.pi)/(4 * np.sqrt(x[0]**3)) * (special.erf(np.sqrt(x[0]) * (cf_cx - x[1])) - special.erf(np.sqrt(x[0]) * (ci_cx - x[1])))
+    I2y = -np.sqrt(np.pi) / (2 * np.sqrt(x[0])) * \
+        ((np.exp(-x[0] * (cf_cy - x[2])**2) * (cf_cy - x[2]))/np.sqrt(np.pi * x[0]) - (np.exp(-x[0] * (ci_cy - x[2])**2) * (ci_cy - x[2])) / np.sqrt(np.pi * x[0])) + \
+            np.sqrt(np.pi)/(4 * np.sqrt(x[0]**3)) * (special.erf(np.sqrt(x[0]) * (cf_cy - x[2])) - special.erf(np.sqrt(x[0]) * (ci_cy - x[2])))
+    I2z = -np.sqrt(np.pi) / (2 * np.sqrt(x[0])) * \
+        ((np.exp(-x[0] * (cf_cz - x[3])**2) * (cf_cz - x[3]))/np.sqrt(np.pi * x[0]) - (np.exp(-x[0] * (ci_cz - x[3])**2) * (ci_cz - x[3])) / np.sqrt(np.pi * x[0])) + \
+            np.sqrt(np.pi)/(4 * np.sqrt(x[0]**3)) * (special.erf(np.sqrt(x[0]) * (cf_cz - x[3])) - special.erf(np.sqrt(x[0]) * (ci_cz - x[3])))
+
+    return [(I1x + x[1] * I0x) / I0x - ux, (I1y + x[2] * I0y) / I0y - uy, (I1z + x[3] * I0z) / I0z - uz, \
+            (I2x + 2 * x[1] * I1x + x[1]**2 * I0x) / (I0x) + (I2y + 2 * x[2] * I1y + x[2]**2 * I0y) / (I0y) + (I2z + 2 * x[3] * I1z + x[3]**2 * I0z) / (I0z) - e]
+
+def calc_moment(f, cx, cy, cz, cx_vec, cy_vec, cz_vec):
+    """
+    Calculate moments (density, momentum, energy) for a given distribution function.
+    
+    Args:
+        f: Distribution function
+        cx, cy, cz: Velocity components
+        cx_vec, cy_vec, cz_vec: Velocity grid vectors
+    
+    Returns:
+        Array of moments [density, x-momentum, y-momentum, z-momentum, energy]
+    """
+    mu = np.zeros(5)
+
+    # Density moment
+    mu[0] = np.trapezoid(np.trapezoid(np.trapezoid(f, cz_vec, axis=2), cy_vec, axis=1), cx_vec, axis=0)
+
+    # Momentum moment
+    uk = cx * f
+    mu[1] = np.trapezoid(np.trapezoid(np.trapezoid(uk, cz_vec, axis=2), cy_vec, axis=1), cx_vec, axis=0)
+
+    uk = cy * f
+    mu[2] = np.trapezoid(np.trapezoid(np.trapezoid(uk, cz_vec, axis=2), cy_vec, axis=1), cx_vec, axis=0)
+
+    uk = cz * f
+    mu[3] = np.trapezoid(np.trapezoid(np.trapezoid(uk, cz_vec, axis=2), cy_vec, axis=1), cx_vec, axis=0)
+
+    # Energy moment
+    c2 = cx**2 + cy**2 + cz**2
+    ek = c2 * f
+    mu[4] = np.trapezoid(np.trapezoid(np.trapezoid(ek, cz_vec, axis=2), cy_vec, axis=1), cx_vec, axis=0)
+
+    return mu 
+
+def invert(mu, initial_guess, group_bounds):
+    A, b, wx, wy, wz = 0.0, 0.0, 0.0, 0.0, 0.0
+    ci_cx = group_bounds['ci_cx']
+    cf_cx = group_bounds['cf_cx']
+    ci_cy = group_bounds['ci_cy']
+    cf_cy = group_bounds['cf_cy']
+    ci_cz = group_bounds['ci_cz']
+    cf_cz = group_bounds['cf_cz']
+
+    sol = optimize.least_squares(moment_eq, initial_guess, args=(mu[1] / mu[0], mu[2] / mu[0], \
+                                    mu[3] / mu[0], mu[4] / mu[0], \
+                                    ci_cx, cf_cx, ci_cy, cf_cy, ci_cz, cf_cz), \
+                                        bounds=([0.0, -10, -10, -10], [np.inf, 10, 10, 10]), method='trf', loss='soft_l1')
+    # print(sol)
+    # print('residual:', np.linalg.norm(sol.fun))
+    
+    # sol = optimize.root(moment_eq, initial_guess, args=(mu[1] / mu[0], mu[2] / mu[0], \
+    #                                 mu[3] / mu[0], mu[4] / mu[0], \
+    #                                     ci_cx, cf_cx, ci_cy, cf_cy, ci_cz, cf_cz), method='lm')
+    if sol.success:
+        b = sol.x[0]
+        wx = sol.x[1]
+        wy = sol.x[2]
+        wz = sol.x[3]
+    
+    I0x = np.sqrt(np.pi / (4 * b)) * (special.erf(np.sqrt(b) * (group_bounds['cf_cx'] - wx)) - special.erf(np.sqrt(b) * (group_bounds['ci_cx'] - wx)))
+    I0y = np.sqrt(np.pi / (4 * b)) * (special.erf(np.sqrt(b) * (group_bounds['cf_cy'] - wy)) - special.erf(np.sqrt(b) * (group_bounds['ci_cy'] - wy)))
+    I0z = np.sqrt(np.pi / (4 * b)) * (special.erf(np.sqrt(b) * (group_bounds['cf_cz'] - wz)) - special.erf(np.sqrt(b) * (group_bounds['ci_cz'] - wz)))
+    A = mu[0] / (I0x * I0y * I0z)
+
+    return A, b, wx, wy, wz
+
+def calculate_hellinger_distance(f1, f2, cx_vec, cy_vec, cz_vec):
+    """
+    Calculate the Hellinger distance between two distributions in a specific group.
+    Make sure distributions are normalized to 1!!!!!!
+    
+    Args:
+        f1, f2: Group distribution functions
+        cx_vec, cy_vec, cz_vec: Velocity space vectors
+        
+    Returns:
+        Hellinger distance between f1 and f2
+    """
+    # Calculate Hellinger distance
+    # H(P,Q) = √(1/2) * √(∫(√P(x) - √Q(x))² dx)
+    diff = np.sqrt(f1) - np.sqrt(f2)
+    squared_diff = diff**2
+    
+    # Integrate over the group volume
+    integral = np.trapezoid(np.trapezoid(np.trapezoid(squared_diff, cz_vec, axis=2), cy_vec, axis=1), cx_vec, axis=0)
+
+    return np.sqrt(0.5 * integral)
 
 class GroupNode:
     def __init__(self, data: dict):
@@ -81,8 +204,9 @@ child2 = GroupNode({'ci_cx': 0, 'cf_cx': 7, 'group_bounds_cx': np.array([60, 121
 root.add_child(child1)
 root.add_child(child2)
 
-# n_step = 50
-# for t in range(0, n_step):
+output_file = "amr_showcase_data.h5"
+frame_data = {}
+
 def animate(t):
     ax1.clear()
     # Calculate input moments to the simulation.
@@ -112,6 +236,23 @@ def animate(t):
     h_dist2 = calculate_hellinger_distance(f[60:121], f2[60:121], cx_vec[60:121], cy_vec, cz_vec)
     print(t, h_dist1, h_dist2)
 
+    # --- Compute marginals (1D projections over cy, cz) ---
+    ft_marginal = np.trapezoid(np.trapezoid(ft,  cz_vec, axis=2), cy_vec, axis=1)
+    f_marginal  = np.trapezoid(np.trapezoid(f,   cz_vec, axis=2), cy_vec, axis=1)
+    f1_marginal = np.trapezoid(np.trapezoid(f1[0:61],  cz_vec, axis=2), cy_vec, axis=1)
+    f2_marginal = np.trapezoid(np.trapezoid(f2[60:121], cz_vec, axis=2), cy_vec, axis=1)
+
+    frame_data[t] = {
+        "t":          t,
+        "ft":         ft_marginal,
+        "f":          f_marginal,
+        "f1":         f1_marginal,   # defined on cx_vec[0:61]
+        "f2":         f2_marginal,   # defined on cx_vec[60:121]
+        "h_dist1":    h_dist1,
+        "h_dist2":    h_dist2,
+        "refined":    int(h_dist1 > 0.05 or h_dist2 > 0.05),
+    }
+
     ax1.plot(cx_vec, np.trapezoid(np.trapezoid(ft, cz_vec, axis=2), cy_vec, axis=1), color='black')
     # In actuality, instead of these if statements, we should refine another level and run the whole thing again.
     # Also the values here would be replaced with the frontier of nodes instead of hard-coded.
@@ -125,6 +266,24 @@ def animate(t):
 
     ax1.set_ylim(-0.05, 0.6)
 
+def save_frame_data(path=output_file):
+    with h5py.File(path, "w") as hf:
+        # Shared axis — stored once
+        hf.create_dataset("cx_vec", data=cx_vec)
+
+        for t, fd in sorted(frame_data.items()):
+            grp = hf.create_group(f"frame_{fd['t']:04d}")
+            grp.attrs["t"]       = fd["t"]
+            grp.attrs["h_dist1"] = fd["h_dist1"]
+            grp.attrs["h_dist2"] = fd["h_dist2"]
+            grp.attrs["refined"] = fd["refined"]
+            grp.create_dataset("ft", data=fd["ft"])
+            grp.create_dataset("f",  data=fd["f"])
+            grp.create_dataset("f1", data=fd["f1"])
+            grp.create_dataset("f2", data=fd["f2"])
+
+    print(f"Saved {len(frame_data)} frames to {path}")
 
 anim = animation.FuncAnimation(fig, animate, frames=91, interval=100)
-anim.save('amr_showcase.mp4')
+anim.save('amr_showcase.gif')
+save_frame_data()
