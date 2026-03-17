@@ -25,7 +25,7 @@ def generate_grid(bounds_list, num_groups, sampler):
         volume = (bounds_list[i, 1] - bounds_list[i, 0]) * \
             (bounds_list[i, 3] - bounds_list[i, 2]) * \
             (bounds_list[i, 5] - bounds_list[i, 4])
-        num_samples[i] = np.max((300, int(np.ceil(30 * volume))))
+        num_samples[i] = np.max((300, int(np.ceil(20 * volume))))
     
     x_sample = np.zeros(int(np.sum(num_samples)))
     y_sample = np.zeros(int(np.sum(num_samples)))
@@ -504,6 +504,16 @@ def generate_regular_samples(p, U_i, num_groups, bounds_list, sampler, max_retri
             x_sample_slice = x_sample_modified[start_idx:end_idx] if x_sample_modified is not None else x_sample[start_idx:end_idx]
             y_sample_slice = y_sample_modified[start_idx:end_idx] if y_sample_modified is not None else y_sample[start_idx:end_idx]
             z_sample_slice = z_sample_modified[start_idx:end_idx] if z_sample_modified is not None else z_sample[start_idx:end_idx]
+
+            mask = (
+                (x_sample_slice > x_boundsl[i]) & (x_sample_slice < x_boundsu[i]) &
+                (y_sample_slice > y_boundsl[i]) & (y_sample_slice < y_boundsu[i]) &
+                (z_sample_slice > z_boundsl[i]) & (z_sample_slice < z_boundsu[i])
+            )
+
+            x_sample_filter = x_sample_slice[mask]
+            y_sample_filter = y_sample_slice[mask]
+            z_sample_filter = z_sample_slice[mask]
 
             # Try to solve
             success, solution, status = try_solve_group(

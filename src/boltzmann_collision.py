@@ -44,7 +44,6 @@ def run_simulation():
     root.generate_samples(sampler)
     root.optimize_weights()
 
-    print(root.entropy)
     print('Running AMR to get initial groups...\n')
 
     # Choose between using custom groups or AMR to get initial groups.

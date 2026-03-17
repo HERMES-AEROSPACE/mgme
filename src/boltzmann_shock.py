@@ -1,13 +1,14 @@
 import numpy as np
 from .banner import print_banner
 from .shock_helper import calc_flux_int, ic, LF_central1, KT_central2, generate_regular_samples, collide, calculate_velocity_grid
-from .config import CONSTANTS, FREESTREAM_PARAMS, PHYS_SPACE, GROUP_PARAMS, VELOCITY_SPACE, COLLISION_PARAMS
+from .config_1d import CONSTANTS, FREESTREAM_PARAMS, PHYS_SPACE, GROUP_PARAMS, VELOCITY_SPACE, SIMULATION_PARAMS
 import itertools
 from scipy import special
 from joblib import Parallel, delayed
 import time, sys
 from numba import types
 from scipy.stats import qmc
+from matplotlib import pyplot as plt
 
 
 def run_simulation():
@@ -22,13 +23,15 @@ def run_simulation():
     Ma1 = FREESTREAM_PARAMS['Ma1']
     m = CONSTANTS['m']
     k = CONSTANTS['k']
+    omega = FREESTREAM_PARAMS['omega']
 
-    n_coll = COLLISION_PARAMS['n_coll']
+    n_coll = SIMULATION_PARAMS['n_coll']
     CX_LB, CX_UB = VELOCITY_SPACE['cx_range']
     CY_LB, CY_UB = VELOCITY_SPACE['cy_range']
     CZ_LB, CZ_UB = VELOCITY_SPACE['cz_range']
     key_type = types.UniTuple(types.int64, 2)
 
+    # Some pre-shock quantities.
     a1 = np.sqrt(gamma * R * T1)
     u1 = Ma1 * a1
     rho1 = P1/(R * T1)
@@ -42,8 +45,8 @@ def run_simulation():
     u2 = u1 * rho1/rho2
     Ma2 = Ma1 * u2/u1 * (T1/T2)**0.5
     n2 = P2/(R * T2) * 1/m
-    # print(n1, n2, u1, u2, T1, T2)
 
+    # Set up reference variables.
     m_ref = m
     n_ref = n1
     T_ref = T1
@@ -54,7 +57,6 @@ def run_simulation():
     L_ref = lam_ref
     Kn = lam_ref / L_ref
     t_ref = L_ref / c_ref
-    omega = 1.0  # Variable Hard Sphere Model: 1.0 - Pseudo-Maxwell, 0.5 - Hard Sphere, 0.811 - VHS Argon
     gamma_omega = special.gamma(5/2 - omega)
     sigma_coeff_hat = 1/gamma_omega * (0.5)**(0.5 - omega)
     print('Reference mean free path:', lam_ref, '[m]')
@@ -62,6 +64,8 @@ def run_simulation():
     print('Knudsen number:', Kn)
     print('Collision cross section omega:', omega)
 
+    print("---------------------------SETTING UP INITIAL CONDITION---------------------------")
+    # Set up velocity and physical space grid.
     cx_vec, cy_vec, cz_vec, cx, cy, cz = calculate_velocity_grid(VELOCITY_SPACE)
     xj_vec = np.linspace(PHYS_SPACE['xj_range'][0], PHYS_SPACE['xj_range'][1], PHYS_SPACE['num_xj'])
     dx = np.abs(xj_vec[1] - xj_vec[0])
@@ -72,8 +76,9 @@ def run_simulation():
     Xj_u = PHYS_SPACE['xj_range'][1]
     numXj = PHYS_SPACE['num_xj']
 
-    cfl = 0.7
-    t_end = 60.0
+    # Set up time step and simulation parameters.
+    cfl = SIMULATION_PARAMS['cfl']
+    t_end = SIMULATION_PARAMS['t_end']
     tc = 1/(n2/n_ref * (d/d_ref)**2 * np.sqrt(2) * 1)
     dt = np.round(cfl/(1/tc + CX_UB/dx), 3)
     sampler = qmc.LatinHypercube(d=3)
@@ -82,6 +87,7 @@ def run_simulation():
     print('Time step:', dt)
     print('dx:', dx)
 
+    # Calculate intial condition on physical grid.
     transition_start = -5
     transition_end = 5
     ramp_length = transition_end - transition_start
@@ -94,7 +100,7 @@ def run_simulation():
     u_val = (u1 + cosine_factor * (u2 - u1)) / c_ref
     n_val = (n1 + cosine_factor * (n2 - n1)) / n_ref
 
-    print("---------------------------SETTING UP INITIAL CONDITION---------------------------")
+    # Create arrays for group bounds.
     group_bounds_cx = GROUP_PARAMS['group_bounds_cx']
     group_bounds_cy = GROUP_PARAMS['group_bounds_cy']
     group_bounds_cz = GROUP_PARAMS['group_bounds_cz']
@@ -106,8 +112,13 @@ def run_simulation():
     cf_combo = np.array(list(itertools.product(cf_cx, cf_cy, cf_cz)))
     num_groups = combinations.shape[0]
 
-    restart = 1
+    bounds_list = np.zeros((num_groups, 6))
+    for i in range(num_groups):
+        bounds_list[i] = np.array([ci_combo[i, 0], cf_combo[i, 0], ci_combo[i, 1], cf_combo[i, 1], ci_combo[i, 2], cf_combo[i, 2]])
+    print(bounds_list)
 
+    # Option to restart simulation from a saved moment list. Calculate initial moments in space.
+    restart = 0
     U0, f = ic(cx, cy, cz, cx_vec, cy_vec, cz_vec, n_val, u_val, T_val, VELOCITY_SPACE['num_cx'], VELOCITY_SPACE['num_cy'], VELOCITY_SPACE['num_cz'], \
         numXj, num_groups, combinations)
     if restart:
@@ -128,12 +139,6 @@ def run_simulation():
     # plt.plot(cx_vec, np.trapezoid(np.trapezoid(f[0], cz_vec, axis=2), cy_vec, axis=1))
     # plt.savefig('plots/icdist.pdf')
     # plt.show()
-
-    bounds_list = np.zeros((num_groups, 6))
-    for i in range(num_groups):
-        bounds_list[i] = np.array([ci_combo[i, 0], cf_combo[i, 0], ci_combo[i, 1], cf_combo[i, 1], ci_combo[i, 2], cf_combo[i, 2]])
-    
-    print(bounds_list)
     print("--------------------------------BEGIN SIMULATION----------------------------------")
 
     def step(i, U_i, bounds_list, num_groups, CX_LB, CX_UB, CY_LB, CY_UB, CZ_LB, CZ_UB, key_type, sigma_coeff_hat, omega, sampler):
@@ -158,7 +163,7 @@ def run_simulation():
         F1 = np.zeros((numXj, num_groups, 5))
         
         # Integrate collision term and flux term separately. Integrate in time using explicit Euler.
-        step_dt = Parallel(n_jobs=26)(
+        step_dt = Parallel(n_jobs=15)(
             delayed(step)(i, U[i], bounds_list, num_groups, CX_LB, CX_UB, CY_LB, CY_UB, CZ_LB, CZ_UB, key_type, sigma_coeff_hat, omega, sampler)
             for i in range(0, numXj)
         )
@@ -174,15 +179,12 @@ def run_simulation():
         k1_f = KT_central2(U, F1, numXj, num_groups, dt, dx, CX_LB, CX_UB)
         U += (k1_f + k1_c) * dt
 
-        # print(U[5, 0:4, :])
-        # print(U[5, 4:8, :])
-
         # Save solution.
-        f1 = 'simulation_data/U{}.npy'.format(t + 2701)
+        f1 = 'simulation_data/U{}.npy'.format(t + 0)
         with open(f1, 'wb') as file:
             np.save(file, U)
 
-        print(t * dt,  t + 2701)
+        print(t * dt,  t + 0)
 
 if __name__ == '__main__':
     run_simulation()

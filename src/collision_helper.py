@@ -42,7 +42,6 @@ class GroupNode:
         res = try_solve_group(self.x_sample, self.y_sample, self.z_sample, self.dv, self.mu)
         if res[0]:
             self.weights = res[1]
-            self.entropy = res[2]
         else:
             print('Optimization failed, investigate further.')
 
@@ -68,7 +67,7 @@ def calc_moment(f, cx, cy, cz, cx_vec, cy_vec, cz_vec):
 
     return mu
 
-def generate_grid(bounds, sampler, method='regular'):
+def generate_grid(bounds, sampler, method='lhc'):
     l_bounds = np.array([bounds[0], bounds[2], bounds[4]])
     u_bounds = np.array([bounds[1], bounds[3], bounds[5]])
 
@@ -99,7 +98,6 @@ def generate_grid(bounds, sampler, method='regular'):
                 (bounds[3] - bounds[2]) * \
                 (bounds[5] - bounds[4])
         num_samples = np.max((300, int(np.ceil(20 * volume))))
-        print(num_samples)
 
         sample = qmc.scale(sampler.random(n=int(num_samples)), l_bounds, u_bounds)
         x_sample = sample[:, 0]
@@ -131,11 +129,7 @@ def try_solve_group(x_sample, y_sample, z_sample, dv, U_i, flux_limit=10.0):
             predicted_flux = np.sum(x_sample * x.value)
             
             if np.abs(predicted_flux) < flux_limit:
-                lambdas = np.array([c.dual_value for c in constraints])
-
-                
-                H = -np.dot(lambdas, U_i)
-                return True, x.value, H
+                return True, x.value, None
             else:
                 return False, None, f"flux_too_large_{predicted_flux:.3f}"
         else:
@@ -143,6 +137,15 @@ def try_solve_group(x_sample, y_sample, z_sample, dv, U_i, flux_limit=10.0):
 
     except Exception as e:
         return False, None, str(e)
+
+def calculate_hellinger_distance(weight_parent, weight_child):
+    """
+    Calculate the Hellinger distance between two group distributions using the same samples.
+    """ 
+    p = weight_parent / np.sum(weight_parent)
+    q = weight_child / np.sum(weight_child)
+
+    return np.sqrt(1 - np.sum(np.sqrt(p * q)))
 
 def refine_group2(bounds):
     """
