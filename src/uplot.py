@@ -9,7 +9,7 @@ from scipy import special
 
 # data = np.load('simulation_data/U20.npy')
 data1 = np.load('simulation_data/U2400.npy')
-data2 = np.load('simulation_data/U1090.npy')
+data2 = np.load('simulation_data/U1100.npy')
 dsmc = np.loadtxt('src/dsmc.txt')
 dsmcT = np.loadtxt('src/dsmcT.txt')
 dsmc_hard = np.loadtxt('src/dsmc_hard.txt')

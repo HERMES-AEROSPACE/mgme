@@ -404,18 +404,82 @@ def KT_central2(U_list, F_list, numXj, n_groups, dt, dx, CX_LB, CX_UB):
 
     return k
 
-def try_solve_group(i, x_sample, y_sample, z_sample, U_i, flux_limit=10.0):
+@jit(nopython=True)
+def max_entropy_newton(x_s, y_s, z_s, moments, lam0=None, max_iter=50, tol=1e-8):
+    """
+    Solve max-entropy weights directly via Newton iterations on dual.
+    
+    Dual problem: find lambda s.t. sum_i phi_i * exp(lam . phi_i) = moments
+    """
+    n = x_s.shape[0]
+    r2 = x_s**2 + y_s**2 + z_s**2
+
+    # Initial lambda guess
+    if lam0 is None:
+        lam = np.zeros(5)
+    else:
+        lam = lam0.copy()
+
+    for iteration in range(max_iter):
+        # Compute weights from current lambda
+        log_w = (lam[0] + lam[1]*x_s + lam[2]*y_s + lam[3]*z_s + lam[4]*r2)
+        w = np.exp(log_w)
+
+        # Compute moment residual: g = sum(phi * w) - moments
+        g = np.zeros(5)
+        g[0] = np.sum(w)           - moments[0]
+        g[1] = np.sum(x_s * w)    - moments[1]
+        g[2] = np.sum(y_s * w)    - moments[2]
+        g[3] = np.sum(z_s * w)    - moments[3]
+        g[4] = np.sum(r2  * w)    - moments[4]
+
+        if np.linalg.norm(g) < tol:
+            break
+
+        # Hessian: H_ij = sum(phi_i * phi_j * w)
+        phi = np.zeros((5, n))
+        phi[0] = np.ones(n)
+        phi[1] = x_s
+        phi[2] = y_s
+        phi[3] = z_s
+        phi[4] = r2
+
+        H = np.zeros((5, 5))
+        for a in range(5):
+            for b in range(5):
+                H[a, b] = np.sum(phi[a] * phi[b] * w)
+
+        # Newton step: lam -= H^{-1} g
+        dlam = np.linalg.solve(H, g)
+        lam -= dlam
+
+    return w, lam
+
+def solve_group_newton(x_sample, y_sample, z_sample, U_i, lam0):
     """Attempt to solve for one group"""
+    try:
+        w, lam = max_entropy_newton(x_sample, y_sample, z_sample, U_i, lam0)
+        residual = np.abs(np.sum(w) - U_i[0]) / U_i[0]
+        if residual < 1e-7:
+            return True, w, lam
+        else:
+            return False, w, lam
+    except:
+        print('Newton failed')
+        return False, np.zeros_like(x_sample), np.zeros(5)
+
+def solve_group_cvxpy(x_sample, y_sample, z_sample, U_i, flux_limit=10.0):
+    # Fallback to CVXPY for ill-conditioned cases
     try:
         x = cp.Variable(shape=int(x_sample.size), nonneg=True)
         obj = cp.Maximize(cp.sum(cp.entr(x)))
 
         constraints = [
-            cp.sum(x) == U_i[i, 0],
-            cp.sum(cp.multiply(x_sample, x)) == U_i[i, 1],
-            cp.sum(cp.multiply(y_sample, x)) == U_i[i, 2],
-            cp.sum(cp.multiply(z_sample, x)) == U_i[i, 3],
-            cp.sum(cp.multiply(x_sample**2 + y_sample**2 + z_sample**2, x)) == U_i[i, 4]
+            cp.sum(x) == U_i[0],
+            cp.sum(cp.multiply(x_sample, x)) == U_i[1],
+            cp.sum(cp.multiply(y_sample, x)) == U_i[2],
+            cp.sum(cp.multiply(z_sample, x)) == U_i[3],
+            cp.sum(cp.multiply(x_sample**2 + y_sample**2 + z_sample**2, x)) == U_i[4]
         ]
         
         prob = cp.Problem(obj, constraints)
@@ -430,7 +494,6 @@ def try_solve_group(i, x_sample, y_sample, z_sample, U_i, flux_limit=10.0):
                 return False, None, f"flux_too_large_{predicted_flux:.3f}"
         else:
             return False, None, f"status_{prob.status}"
-
     except Exception as e:
         return False, None, str(e)
 
@@ -446,7 +509,7 @@ def regenerate_group_samples(i, n_samples, bounds_list):
     else:
         return None, None, None
 
-def generate_regular_samples(p, U_i, num_groups, bounds_list, max_retries=10):
+def generate_regular_samples(p, U_i, num_groups, bounds_list, lam_cache, max_retries=6):
     num_valid_samples = np.zeros(num_groups, dtype=np.int64)
 
     ux = U_i[:, 1] / U_i[:, 0]
@@ -472,6 +535,9 @@ def generate_regular_samples(p, U_i, num_groups, bounds_list, max_retries=10):
     x_sample_working = x_sample.copy()
     y_sample_working = y_sample.copy()
     z_sample_working = z_sample.copy()
+
+    # Initialize output lambda array for all groups
+    lam_out = np.zeros((num_groups, 5))
 
     for i in range(num_groups):
         start_idx = int(offsets[i])
@@ -501,17 +567,24 @@ def generate_regular_samples(p, U_i, num_groups, bounds_list, max_retries=10):
             y_slice = y_sample_working[start_idx:end_idx]
             z_slice = z_sample_working[start_idx:end_idx]
 
-            # Try to solve
-            success, solution, status = try_solve_group(
-                i, x_slice, y_slice, z_slice, U_i
-            )
-            
+            # Try to solve using Newton first (much faster).
+            lam0 = lam_cache[i] if (lam_cache is not None and
+                                     np.any(lam_cache[i] != 0.0)) else None
+            success, solution, lam = solve_group_newton(x_slice, y_slice, z_slice, U_i[i], lam0)
+
             if success:
                 # Accept solution
                 weights[start_idx:end_idx] = solution
                 num_valid_samples[i] = np.sum(solution > 1e-12)
-                
+                lam_out[i] = lam
                 break  # Exit retry loop
+            elif not success and attempt > 3:
+                success, solution, status = solve_group_cvxpy(x_slice, y_slice, z_slice, U_i[i])
+                if success:
+                    weights[start_idx:end_idx] = solution
+                    num_valid_samples[i] = np.sum(solution > 1e-12)
+                    lam_out[i] = np.zeros(5)
+                    break
 
         if not success:
             # if attempt == max_retries - 1:
@@ -524,10 +597,10 @@ def generate_regular_samples(p, U_i, num_groups, bounds_list, max_retries=10):
                   f'z=[{adaptive_bounds[i,4]:.4f}, {adaptive_bounds[i,5]:.4f}]')
             num_valid_samples[i] = 0
             weights[start_idx:end_idx] = 0.0
-                    
+            lam_out = np.zeros(5)
 
     return (weights, num_valid_samples, offsets,
-            x_sample_working, y_sample_working, z_sample_working)
+            x_sample_working, y_sample_working, z_sample_working, lam_out)
 
 @jit(nopython=True)
 def collide(x_sample, y_sample, z_sample, weights, num_valid_samples, bounds_list, n_groups, n_coll,

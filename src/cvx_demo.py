@@ -4,6 +4,7 @@ from matplotlib import pyplot as plt
 from .moment_utils import invert
 from scipy import special
 from scipy.stats import qmc
+import time
 
 
 def calc_flux(A, b, wx, wy, wz, bounds):
@@ -70,6 +71,46 @@ def calc_moment(f, cx, cy, cz, cx_vec, cy_vec, cz_vec):
 
     return mu 
 
+
+def max_entropy_newton(x_s, y_s, z_s, moments, lam0=None,
+                        max_iter=50, tol=1e-8):
+    n  = x_s.shape[0]
+    r2 = x_s**2 + y_s**2 + z_s**2
+
+    lam = np.zeros(5) if lam0 is None else lam0.copy()
+
+    for iteration in range(max_iter):
+        log_w = lam[0] + lam[1]*x_s + lam[2]*y_s + lam[3]*z_s + lam[4]*r2
+        w     = np.exp(log_w)
+
+        # Moment residual
+        g    = np.zeros(5)
+        g[0] = np.sum(w)        - moments[0]
+        g[1] = np.sum(x_s * w) - moments[1]
+        g[2] = np.sum(y_s * w) - moments[2]
+        g[3] = np.sum(z_s * w) - moments[3]
+        g[4] = np.sum(r2  * w) - moments[4]
+
+        if np.sqrt(np.sum(g**2)) < tol * moments[0]:
+            break
+
+        # Hessian
+        H = np.zeros((5, 5))
+        phi = np.zeros((5, n))
+        phi[0] = np.ones(n)
+        phi[1] = x_s
+        phi[2] = y_s
+        phi[3] = z_s
+        phi[4] = r2
+
+        for a in range(5):
+            for b in range(5):
+                H[a, b] = np.sum(phi[a] * phi[b] * w)
+
+        dlam = np.linalg.solve(H, g)
+        lam -= dlam
+
+    return w, lam
 
 # np.random.seed(34957293)
 
@@ -160,10 +201,18 @@ constraints = [cp.sum(x) == mu1[0], cp.sum(cp.multiply(x_sample, x)) == mu1[1], 
                cp.sum(cp.multiply(y_sample, x)) == mu1[2], cp.sum(cp.multiply(z_sample, x)) == mu1[3], \
                cp.sum(cp.multiply(x_sample**2 + y_sample**2 + z_sample**2, x)) == mu1[4]]
 
+start = time.perf_counter()
 prob = cp.Problem(obj, constraints)
 prob.solve(verbose=True)
+print('CVXPY time:', time.perf_counter() - start)
 
 real_weight = x.value
+
+# Claude Newton solver.
+start = time.perf_counter()
+w, lam = max_entropy_newton(x_sample, y_sample, z_sample, mu1)
+print('Newton time:', time.perf_counter() - start)
+newton_weight = x.value
 
 # Inversion.
 A, b, wx, wy, wz = invert(mu1, [0.01, 0.0, 0.0, 0.0], bounds)
@@ -215,6 +264,11 @@ f3 = np.sum(real_weight * ccTc)
 # f3_invert = np.trapezoid(np.trapezoid(np.trapezoid(ccTc_s[100:121, 0:121, 0:121] * f_invert[100:121, 0:121, 0:121], \
 #     cz_vec_smooth[0:121], axis=2), cy_vec_smooth[0:121], axis=1), cx_vec_smooth[ici:icf], axis=0)
 print(flux)
+print(f1, f2, f3)
+
+f1 = np.sum(newton_weight * x_sample)
+f2 = np.sum(newton_weight * x_sample**2)
+f3 = np.sum(newton_weight * ccTc)
 print(f1, f2, f3)
 # print(f1_invert, f2_invert, f3_invert)
 

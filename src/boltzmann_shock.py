@@ -4,8 +4,8 @@ from .shock_helper import calc_flux_int, ic, LF_central1, KT_central2, generate_
 from .config_1d import CONSTANTS, FREESTREAM_PARAMS, PHYS_SPACE, GROUP_PARAMS, VELOCITY_SPACE, SIMULATION_PARAMS
 import itertools
 from scipy import special
-from joblib import Parallel, delayed
-import time, sys
+from joblib import Parallel, delayed, parallel_backend
+import time, sys, cProfile, io, pstats
 from numba import types
 from scipy.stats import qmc
 from matplotlib import pyplot as plt
@@ -141,18 +141,20 @@ def run_simulation():
     # plt.show()
     
     print("--------------------------------BEGIN SIMULATION----------------------------------")
-
-    def step(i, U_i, bounds_list, num_groups, CX_LB, CX_UB, CY_LB, CY_UB, CZ_LB, CZ_UB, key_type, sigma_coeff_hat, omega):
+    # Cache distribution parameters for Newton solver.
+    lam_cache = np.zeros((numXj, num_groups, 5))
+    pr = cProfile.Profile()
+    def step(i, U_i, bounds_list, num_groups, CX_LB, CX_UB, CY_LB, CY_UB, CZ_LB, CZ_UB, key_type, sigma_coeff_hat, omega, lam_cache_i):
         # Calculate weights through convex optimization.
-        weights, num_valid_samples, offsets, x_sample, y_sample, z_sample = generate_regular_samples(
-            i, U_i, num_groups, bounds_list, max_retries=10)
+        weights, num_valid_samples, offsets, x_sample, y_sample, z_sample, lam_out = generate_regular_samples(
+            i, U_i, num_groups, bounds_list, lam_cache_i, max_retries=10)
 
         # Advance the collision and flux forward.
         coll = collide(x_sample, y_sample, z_sample, weights, num_valid_samples, bounds_list, num_groups, \
                         n_coll, CX_LB, CX_UB, CY_LB, CY_UB, CZ_LB, CZ_UB, key_type, sigma_coeff_hat, omega)
         flux = calc_flux_int(num_groups, weights, offsets, x_sample, y_sample, z_sample)
 
-        return i, coll, flux
+        return i, coll, flux, lam_out
 
     for t in range(0, int(np.ceil(int(t_end / dt) / 100) * 100) + 1):
         # Boundary conditions.
@@ -164,23 +166,25 @@ def run_simulation():
         F1 = np.zeros((numXj, num_groups, 5))
         
         # Integrate collision term and flux term separately. Integrate in time using explicit Euler.
-        step_dt = Parallel(n_jobs=15)(
-            delayed(step)(i, U[i], bounds_list, num_groups, CX_LB, CX_UB, CY_LB, CY_UB, CZ_LB, CZ_UB, key_type, sigma_coeff_hat, omega)
-            for i in range(0, numXj)
-        )
-        for i, coll, flux in step_dt:
+        with parallel_backend('loky', inner_max_num_threads=1):
+            step_dt = Parallel(n_jobs=32)(
+                delayed(step)(i, U[i], bounds_list, num_groups, CX_LB, CX_UB, CY_LB, CY_UB, CZ_LB, CZ_UB, \
+                            key_type, sigma_coeff_hat, omega, lam_cache[i].copy())
+                for i in range(0, numXj)
+            )
+
+        for i, coll, flux, lam_out in step_dt:
             k1_c[i, :, 0] = coll[0]
             k1_c[i, :, 1] = coll[1]
             k1_c[i, :, 2] = coll[2]
             k1_c[i, :, 3] = coll[3]
             k1_c[i, :, 4] = coll[4]
             F1[i] = flux
+            lam_cache[i] = lam_out
 
         # 2nd order central difference using MUSCL reconstruction and slope limiters.
-        # print(k1_c[1, :, :])
         k1_f = KT_central2(U, F1, numXj, num_groups, dt, dx, CX_LB, CX_UB)
         U += (k1_f + k1_c) * dt
-        # print(U[1, 0, :])
 
         # Save solution.
         f1 = 'simulation_data/U{}.npy'.format(t + 0)
