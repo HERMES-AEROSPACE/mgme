@@ -12,8 +12,8 @@ VELOCITY_SPACE = {
 }
 
 PHYS_SPACE = {
-    'num_xj': 101,
-    'xj_range': [-15, 15]
+    'num_xj': 111,
+    'xj_range': [-12, 10]
 }
 
 # Group parameters
@@ -32,7 +32,7 @@ GROUP_PARAMS = {
 # Collision parameters
 SIMULATION_PARAMS = {
     'n_coll': 40000,
-    'cfl': 0.7,
+    'cfl': 0.67,
     't_end': 35.0
 }
 
@@ -48,5 +48,5 @@ FREESTREAM_PARAMS = {
     'T1': 300, 
     'P1': 6.6667,
     'Ma1': 2.05,
-    'omega': 0.811  # Variable Hard Sphere Model: 1.0 - Pseudo-Maxwell, 0.5 - Hard Sphere, 0.811 - VHS Argon
+    'omega': 0.7  # Variable Hard Sphere Model: 1.0 - Pseudo-Maxwell, 0.5 - Hard Sphere, 0.811 - VHS Argon
 }

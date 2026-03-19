@@ -58,7 +58,7 @@ def run_simulation():
     Kn = lam_ref / L_ref
     t_ref = L_ref / c_ref
     gamma_omega = special.gamma(5/2 - omega)
-    sigma_coeff_hat = 1/gamma_omega * (0.5)**(0.5 - omega)
+    sigma_coeff_hat = 1/gamma_omega * (2)**(0.5 - omega)
     print('Reference mean free path:', lam_ref, '[m]')
     print('Characteristic length:', L_ref, '[m]')
     print('Knudsen number:', Kn)
@@ -79,11 +79,18 @@ def run_simulation():
     # Set up time step and simulation parameters.
     cfl = SIMULATION_PARAMS['cfl']
     t_end = SIMULATION_PARAMS['t_end']
-    tc = 1/(n2/n_ref * (d/d_ref)**2 * np.sqrt(2) * 1)
-    dt = np.round(cfl/(1/tc + CX_UB/dx), 3)
+    T_local = T2 / T_ref   # downstream temperature, nondimensional
+    T_d = 1.0          # reference temperature used to calculate species diameter
+    v_max = np.max([np.abs(CX_UB), np.abs(CX_LB)])
+
+    tc_vhs = 1 / (2 * (d/d_ref)**2 * (n2/n_ref) * np.sqrt(2 * T_d / np.pi) * (T_local/T_d)**(1-omega))
+    tc_conv = dx / v_max
+
+    # dt = np.round(cfl/(1/tc + CX_UB/dx), 3)
+    dt = np.round(cfl * np.min([tc_vhs, tc_conv]), 3)
     
     print('CFL number:', cfl)
-    print('Collision time scale:', tc * t_ref, '[s]')
+    print('Collision time scale:', tc_vhs * t_ref, '[s]')
     print('Time step:', dt)
     print('dx:', dx)
 
@@ -187,11 +194,12 @@ def run_simulation():
         U += (k1_f + k1_c) * dt
 
         # Save solution.
-        f1 = 'simulation_data/U{}.npy'.format(t + 0)
+        f1 = 'simulation_data2/U{}.npy'.format(t + 0)
         with open(f1, 'wb') as file:
             np.save(file, U)
 
-        print(t * dt,  t + 0)
+        if t % 10 == 0:
+            print(t * dt,  t + 0)
 
 if __name__ == '__main__':
     run_simulation()

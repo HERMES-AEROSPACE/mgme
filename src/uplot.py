@@ -8,8 +8,8 @@ from scipy import special
 
 
 # data = np.load('simulation_data/U20.npy')
-data1 = np.load('simulation_data/U2400.npy')
-data2 = np.load('simulation_data/U1100.npy')
+data1 = np.load('simulation_data/U1500.npy')
+data2 = np.load('simulation_data2/U1500.npy')
 dsmc = np.loadtxt('src/dsmc.txt')
 dsmcT = np.loadtxt('src/dsmcT.txt')
 dsmc_hard = np.loadtxt('src/dsmc_hard.txt')
@@ -25,7 +25,7 @@ alsmeyer_205 = np.loadtxt('src/alsmeyer_205.txt')
 
 x = np.linspace(*PHYS_SPACE['xj_range'], PHYS_SPACE['num_xj'])
 # x = np.linspace(-20, 20, 201)
-x2 = np.linspace(-15, 15, 101)
+x2 = np.linspace(-12, 10, 111)
 
 R = CONSTANTS['R']
 m = CONSTANTS['m']
@@ -145,6 +145,7 @@ x_center  = interp(0.5)
 
 x_centered = x2_scale - x_center
 mask = (x_centered >= -7.8) & (x_centered <= 9.1)
+mask = (x_centered >= -10) & (x_centered <= 10)
 idx  = np.where(mask)[0]
 f_als       = interp1d(alsmeyer_205[:, 0], alsmeyer_205[:, 1],
                         kind='cubic', bounds_error=False, fill_value=(0.0, 1.0))
@@ -153,9 +154,10 @@ y_als_fine  = f_als(x_als_fine)
 
 fig = plt.figure(figsize=(7, 6))
 ax1 = fig.add_subplot(111)
-ax1.plot(x_centered[idx[::3]], n2_scale[idx[::3]], color='black', linewidth=1.6)
-ax1.plot(x_centered[idx[::3]], temperature2_scale[idx[::3]], color='red', linewidth=1.6)
-ax1.scatter(x_als_fine[0::10], y_als_fine[0::10],  color='black', marker='o', s=40, linewidths=1.3, facecolors='none')
+ax1.plot(x_centered[idx], n1_scale[idx], '--', color='black', linewidth=1.6, label=r'$\omega = 0.811$')
+ax1.plot(x_centered[idx], n2_scale[idx], color='black', linewidth=1.6, label=r'$\omega = 0.7$')
+# ax1.plot(x_centered[idx[::3]], temperature2_scale[idx[::3]], color='red', linewidth=1.6)
+ax1.scatter(x_als_fine[0::10], y_als_fine[0::10],  color='black', marker='s', s=50, linewidths=1.1, facecolors='none', label=r'Alsmeyer')
 # ax1.plot(x2_scale + 0.07, n1_scale, color='purple')
 # ax1.plot(x2_scale + 0.055, temperature1_scale, color='indigo')
 # ax1.plot(x_scale, vel2_scale, color='blue')
@@ -169,10 +171,10 @@ ax1.scatter(x_als_fine[0::10], y_als_fine[0::10],  color='black', marker='o', s=
 # ax1.plot(1 - dsmcT_vhs[:, 0], dsmcT_vhs[:, 1], '--', color='red')
 
 
-ax1.set_xlabel(r'$x/\lambda_{1}$ ', fontsize=18)
-ax1.set_ylabel(r'Normalized $n$, $T$', fontsize=18)
+ax1.set_xlabel(r'$\mathbf{x/\lambda_{1}}$ ', fontsize=18)
+ax1.set_ylabel(r'$\mathbf{\rho_n}$', fontsize=18)
 ax1.tick_params(axis='both',labelsize=16)
-ax1.legend([r'$n$', r'$T$', r'Alsmeyer - $n$', r'DSMC - $T$'], fontsize=16)
+ax1.legend(fontsize=16)
 ax1.tick_params(axis='both', direction='out', length=6, width=1.2)
 ax1.minorticks_on()
 # ax1.grid()

@@ -425,13 +425,13 @@ def max_entropy_newton(x_s, y_s, z_s, moments, lam0=None, max_iter=50, tol=1e-8)
         log_w = (lam[0] + lam[1]*x_s + lam[2]*y_s + lam[3]*z_s + lam[4]*r2)
         w = np.exp(log_w)
 
-        # Compute moment residual: g = sum(phi * w) - moments
+        # Compute moment residual
         g = np.zeros(5)
-        g[0] = np.sum(w)           - moments[0]
-        g[1] = np.sum(x_s * w)    - moments[1]
-        g[2] = np.sum(y_s * w)    - moments[2]
-        g[3] = np.sum(z_s * w)    - moments[3]
-        g[4] = np.sum(r2  * w)    - moments[4]
+        g[0] = np.sum(w) - moments[0]
+        g[1] = np.sum(x_s * w) - moments[1]
+        g[2] = np.sum(y_s * w) - moments[2]
+        g[3] = np.sum(z_s * w) - moments[3]
+        g[4] = np.sum(r2  * w) - moments[4]
 
         if np.linalg.norm(g) < tol:
             break
@@ -465,7 +465,7 @@ def solve_group_newton(x_sample, y_sample, z_sample, U_i, lam0):
         else:
             return False, w, lam
     except:
-        print('Newton failed')
+        # print('Newton failed')
         return False, np.zeros_like(x_sample), np.zeros(5)
 
 def solve_group_cvxpy(x_sample, y_sample, z_sample, U_i, flux_limit=10.0):
