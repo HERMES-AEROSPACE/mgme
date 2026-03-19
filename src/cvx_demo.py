@@ -88,10 +88,10 @@ icf = 51
 mu1 = calc_moment(f0[ici:icf, 0:51, 0:51], cx_s[ici:icf, 0:51, 0:51], cy_s[ici:icf, 0:51, 0:51], cz_s[ici:icf, 0:51, 0:51], \
     cx_vec_smooth[ici:icf], cy_vec_smooth[0:51], cz_vec_smooth[0:51])
 
-mu1 = np.array([0.0644061331130687, 0.03144408776050622, 0.03985565955833097, -0.04150734354154407, 0.10559383909866409])
-bounds = {'ci_cx': -0.5, 'cf_cx': 1.0, \
-        'ci_cy': 0.0, 'cf_cy': 5.5,\
-        'ci_cz': -5.0, 'cf_cz': 0.0}
+mu1 = np.array([0.37782412805080906, 0.9506660674376028, -0.001229336318707313, 0.0037419080983438773, 3.162173510741974])
+bounds = {'ci_cx': 2.0, 'cf_cx': 5.5, \
+        'ci_cy': -5.0, 'cf_cy': 5.5,\
+        'ci_cz': -5.0, 'cf_cz': 5.5}
 
 # cx_vec = np.linspace(bounds['ci_cx'], bounds['cf_cx'], num_cx, endpoint=False) + (bounds['cf_cx'] - bounds['ci_cx']) / (2 * num_cx)
 # cy_vec = np.linspace(bounds['ci_cy'], bounds['cf_cy'], num_cy, endpoint=False) + (bounds['cf_cy'] - bounds['ci_cy']) / (2 * num_cy)
@@ -108,9 +108,9 @@ bounds = {'ci_cx': -0.5, 'cf_cx': 1.0, \
 # x_sample = cx.flatten()
 # y_sample = cy.flatten()
 # z_sample = cz.flatten()
-num_sample = 300
-l_bounds = [-0.5, 0.0, -2.5463737569510942]
-u_bounds = [1.0, 2.5207289324075455, 0.0]
+num_sample = 343
+l_bounds = [2.0, -3.50033349907747, -3.4871759370056723]
+u_bounds = [5.5, 3.49382604639016, 3.5069836084619577]
 sampler = qmc.LatinHypercube(d=3)
 sample = qmc.scale(sampler.random(n=num_sample), l_bounds, u_bounds)
 
@@ -166,9 +166,9 @@ prob.solve(verbose=True)
 real_weight = x.value
 
 # Inversion.
-A, b, wx, wy, wz = invert(mu1, [0.001, 0.0, 0.0, 0.0], bounds)
+A, b, wx, wy, wz = invert(mu1, [0.01, 0.0, 0.0, 0.0], bounds)
 f_invert = A * np.exp(-b * ((cx_s - wx)**2 + (cy_s - wy)**2 + (cz_s - wz)**2))
-fI_invert = np.trapezoid(np.trapezoid(f_invert[0:51, 0:51, 0:51], cz_vec_smooth[0:51], axis=2), cy_vec_smooth[0:51], axis=1)
+fI_invert = np.trapezoid(np.trapezoid(f_invert[70:, :, :], cz_vec_smooth, axis=2), cy_vec_smooth, axis=1)
 
 # Compute flux using inversion vs. integrating weights.
 flux = calc_flux(A, b, wx, wy, wz, bounds)
@@ -235,7 +235,7 @@ plt.rc('font', family='serif')
 fig = plt.figure(figsize=(6, 6))
 ax1 = fig.add_subplot(111)
 # ax1.bar(cx_vec, density, width=dx * 0.1, color='green')
-ax1.plot(cy_vec_smooth[56:69], fI_invert, color='black')
+ax1.plot(cx_vec_smooth[70:], fI_invert, color='black')
 ax1.set_xlabel('Cy', fontsize=18)
 ax1.set_ylabel('f', fontsize=18)
 ax1.set_yscale('log')

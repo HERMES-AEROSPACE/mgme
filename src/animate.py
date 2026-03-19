@@ -2,11 +2,13 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
 from .moment_utils import invert
-from .config import PHYS_SPACE
+from .config_1d import PHYS_SPACE, CONSTANTS, FREESTREAM_PARAMS
+from scipy.interpolate import interp1d
 
 
 dsmc = np.loadtxt('src/dsmc.txt')
 dsmcT = np.loadtxt('src/dsmcT.txt')
+alsmeyer_205 = np.loadtxt('src/alsmeyer_205.txt')
 plt.rc('font', family='serif')
 fig = plt.figure(figsize=(10, 6))
 ax = fig.add_subplot(111)
@@ -15,17 +17,30 @@ ax = fig.add_subplot(111)
 # ax.plot(1 - dsmcT[:, 0], dsmcT[:, 1], '--', color='red')
 line1, = ax.plot([], [], color='black', label='Density')
 line2, = ax.plot([], [], color='red', label='Temperature')
-line3, = ax.plot([], [], color='blue', label='Velocity')
+line3, = ax.plot([], [], '--', color='black', label='Velocity')
 lines = [line1, line2]
 
 ax.set_xlabel('Scaled Location', fontsize=18)
 ax.set_ylabel('Normalized Property', fontsize=18)
 ax.legend(loc='upper left', fontsize=14)
 
-x = np.linspace(*PHYS_SPACE['xj_range'], PHYS_SPACE['num_xj'])
-x_scale = (x - x.min()) / (x.max() - x.min())
+R = CONSTANTS['R']
+m = CONSTANTS['m']
+T1 = FREESTREAM_PARAMS['T1']
+P1 = FREESTREAM_PARAMS['P1']
+d_ref = CONSTANTS['d']
+gamma = CONSTANTS['gamma']
+rho1    = P1 / (R * T1)
+n_ref = P1/(R * T1) * 1/m
+sigma_ref = np.pi * d_ref**2
+lam_ref = 1/(n_ref * sigma_ref)
 
-ax.set_xlim(0.0, 1.0)
+mu_argon_300K = 2.2948e-5   # Pa.s
+lam_alsmeyer  = 16/5 * mu_argon_300K / (rho1 * np.sqrt(2 * np.pi * R * T1))
+x = np.linspace(*PHYS_SPACE['xj_range'], PHYS_SPACE['num_xj'])
+x_scale = x * (lam_ref / lam_alsmeyer)
+
+ax.set_xlim(-10.0, 10.0)
 ax.set_ylim(-0.05, 1.15)
 ax.tick_params(axis='both', labelsize=14)
 plt.locator_params(axis='both', nbins=10)
@@ -56,17 +71,22 @@ def update(i):
     shock_thick = (np.max(n_scale) - np.min(n_scale)) / np.max(np.abs(np.gradient(n_scale, x_scale)))
     thick = 1.098/shock_thick
 
-    line1.set_data(x_scale, n_scale)
-    line2.set_data(x_scale, temperature_scale)
-    line3.set_data(x_scale, vel_scale)
+    interp    = interp1d(n_scale, x_scale)
+    x_center  = interp(0.5)
 
-    p = 52
-    negx_n = np.sum(data[p, 0:4], axis=0)[0]
-    posx_n = np.sum(data[p, 4:], axis=0)[0]
-    negx_u = np.sum(data[p, 0:4], axis=0)[1]
-    posx_u = np.sum(data[p, 4:], axis=0)[1]
-    negx_e = np.sum(data[p, 0:4], axis=0)[4]
-    posx_e = np.sum(data[p, 4:], axis=0)[4]
+    line1.set_data(x_scale - x_center, n_scale)
+    line2.set_data(x_scale - x_center, temperature_scale)
+    line3.set_data(alsmeyer_205[:, 0], alsmeyer_205[:, 1])
+
+    grad = np.max(np.abs(np.gradient(n_scale, x_scale)))
+
+    # p = 52
+    # negx_n = np.sum(data[p, 0:4], axis=0)[0]
+    # posx_n = np.sum(data[p, 4:], axis=0)[0]
+    # negx_u = np.sum(data[p, 0:4], axis=0)[1]
+    # posx_u = np.sum(data[p, 4:], axis=0)[1]
+    # negx_e = np.sum(data[p, 0:4], axis=0)[4]
+    # posx_e = np.sum(data[p, 4:], axis=0)[4]
     # cx_vec, cy_vec, cz_vec = np.linspace(-5, 5.5, 106), np.linspace(-5, 5.5, 106), np.linspace(-5, 5.5, 106)
     # cx, cy, cz = np.meshgrid(cx_vec, cy_vec, cz_vec, indexing='ij')
 
@@ -83,8 +103,8 @@ def update(i):
     # if i > 115169
     #     title.set_text(f't = {t:.2f}')
     # else:
-    t = i * 0.023
-    title.set_text(f't = {t:.3f}, $u1$ = {posx_u/posx_n:.3f}, $u0$ = {negx_u/negx_n:.3f}')
+    t = i * 0.032
+    title.set_text(f't = {t:.3f}, rst = {grad:.4f}')
 
     return lines, title
 
@@ -98,7 +118,7 @@ def on_key(event):
             anim.resume()
             anim_running = True
 
-anim = FuncAnimation(fig, update, init_func=init, frames=490, blit=False, interval=30)
+anim = FuncAnimation(fig, update, init_func=init, frames=1080, blit=False, interval=50)
 anim.save('plots/evo.gif')
 fig.canvas.mpl_connect('key_press_event', on_key)
 plt.show()

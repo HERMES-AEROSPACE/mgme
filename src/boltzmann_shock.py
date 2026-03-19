@@ -81,7 +81,7 @@ def run_simulation():
     t_end = SIMULATION_PARAMS['t_end']
     tc = 1/(n2/n_ref * (d/d_ref)**2 * np.sqrt(2) * 1)
     dt = np.round(cfl/(1/tc + CX_UB/dx), 3)
-    sampler = qmc.LatinHypercube(d=3)
+    
     print('CFL number:', cfl)
     print('Collision time scale:', tc * t_ref, '[s]')
     print('Time step:', dt)
@@ -122,7 +122,7 @@ def run_simulation():
     U0, f = ic(cx, cy, cz, cx_vec, cy_vec, cz_vec, n_val, u_val, T_val, VELOCITY_SPACE['num_cx'], VELOCITY_SPACE['num_cy'], VELOCITY_SPACE['num_cz'], \
         numXj, num_groups, combinations)
     if restart:
-        data = np.load('simulation_data/U2700.npy')
+        data = np.load('simulation_data/U2000.npy')
         print('Restarting from...')
         U = data
     else:
@@ -134,17 +134,18 @@ def run_simulation():
     # plt.ylabel('T', fontsize=16)
     # plt.savefig('plots/ic.pdf')
     # f[f < 1e-12] = 0.0
-    # plt.plot(cx_vec, np.trapezoid(np.trapezoid(n_val[-1] * f[-1], cz_vec, axis=2), cy_vec, axis=1))
+    plt.plot(cx_vec, np.trapezoid(np.trapezoid(n_val[-1] * f[-1], cz_vec, axis=2), cy_vec, axis=1))
     # plt.plot(cz_vec, np.trapezoid(np.trapezoid(n_val[-1] * f[-1], cy_vec, axis=1), cx_vec, axis=0))
-    # plt.plot(cx_vec, np.trapezoid(np.trapezoid(f[0], cz_vec, axis=2), cy_vec, axis=1))
-    # plt.savefig('plots/icdist.pdf')
+    plt.plot(cx_vec, np.trapezoid(np.trapezoid(f[0], cz_vec, axis=2), cy_vec, axis=1))
+    plt.savefig('plots/icdist.pdf')
     # plt.show()
+    
     print("--------------------------------BEGIN SIMULATION----------------------------------")
 
-    def step(i, U_i, bounds_list, num_groups, CX_LB, CX_UB, CY_LB, CY_UB, CZ_LB, CZ_UB, key_type, sigma_coeff_hat, omega, sampler):
+    def step(i, U_i, bounds_list, num_groups, CX_LB, CX_UB, CY_LB, CY_UB, CZ_LB, CZ_UB, key_type, sigma_coeff_hat, omega):
         # Calculate weights through convex optimization.
         weights, num_valid_samples, offsets, x_sample, y_sample, z_sample = generate_regular_samples(
-            i, U_i, num_groups, bounds_list, sampler, max_retries=10)
+            i, U_i, num_groups, bounds_list, max_retries=10)
 
         # Advance the collision and flux forward.
         coll = collide(x_sample, y_sample, z_sample, weights, num_valid_samples, bounds_list, num_groups, \
@@ -164,7 +165,7 @@ def run_simulation():
         
         # Integrate collision term and flux term separately. Integrate in time using explicit Euler.
         step_dt = Parallel(n_jobs=15)(
-            delayed(step)(i, U[i], bounds_list, num_groups, CX_LB, CX_UB, CY_LB, CY_UB, CZ_LB, CZ_UB, key_type, sigma_coeff_hat, omega, sampler)
+            delayed(step)(i, U[i], bounds_list, num_groups, CX_LB, CX_UB, CY_LB, CY_UB, CZ_LB, CZ_UB, key_type, sigma_coeff_hat, omega)
             for i in range(0, numXj)
         )
         for i, coll, flux in step_dt:
@@ -176,8 +177,10 @@ def run_simulation():
             F1[i] = flux
 
         # 2nd order central difference using MUSCL reconstruction and slope limiters.
+        # print(k1_c[1, :, :])
         k1_f = KT_central2(U, F1, numXj, num_groups, dt, dx, CX_LB, CX_UB)
         U += (k1_f + k1_c) * dt
+        # print(U[1, 0, :])
 
         # Save solution.
         f1 = 'simulation_data/U{}.npy'.format(t + 0)

@@ -12,28 +12,28 @@ VELOCITY_SPACE = {
 }
 
 PHYS_SPACE = {
-    'num_xj': 51,
-    'xj_range': [-10, 10]
+    'num_xj': 101,
+    'xj_range': [-15, 15]
 }
 
 # Group parameters
 GROUP_PARAMS = {
-    'ci_cx': np.array([-5.0, -2.0, -0.5, 1.0, 2.5]),
-    'cf_cx': np.array([-2.0, -0.5, 1.0, 2.5, 5.5]),
-    'group_bounds_cx': np.array([[0, 31], [30, 46], [45, 61], [60, 76], [75, 106]]),
-    'ci_cy': np.array([-5.0, 0]), 
-    'cf_cy': np.array([0, 5.5]),
-    'group_bounds_cy': np.array([[0, 51], [50, 106]]),
-    'ci_cz': np.array([-5.0, 0]), 
-    'cf_cz': np.array([0, 5.5]),
-    'group_bounds_cz': np.array([[0, 51], [50, 106]])
+    'ci_cx': np.array([-5.0, -1.0, 0.0, 1.0, 2.0]),
+    'cf_cx': np.array([-1.0, 0.0, 1.0, 2.0, 5.5]),
+    'group_bounds_cx': np.array([[0, 41], [40, 51], [50, 61], [60, 71], [70, 106]]),
+    'ci_cy': np.array([-5.0]), 
+    'cf_cy': np.array([5.5]),
+    'group_bounds_cy': np.array([[0, 106]]),
+    'ci_cz': np.array([-5.0]), 
+    'cf_cz': np.array([5.5]),
+    'group_bounds_cz': np.array([[0, 106]])
 }
 
 # Collision parameters
 SIMULATION_PARAMS = {
     'n_coll': 40000,
     'cfl': 0.7,
-    't_end': 100.0
+    't_end': 35.0
 }
 
 CONSTANTS = {
@@ -48,5 +48,5 @@ FREESTREAM_PARAMS = {
     'T1': 300, 
     'P1': 6.6667,
     'Ma1': 2.05,
-    'omega': 0.5  # Variable Hard Sphere Model: 1.0 - Pseudo-Maxwell, 0.5 - Hard Sphere, 0.811 - VHS Argon
+    'omega': 0.811  # Variable Hard Sphere Model: 1.0 - Pseudo-Maxwell, 0.5 - Hard Sphere, 0.811 - VHS Argon
 }

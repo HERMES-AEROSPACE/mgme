@@ -19,13 +19,13 @@ def calculate_velocity_grid(velocity_space):
 
     return cx_vec, cy_vec, cz_vec, cx, cy, cz 
 
-def generate_grid(bounds_list, num_groups, sampler):
+def generate_grid(bounds_list, num_groups):
     num_samples = np.zeros(num_groups)
     for i in range(0, num_groups):
         volume = (bounds_list[i, 1] - bounds_list[i, 0]) * \
             (bounds_list[i, 3] - bounds_list[i, 2]) * \
             (bounds_list[i, 5] - bounds_list[i, 4])
-        num_samples[i] = np.max((300, int(np.ceil(20 * volume))))
+        num_samples[i] = np.max((300, int(np.ceil(10 * volume))))
     
     x_sample = np.zeros(int(np.sum(num_samples)))
     y_sample = np.zeros(int(np.sum(num_samples)))
@@ -41,6 +41,7 @@ def generate_grid(bounds_list, num_groups, sampler):
         start_idx = int(offsets[i])
         end_idx = int(offsets[i+1])
 
+        sampler = qmc.LatinHypercube(d=3)
         sample = qmc.scale(sampler.random(n=int(num_samples[i])), l_bounds, u_bounds)
     
         x_sample[start_idx:end_idx] = sample[:, 0]
@@ -433,23 +434,20 @@ def try_solve_group(i, x_sample, y_sample, z_sample, U_i, flux_limit=10.0):
     except Exception as e:
         return False, None, str(e)
 
-def regenerate_group_samples(i, n_samples, bounds_list, sampler):
+def regenerate_group_samples(i, n_samples, bounds_list):
     """Generate new samples for a group"""
     l_bounds = [bounds_list[i, 0], bounds_list[i, 2], bounds_list[i, 4]]
     u_bounds = [bounds_list[i, 1], bounds_list[i, 3], bounds_list[i, 5]]
     
+    sampler = qmc.LatinHypercube(d=3)
     if all(u > l for l, u in zip(l_bounds, u_bounds)):
         sample = qmc.scale(sampler.random(n=n_samples), l_bounds, u_bounds)
         return sample[:, 0], sample[:, 1], sample[:, 2]
     else:
         return None, None, None
 
-def generate_regular_samples(p, U_i, num_groups, bounds_list, sampler, max_retries=10):
+def generate_regular_samples(p, U_i, num_groups, bounds_list, max_retries=10):
     num_valid_samples = np.zeros(num_groups, dtype=np.int64)
-
-    x_sample_modified = None
-    y_sample_modified = None
-    z_sample_modified = None
 
     ux = U_i[:, 1] / U_i[:, 0]
     uy = U_i[:, 2] / U_i[:, 0]
@@ -468,9 +466,12 @@ def generate_regular_samples(p, U_i, num_groups, bounds_list, sampler, max_retri
     z_boundsu = np.minimum(bounds_list[:, 5], uz + 3*sigma)
 
     adaptive_bounds = np.vstack((x_boundsl, x_boundsu, y_boundsl, y_boundsu, z_boundsl, z_boundsu)).T
-    x_sample, y_sample, z_sample, offsets, num_samples = generate_grid(adaptive_bounds, num_groups, sampler)
+    x_sample, y_sample, z_sample, offsets, num_samples = generate_grid(adaptive_bounds, num_groups)
 
     weights = np.zeros(int(np.sum(num_samples)))
+    x_sample_working = x_sample.copy()
+    y_sample_working = y_sample.copy()
+    z_sample_working = z_sample.copy()
 
     for i in range(num_groups):
         start_idx = int(offsets[i])
@@ -478,7 +479,7 @@ def generate_regular_samples(p, U_i, num_groups, bounds_list, sampler, max_retri
         n_samples_group = end_idx - start_idx
 
         # Skip if density too small
-        if U_i[i, 0] <= 1e-5:
+        if U_i[i, 0] <= 1e-6:
             num_valid_samples[i] = 0
             weights[start_idx:end_idx] = 0.0
             continue
@@ -488,210 +489,191 @@ def generate_regular_samples(p, U_i, num_groups, bounds_list, sampler, max_retri
         for attempt in range(max_retries):
             # For retry attempts, regenerate samples
             if attempt > 0:
-                if x_sample_modified is None:
-                    x_sample_modified = x_sample.copy()
-                    y_sample_modified = y_sample.copy()
-                    z_sample_modified = z_sample.copy()
+                x_new, y_new, z_new = regenerate_group_samples(i, n_samples_group, adaptive_bounds)
 
-                x_new, y_new, z_new = regenerate_group_samples(i, n_samples_group, adaptive_bounds, sampler)
-                
                 # Replace samples in modified arrays
-                x_sample_modified[start_idx:end_idx] = x_new
-                y_sample_modified[start_idx:end_idx] = y_new
-                z_sample_modified[start_idx:end_idx] = z_new
+                x_sample_working[start_idx:end_idx] = x_new
+                y_sample_working[start_idx:end_idx] = y_new
+                z_sample_working[start_idx:end_idx] = z_new
             
             # Get samples (from original on first attempt, modified on retries)
-            x_sample_slice = x_sample_modified[start_idx:end_idx] if x_sample_modified is not None else x_sample[start_idx:end_idx]
-            y_sample_slice = y_sample_modified[start_idx:end_idx] if y_sample_modified is not None else y_sample[start_idx:end_idx]
-            z_sample_slice = z_sample_modified[start_idx:end_idx] if z_sample_modified is not None else z_sample[start_idx:end_idx]
-
-            mask = (
-                (x_sample_slice > x_boundsl[i]) & (x_sample_slice < x_boundsu[i]) &
-                (y_sample_slice > y_boundsl[i]) & (y_sample_slice < y_boundsu[i]) &
-                (z_sample_slice > z_boundsl[i]) & (z_sample_slice < z_boundsu[i])
-            )
-
-            x_sample_filter = x_sample_slice[mask]
-            y_sample_filter = y_sample_slice[mask]
-            z_sample_filter = z_sample_slice[mask]
+            x_slice = x_sample_working[start_idx:end_idx]
+            y_slice = y_sample_working[start_idx:end_idx]
+            z_slice = z_sample_working[start_idx:end_idx]
 
             # Try to solve
             success, solution, status = try_solve_group(
-                i, x_sample_slice, y_sample_slice, z_sample_slice, U_i
+                i, x_slice, y_slice, z_slice, U_i
             )
             
             if success:
                 # Accept solution
-                mask_indices = np.where(mask)[0]
-                absolute_indices = start_idx + mask_indices
-                weights[absolute_indices] = solution
+                weights[start_idx:end_idx] = solution
                 num_valid_samples[i] = np.sum(solution > 1e-12)
                 
                 break  # Exit retry loop
-            else:
-                # if attempt == max_retries - 1:
-                print(f'Cell {p}, Group {i}: Failed after {max_retries} attempts - {status}')
-                print(U_i[i, 0], U_i[i, 1], U_i[i, 2], U_i[i, 3], U_i[i, 4])
-                print(x_boundsl[i], x_boundsu[i], y_boundsl[i], y_boundsu[i], z_boundsl[i], z_boundsu[i])
-                print(x_sample_filter.size, sigma, 2/3 * thermal, status)
-                num_valid_samples[i] = 0
-                weights[start_idx:end_idx] = 0.0
+
+        if not success:
+            # if attempt == max_retries - 1:
+            print(f'Cell {p}, Group {i}: Failed after {max_retries} attempts ')
+            print(f'  moments:  {U_i[i]}')
+            print(f'  num_samples:   {n_samples_group}')
+            print(f'  sigma:    {sigma[i]:.4f}, thermal: {2/3*thermal[i]:.4f}')
+            print(f'  adaptive: x=[{adaptive_bounds[i,0]:.4f}, {adaptive_bounds[i,1]:.4f}] '
+                  f'y=[{adaptive_bounds[i,2]:.4f}, {adaptive_bounds[i,3]:.4f}] '
+                  f'z=[{adaptive_bounds[i,4]:.4f}, {adaptive_bounds[i,5]:.4f}]')
+            num_valid_samples[i] = 0
+            weights[start_idx:end_idx] = 0.0
                     
 
     return (weights, num_valid_samples, offsets,
-        x_sample_modified if x_sample_modified is not None else x_sample,
-        y_sample_modified if y_sample_modified is not None else y_sample,
-        z_sample_modified if z_sample_modified is not None else z_sample)
+            x_sample_working, y_sample_working, z_sample_working)
 
 @jit(nopython=True)
-def collide(x_sample, y_sample, z_sample, weights, num_valid_samples, bounds_list, n_groups, n_coll, \
+def collide(x_sample, y_sample, z_sample, weights, num_valid_samples, bounds_list, n_groups, n_coll,
             CX_LB, CX_UB, CY_LB, CY_UB, CZ_LB, CZ_UB, key_type, sigma_coeff_hat, omega):
-    group_n = np.zeros(n_groups)
+
+    group_n  = np.zeros(n_groups)
     group_px = np.zeros(n_groups)
     group_py = np.zeros(n_groups)
     group_pz = np.zeros(n_groups)
-    group_e = np.zeros(n_groups)
+    group_e  = np.zeros(n_groups)
 
-    nonzero_mask = weights > 1e-12  # Use small threshold instead of exact zero
-    nonzero_indices = np.where(nonzero_mask)[0]
-
-    # Generate random numbers for collisions.
-    Rf1 = np.random.uniform(0.0, 1.0, n_coll)
-    Rf2 = np.random.uniform(0.0, 1.0, n_coll)
-    depl_idx1 = np.random.choice(nonzero_indices, size=n_coll, replace=True)
-    depl_idx2 = np.random.choice(nonzero_indices, size=n_coll, replace=True)
-
-    mask = depl_idx1 != depl_idx2
-
-    depl_idx1 = depl_idx1[mask]
-    depl_idx2 = depl_idx2[mask]
-    Rf1 = Rf1[mask]
-    Rf2 = Rf2[mask]
-
-    # Group the prospective collisions into which group they end up in.
-    depl_tracker = Dict.empty(key_type=key_type, \
-                              value_type=types.int64)
-    
     ci_cx = bounds_list[:, 0]
     cf_cx = bounds_list[:, 1]
     ci_cy = bounds_list[:, 2]
     cf_cy = bounds_list[:, 3]
     ci_cz = bounds_list[:, 4]
     cf_cz = bounds_list[:, 5]
-    
-    for i in range(0, depl_idx1.size):
-        x_valid = (x_sample[depl_idx1[i]] >= ci_cx) & (x_sample[depl_idx1[i]] <= cf_cx)
-        y_valid = (y_sample[depl_idx1[i]] >= ci_cy) & (y_sample[depl_idx1[i]] <= cf_cy)
-        z_valid = (z_sample[depl_idx1[i]] >= ci_cz) & (z_sample[depl_idx1[i]] <= cf_cz)
-        depl_group1 = np.argmax(x_valid & y_valid & z_valid)
 
-        x_valid = (x_sample[depl_idx2[i]] >= ci_cx) & (x_sample[depl_idx2[i]] <= cf_cx)
-        y_valid = (y_sample[depl_idx2[i]] >= ci_cy) & (y_sample[depl_idx2[i]] <= cf_cy)
-        z_valid = (z_sample[depl_idx2[i]] >= ci_cz) & (z_sample[depl_idx2[i]] <= cf_cz)
-        depl_group2 = np.argmax(x_valid & y_valid & z_valid)
+    def find_group(vx, vy, vz):
+        x_valid = (vx >= ci_cx) & (vx <= cf_cx)
+        y_valid = (vy >= ci_cy) & (vy <= cf_cy)
+        z_valid = (vz >= ci_cz) & (vz <= cf_cz)
+        return np.argmax(x_valid & y_valid & z_valid)
 
-        if depl_group1 < depl_group2: key = (depl_group1, depl_group2)
-        else: key = (depl_group2, depl_group1)
+    def clamp_and_find_group(vx, vy, vz):
+        vx_c = np.minimum(np.maximum(vx, CX_LB), CX_UB)
+        vy_c = np.minimum(np.maximum(vy, CY_LB), CY_UB)
+        vz_c = np.minimum(np.maximum(vz, CZ_LB), CZ_UB)
+        return find_group(vx_c, vy_c, vz_c)
 
-        if key in depl_tracker: depl_tracker[key] += 1
-        else: depl_tracker[key] = 1
+    # --- Generate collision pairs ---
+    nonzero_indices = np.where(weights > 1e-12)[0]
+    w_nonzero   = weights[nonzero_indices]
+    W           = w_nonzero.sum()
+    w_cdf       = np.cumsum(w_nonzero) / W   # normalized CDF, goes from 0 to 1
 
-    for i in range(0, depl_idx1.size):
-        d_idx1 = depl_idx1[i]
-        d_idx2 = depl_idx2[i]
+    # Sample using searchsorted with cdf. Clip to prevent out of bounds errors.
+    u1 = np.random.uniform(0.0, 1.0, n_coll)
+    u2 = np.random.uniform(0.0, 1.0, n_coll)
+    i1 = np.clip(np.searchsorted(w_cdf, u1), 0, len(nonzero_indices) - 1)
+    i2 = np.clip(np.searchsorted(w_cdf, u2), 0, len(nonzero_indices) - 1)
 
-        vx1 = x_sample[d_idx1]
-        vy1 = y_sample[d_idx1]
-        vz1 = z_sample[d_idx1]
-        vx2 = x_sample[d_idx2]
-        vy2 = y_sample[d_idx2]
-        vz2 = z_sample[d_idx2]
+    # For each uniform sample, find which bin it falls into
+    depl_idx1 = nonzero_indices[i1]
+    depl_idx2 = nonzero_indices[i2]
 
-        # Simulate virtual collisions.
-        gx = np.abs(vx2 - vx1)
-        gy = np.abs(vy2 - vy1)
-        gz = np.abs(vz2 - vz1)
-        g = np.sqrt(gx**2 + gy**2 + gz**2)
+    Rf1      = np.random.uniform(0.0, 1.0, n_coll)
+    Rf2      = np.random.uniform(0.0, 1.0, n_coll)
 
-        phi = 2 * np.pi * Rf1[i]
+    mask      = depl_idx1 != depl_idx2
+    depl_idx1 = depl_idx1[mask]
+    depl_idx2 = depl_idx2[mask]
+    Rf1       = Rf1[mask]
+    Rf2       = Rf2[mask]
+    n_actual  = depl_idx1.size
+
+    # --- Precompute all pre and post collision groups in one pass ---
+    pre_group1  = np.zeros(n_actual, dtype=np.int64)
+    pre_group2  = np.zeros(n_actual, dtype=np.int64)
+    post_group1 = np.zeros(n_actual, dtype=np.int64)
+    post_group2 = np.zeros(n_actual, dtype=np.int64)
+
+    # Store post-collision velocities for second pass
+    vx1_arr  = np.zeros(n_actual);  vy1_arr  = np.zeros(n_actual);  vz1_arr  = np.zeros(n_actual)
+    vx2_arr  = np.zeros(n_actual);  vy2_arr  = np.zeros(n_actual);  vz2_arr  = np.zeros(n_actual)
+    vx1p_arr = np.zeros(n_actual);  vy1p_arr = np.zeros(n_actual);  vz1p_arr = np.zeros(n_actual)
+    vx2p_arr = np.zeros(n_actual);  vy2p_arr = np.zeros(n_actual);  vz2p_arr = np.zeros(n_actual)
+    g_arr = np.zeros(n_actual)
+
+    for i in range(n_actual):
+        vx1 = x_sample[depl_idx1[i]]
+        vy1 = y_sample[depl_idx1[i]]
+        vz1 = z_sample[depl_idx1[i]]
+        vx2 = x_sample[depl_idx2[i]]
+        vy2 = y_sample[depl_idx2[i]]
+        vz2 = z_sample[depl_idx2[i]]
+
+        vx1_arr[i] = vx1;  vy1_arr[i] = vy1;  vz1_arr[i] = vz1
+        vx2_arr[i] = vx2;  vy2_arr[i] = vy2;  vz2_arr[i] = vz2
+
+        # Pre-collision groups
+        pre_group1[i] = find_group(vx1, vy1, vz1)
+        pre_group2[i] = find_group(vx2, vy2, vz2)
+
+        # Post-collision velocities
+        gx = vx2 - vx1
+        gy = vy2 - vy1
+        gz = vz2 - vz1
+        g  = np.sqrt(gx**2 + gy**2 + gz**2)
+        g_arr[i] = g
+
+        phi       = 2 * np.pi * Rf1[i]
         cos_theta = 2 * Rf2[i] - 1
         sin_theta = np.sqrt(1 - cos_theta**2)
-
-        gx_p = 0.5 * g * sin_theta * np.cos(phi)
-        gy_p = 0.5 * g * sin_theta * np.sin(phi)
-        gz_p = 0.5 * g * cos_theta
 
         V_x = 0.5 * (vx1 + vx2)
         V_y = 0.5 * (vy1 + vy2)
         V_z = 0.5 * (vz1 + vz2)
 
-        vx1p = V_x - gx_p
-        vy1p = V_y - gy_p
-        vz1p = V_z - gz_p
-        vx2p = V_x + gx_p
-        vy2p = V_y + gy_p
-        vz2p = V_z + gz_p
+        vx1p = V_x - 0.5 * g * sin_theta * np.cos(phi)
+        vy1p = V_y - 0.5 * g * sin_theta * np.sin(phi)
+        vz1p = V_z - 0.5 * g * cos_theta
+        vx2p = V_x + 0.5 * g * sin_theta * np.cos(phi)
+        vy2p = V_y + 0.5 * g * sin_theta * np.sin(phi)
+        vz2p = V_z + 0.5 * g * cos_theta
 
-        # Calculate loss rate for mass, momentum, and energy.
-        x_valid = (vx1 >= ci_cx) & (vx1 <= cf_cx)
-        y_valid = (vy1 >= ci_cy) & (vy1 <= cf_cy)
-        z_valid = (vz1 >= ci_cz) & (vz1 <= cf_cz)
-        group_idx1 = np.argmax(x_valid & y_valid & z_valid)
+        vx1p_arr[i] = vx1p
+        vy1p_arr[i] = vy1p
+        vz1p_arr[i] = vz1p
+        vx2p_arr[i] = vx2p
+        vy2p_arr[i] = vy2p
+        vz2p_arr[i] = vz2p
 
-        x_valid = (vx2 >= ci_cx) & (vx2 <= cf_cx)
-        y_valid = (vy2 >= ci_cy) & (vy2 <= cf_cy)
-        z_valid = (vz2 >= ci_cz) & (vz2 <= cf_cz)
-        group_idx2 = np.argmax(x_valid & y_valid & z_valid)
+        # Post-collision groups
+        post_group1[i] = clamp_and_find_group(vx1p, vy1p, vz1p)
+        post_group2[i] = clamp_and_find_group(vx2p, vy2p, vz2p)
 
-        # Calculate gain rate for mass, momentum, and energy.
-        vx1p_clamped = np.minimum(np.maximum(vx1p, CX_LB), CX_UB)
-        vy1p_clamped = np.minimum(np.maximum(vy1p, CY_LB), CY_UB)
-        vz1p_clamped = np.minimum(np.maximum(vz1p, CZ_LB), CZ_UB)
-        x_valid = (vx1p_clamped >= ci_cx) & (vx1p_clamped <= cf_cx)
-        y_valid = (vy1p_clamped >= ci_cy) & (vy1p_clamped <= cf_cy)
-        z_valid = (vz1p_clamped >= ci_cz) & (vz1p_clamped <= cf_cz)
-        if np.count_nonzero(x_valid & y_valid & z_valid) != 1: print("uho h")
-        group_idx1r = np.argmax(x_valid & y_valid & z_valid)
+    # --- Apply collision rates ---
+    for i in range(n_actual):
+        g1,  g2  = pre_group1[i],  pre_group2[i]
+        g1r, g2r = post_group1[i], post_group2[i]
+        g = g_arr[i]
 
-        vx2p_clamped = np.minimum(np.maximum(vx2p, CX_LB), CX_UB)
-        vy2p_clamped = np.minimum(np.maximum(vy2p, CY_LB), CY_UB)
-        vz2p_clamped = np.minimum(np.maximum(vz2p, CZ_LB), CZ_UB)
-        x_valid = (vx2p_clamped >= ci_cx) & (vx2p_clamped <= cf_cx)
-        y_valid = (vy2p_clamped >= ci_cy) & (vy2p_clamped <= cf_cy)
-        z_valid = (vz2p_clamped >= ci_cz) & (vz2p_clamped <= cf_cz)
-        if np.count_nonzero(x_valid & y_valid & z_valid) != 1: print("uho h")
-        group_idx2r = np.argmax(x_valid & y_valid & z_valid)
+        # Single collision weight — used for BOTH loss and gain
+        C = 0.5 * W**2 / n_actual * g**(2 - 2*omega) * sigma_coeff_hat
 
-        if group_idx1 < group_idx2: key = (group_idx1, group_idx2)
-        else: key = (group_idx2, group_idx1)
-        n_coll_group = depl_tracker[key]
+        # Loss from pre-collision groups
+        group_n[g1]  -= C;       group_n[g2]  -= C
+        group_px[g1] -= C * vx1_arr[i]
+        group_py[g1] -= C * vy1_arr[i]
+        group_pz[g1] -= C * vz1_arr[i]
+        group_e[g1]  -= C * (vx1_arr[i]**2 + vy1_arr[i]**2 + vz1_arr[i]**2)
+        group_px[g2] -= C * vx2_arr[i]
+        group_py[g2] -= C * vy2_arr[i]
+        group_pz[g2] -= C * vz2_arr[i]
+        group_e[g2]  -= C * (vx2_arr[i]**2 + vy2_arr[i]**2 + vz2_arr[i]**2)
 
-        Li = 0.5 * weights[d_idx1] * weights[d_idx2] * g**(2 - 2*omega) * sigma_coeff_hat * \
-            num_valid_samples[group_idx1] * num_valid_samples[group_idx2] / n_coll_group
-        group_n[group_idx1] -= Li
-        group_px[group_idx1] -= Li * vx1
-        group_py[group_idx1] -= Li * vy1
-        group_pz[group_idx1] -= Li * vz1
-        group_e[group_idx1] -= Li * (vx1**2 + vy1**2 + vz1**2)
-        
-        group_n[group_idx2] -= Li
-        group_px[group_idx2] -= Li * vx2
-        group_py[group_idx2] -= Li * vy2
-        group_pz[group_idx2] -= Li * vz2
-        group_e[group_idx2] -= Li * (vx2**2 + vy2**2 + vz2**2)
-
-        Gi = 0.5 * weights[d_idx1] * weights[d_idx2] * g**(2 - 2*omega) * sigma_coeff_hat * \
-            num_valid_samples[group_idx1] * num_valid_samples[group_idx2] / n_coll_group
-        group_n[group_idx1r] += Gi
-        group_px[group_idx1r] += Gi * vx1p
-        group_py[group_idx1r] += Gi * vy1p
-        group_pz[group_idx1r] += Gi * vz1p
-        group_e[group_idx1r] += Gi * (vx1p**2 + vy1p**2 + vz1p**2)
-
-        group_n[group_idx2r] += Gi
-        group_px[group_idx2r] += Gi * vx2p
-        group_py[group_idx2r] += Gi * vy2p
-        group_pz[group_idx2r] += Gi * vz2p
-        group_e[group_idx2r] += Gi * (vx2p**2 + vy2p**2 + vz2p**2)
+        # Gain into post-collision groups
+        group_n[g1r]  += C;       group_n[g2r]  += C
+        group_px[g1r] += C * vx1p_arr[i]
+        group_py[g1r] += C * vy1p_arr[i]
+        group_pz[g1r] += C * vz1p_arr[i]
+        group_e[g1r]  += C * (vx1p_arr[i]**2 + vy1p_arr[i]**2 + vz1p_arr[i]**2)
+        group_px[g2r] += C * vx2p_arr[i]
+        group_py[g2r] += C * vy2p_arr[i]
+        group_pz[g2r] += C * vz2p_arr[i]
+        group_e[g2r]  += C * (vx2p_arr[i]**2 + vy2p_arr[i]**2 + vz2p_arr[i]**2)
 
     return [group_n, group_px, group_py, group_pz, group_e]
