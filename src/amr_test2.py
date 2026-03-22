@@ -494,6 +494,86 @@ class VelocityGroup:
             leaves.extend(child.get_leaves())
         return leaves
 
+def bootstrap_refine(root, f0, cx, cy, cz, cx_vec, cy_vec, cz_vec, invert_fn,
+                     kl_threshold=KL_THRESHOLD, max_passes=20):
+    """
+    Refine the AMR tree based on goodness-of-fit KL(f0 || f_maxwellian)
+    on each leaf. Runs until no splits occur or max_passes is reached.
+    """
+    for pass_idx in range(max_passes):
+        leaves = root.get_leaves()
+        splits_this_pass = 0
+
+        for leaf in leaves:
+            ix_lo, ix_hi = leaf.bounds
+            f_slice = f0[ix_lo:ix_hi]
+
+            # Recompute moments and refit Maxwellian from f0
+            leaf.compute_moments(f_slice)
+
+            group_bounds_dict = {
+                'ci_cx': cx_vec[ix_lo], 'cf_cx': cx_vec[ix_hi - 1],
+                'group_bounds_cx': np.array([ix_lo, ix_hi]),
+                'ci_cy': cy_vec[0],     'cf_cy': cy_vec[-1],
+                'group_bounds_cy': np.array([0, len(cy_vec)]),
+                'ci_cz': cz_vec[0],     'cf_cz': cz_vec[-1],
+                'group_bounds_cz': np.array([0, len(cz_vec)]),
+            }
+            leaf.fit_maxwellian(invert_fn, group_bounds_dict)
+
+            # Goodness-of-fit KL: how well does the Maxwellian represent f0?
+            eps = 1e-300
+            f_fit = leaf.f
+            f_true = f_slice
+
+            # Avoid log(0): only compute where both are positive
+            mask = (f_true > eps) & (f_fit > eps)
+            if not np.any(mask):
+                continue
+
+            integrand = np.where(mask, f_true * np.log(f_true / (f_fit + eps)), 0.0)
+            kl = np.trapezoid(
+                np.trapezoid(
+                    np.trapezoid(integrand, cz_vec, axis=2),
+                    cy_vec, axis=1),
+                cx_vec[ix_lo:ix_hi], axis=0)
+            kl = max(kl, 0.0)
+
+            if kl > kl_threshold and leaf.can_split():
+                print(f'  bootstrap pass {pass_idx}: splitting depth={leaf.depth} '
+                      f'bounds={leaf.bounds}, kl={kl:.4f}')
+                # Initialize shadows before split uses them
+                leaf.update_shadows(invert_fn, cx, cy, cz,
+                                    cx_vec, cy_vec, cz_vec)
+                leaf.split(cx, cy, cz, cx_vec, cy_vec, cz_vec,
+                           invert_fn, f_slice, current_t=0)
+                splits_this_pass += 1
+
+        print(f'Bootstrap pass {pass_idx}: {splits_this_pass} split(s), '
+              f'{len(root.get_leaves())} leaves total')
+
+        if splits_this_pass == 0:
+            print(f'Bootstrap converged after {pass_idx + 1} pass(es).')
+            break
+
+    # Final pass: initialize shadows on all leaves after tree is stable
+    for leaf in root.get_leaves():
+        ix_lo, ix_hi = leaf.bounds
+        f_slice = f0[ix_lo:ix_hi]
+        leaf.compute_moments(f_slice)
+
+        group_bounds_dict = {
+            'ci_cx': cx_vec[ix_lo], 'cf_cx': cx_vec[ix_hi - 1],
+            'group_bounds_cx': np.array([ix_lo, ix_hi]),
+            'ci_cy': cy_vec[0],     'cf_cy': cy_vec[-1],
+            'group_bounds_cy': np.array([0, len(cy_vec)]),
+            'ci_cz': cz_vec[0],     'cf_cz': cz_vec[-1],
+            'group_bounds_cz': np.array([0, len(cz_vec)]),
+        }
+        leaf.fit_maxwellian(invert_fn, group_bounds_dict)
+        leaf.update_shadows(invert_fn, cx, cy, cz, cx_vec, cy_vec, cz_vec)
+        leaf.kl_accum = 0.0
+        leaf.f_shadow_old = [None, None]  # fresh — no temporal history yet
 
 # ============================================================
 # Setup
@@ -516,7 +596,7 @@ group_bounds_root = {
     'ci_cz': -7, 'cf_cz': 7, 'group_bounds_cz': np.array([0, 121]),
 }
 root.fit_maxwellian(invert, group_bounds_root)
-root.update_shadows(invert, cx, cy, cz, cx_vec, cy_vec, cz_vec)
+bootstrap_refine(root, f0, cx, cy, cz, cx_vec, cy_vec, cz_vec, invert)
 
 # ============================================================
 # Time loop

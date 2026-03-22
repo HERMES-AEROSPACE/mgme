@@ -25,7 +25,7 @@ def generate_grid(bounds_list, num_groups):
         volume = (bounds_list[i, 1] - bounds_list[i, 0]) * \
             (bounds_list[i, 3] - bounds_list[i, 2]) * \
             (bounds_list[i, 5] - bounds_list[i, 4])
-        num_samples[i] = np.max((300, int(np.ceil(10 * volume))))
+        num_samples[i] = np.max((300, int(np.ceil(15 * volume))))
     
     x_sample = np.zeros(int(np.sum(num_samples)))
     y_sample = np.zeros(int(np.sum(num_samples)))
@@ -332,6 +332,81 @@ def calc_flux_int(num_groups, weights, offsets, x_sample, y_sample, z_sample):
         
     return F
 
+@jit(nopython=True)
+def calc_flux_analytical(lam_cache, bounds_list, num_groups, U_i):
+    flux = np.zeros((num_groups, 5))
+
+    for g in range(num_groups):
+        lam = lam_cache[g]
+        if lam[4] >= 0.0 or U_i[g, 0] < 1e-6:
+            continue
+
+        beta = -lam[4]
+        wx   = -lam[1] / (2.0 * lam[4])
+        wy   = -lam[2] / (2.0 * lam[4])
+        wz   = -lam[3] / (2.0 * lam[4])
+
+        xlo = bounds_list[g, 0];  xhi = bounds_list[g, 1]
+        ylo = bounds_list[g, 2];  yhi = bounds_list[g, 3]
+        zlo = bounds_list[g, 4];  zhi = bounds_list[g, 5]
+
+        # --- x ---
+        ax = xlo - wx;  bx = xhi - wx
+        eax = np.exp(-beta * ax**2)
+        ebx = np.exp(-beta * bx**2)
+        erf_x = math.erf(np.sqrt(beta) * bx) - math.erf(np.sqrt(beta) * ax)
+        exp_x = eax - ebx
+
+        I0x = 0.5 * np.sqrt(np.pi / beta) * erf_x
+        I1x = wx * I0x + 1.0 / (2.0 * beta) * exp_x
+        I2x = (wx**2 * I0x
+               + (wx / beta) * exp_x
+               + 1.0 / (2.0 * beta) * (ax * eax - bx * ebx)
+               + 0.5 * np.sqrt(np.pi / beta) * 1.0 / (2.0 * beta) * erf_x)
+        I3x = (wx**3 * I0x
+               + (3.0*wx**2/(2.0*beta) + 1.0/(2.0*beta**2)) * exp_x
+               + 3.0*wx * 0.5*np.sqrt(np.pi / beta) * 1.0 / (2.0 * beta) * erf_x
+               + 1.0 / (2.0 * beta) * ((ax**2 + 3.0*wx*ax) * eax - (bx**2 + 3.0*wx*bx) * ebx))
+
+        # --- y ---
+        ay = ylo - wy;  by = yhi - wy
+        eay = np.exp(-beta * ay**2)
+        eby = np.exp(-beta * by**2)
+        erf_y = math.erf(np.sqrt(beta) * by) - math.erf(np.sqrt(beta) * ay)
+        exp_y = eay - eby
+
+        I0y = 0.5 * np.sqrt(np.pi / beta) * erf_y
+        I1y = wy * I0y + 1.0 / (2.0 * beta) * exp_y
+        I2y = (wy**2 * I0y
+               + (wy / beta) * exp_y
+               + 1.0 / (2.0 * beta) * (ay * eay - by * eby)
+               + 0.5 * np.sqrt(np.pi / beta) * 1.0 / (2.0 * beta) * erf_y)
+
+        # --- z ---
+        az = zlo - wz;  bz = zhi - wz
+        eaz = np.exp(-beta * az**2)
+        ebz = np.exp(-beta * bz**2)
+        erf_z = math.erf(np.sqrt(beta) * bz) - math.erf(np.sqrt(beta) * az)
+        exp_z = eaz - ebz
+
+        I0z = 0.5 * np.sqrt(np.pi / beta) * erf_z
+        I1z = wz * I0z + 1.0 / (2.0 * beta) * exp_z
+        I2z = (wz**2 * I0z
+               + (wz / beta) * exp_z
+               + 1.0 / (2.0 * beta) * (az * eaz - bz * ebz)
+               + 0.5 * np.sqrt(np.pi / beta) * 1.0 / (2.0 * beta) * erf_z)
+
+        # A from known density
+        A = U_i[g, 0] / (I0x * I0y * I0z)
+
+        flux[g, 0] = A * I1x * I0y * I0z
+        flux[g, 1] = A * I2x * I0y * I0z
+        flux[g, 2] = A * I1x * I1y * I0z
+        flux[g, 3] = A * I1x * I0y * I1z
+        flux[g, 4] = A * (I3x * I0y * I0z + I1x * I2y * I0z + I1x * I0y * I2z)
+
+    return flux
+
 # Flux limiter function.
 def minmod3(a, b, c):  
     all_positive = (a > 0) & (b > 0) & (c > 0)
@@ -405,7 +480,7 @@ def KT_central2(U_list, F_list, numXj, n_groups, dt, dx, CX_LB, CX_UB):
     return k
 
 @jit(nopython=True)
-def max_entropy_newton(x_s, y_s, z_s, moments, lam0=None, max_iter=50, tol=1e-8):
+def max_entropy_newton(x_s, y_s, z_s, moments, lam0, max_iter=70, tol=1e-4):
     """
     Solve max-entropy weights directly via Newton iterations on dual.
     
@@ -415,11 +490,9 @@ def max_entropy_newton(x_s, y_s, z_s, moments, lam0=None, max_iter=50, tol=1e-8)
     r2 = x_s**2 + y_s**2 + z_s**2
 
     # Initial lambda guess
-    if lam0 is None:
-        lam = np.zeros(5)
-    else:
-        lam = lam0.copy()
+    lam = lam0.copy()
 
+    converged = False
     for iteration in range(max_iter):
         # Compute weights from current lambda
         log_w = (lam[0] + lam[1]*x_s + lam[2]*y_s + lam[3]*z_s + lam[4]*r2)
@@ -433,7 +506,15 @@ def max_entropy_newton(x_s, y_s, z_s, moments, lam0=None, max_iter=50, tol=1e-8)
         g[3] = np.sum(z_s * w) - moments[3]
         g[4] = np.sum(r2  * w) - moments[4]
 
-        if np.linalg.norm(g) < tol:
+        rel = np.zeros(5)
+        for k in range(5):
+            denom = np.abs(moments[k])
+            if denom > 1e-30:
+                rel[k] = np.abs(g[k]) / denom
+            else:
+                rel[k] = np.abs(g[k])
+        if np.max(rel) < tol:
+            converged = True
             break
 
         # Hessian: H_ij = sum(phi_i * phi_j * w)
@@ -453,17 +534,14 @@ def max_entropy_newton(x_s, y_s, z_s, moments, lam0=None, max_iter=50, tol=1e-8)
         dlam = np.linalg.solve(H, g)
         lam -= dlam
 
-    return w, lam
+    return w, lam, converged
 
 def solve_group_newton(x_sample, y_sample, z_sample, U_i, lam0):
     """Attempt to solve for one group"""
     try:
-        w, lam = max_entropy_newton(x_sample, y_sample, z_sample, U_i, lam0)
-        residual = np.abs(np.sum(w) - U_i[0]) / U_i[0]
-        if residual < 1e-7:
-            return True, w, lam
-        else:
-            return False, w, lam
+        lam_init = lam0 if lam0 is not None else np.zeros(5)
+        w, lam, converged = max_entropy_newton(x_sample, y_sample, z_sample, U_i, lam_init)
+        return converged, w, lam
     except:
         # print('Newton failed')
         return False, np.zeros_like(x_sample), np.zeros(5)
@@ -497,44 +575,9 @@ def solve_group_cvxpy(x_sample, y_sample, z_sample, U_i, flux_limit=10.0):
     except Exception as e:
         return False, None, str(e)
 
-def regenerate_group_samples(i, n_samples, bounds_list):
-    """Generate new samples for a group"""
-    l_bounds = [bounds_list[i, 0], bounds_list[i, 2], bounds_list[i, 4]]
-    u_bounds = [bounds_list[i, 1], bounds_list[i, 3], bounds_list[i, 5]]
-    
-    sampler = qmc.LatinHypercube(d=3)
-    if all(u > l for l, u in zip(l_bounds, u_bounds)):
-        sample = qmc.scale(sampler.random(n=n_samples), l_bounds, u_bounds)
-        return sample[:, 0], sample[:, 1], sample[:, 2]
-    else:
-        return None, None, None
-
-def generate_regular_samples(p, U_i, num_groups, bounds_list, lam_cache, max_retries=6):
+def generate_regular_samples(p, U_i, num_groups, lam_cache, x_sample, y_sample, z_sample, offsets, num_samples):
     num_valid_samples = np.zeros(num_groups, dtype=np.int64)
-
-    ux = U_i[:, 1] / U_i[:, 0]
-    uy = U_i[:, 2] / U_i[:, 0]
-    uz = U_i[:, 3] / U_i[:, 0]
-    
-    thermal = (U_i[:, 4] / U_i[:, 0]) - (ux**2 + uy**2 + uz**2)
-    sigma = np.sqrt(np.maximum(2 * thermal / 3, 1e-10))
-    
-    x_boundsl = np.maximum(bounds_list[:, 0], ux - 3*sigma)
-    x_boundsu = np.minimum(bounds_list[:, 1], ux + 3*sigma)
-    
-    y_boundsl = np.maximum(bounds_list[:, 2], uy - 3*sigma)
-    y_boundsu = np.minimum(bounds_list[:, 3], uy + 3*sigma)
-    
-    z_boundsl = np.maximum(bounds_list[:, 4], uz - 3*sigma)
-    z_boundsu = np.minimum(bounds_list[:, 5], uz + 3*sigma)
-
-    adaptive_bounds = np.vstack((x_boundsl, x_boundsu, y_boundsl, y_boundsu, z_boundsl, z_boundsu)).T
-    x_sample, y_sample, z_sample, offsets, num_samples = generate_grid(adaptive_bounds, num_groups)
-
     weights = np.zeros(int(np.sum(num_samples)))
-    x_sample_working = x_sample.copy()
-    y_sample_working = y_sample.copy()
-    z_sample_working = z_sample.copy()
 
     # Initialize output lambda array for all groups
     lam_out = np.zeros((num_groups, 5))
@@ -550,61 +593,41 @@ def generate_regular_samples(p, U_i, num_groups, bounds_list, lam_cache, max_ret
             weights[start_idx:end_idx] = 0.0
             continue
 
-        # Try multiple times
         success = False
-        for attempt in range(max_retries):
-            # For retry attempts, regenerate samples
-            if attempt > 0:
-                x_new, y_new, z_new = regenerate_group_samples(i, n_samples_group, adaptive_bounds)
+        x_slice = x_sample[start_idx:end_idx]
+        y_slice = y_sample[start_idx:end_idx]
+        z_slice = z_sample[start_idx:end_idx]
 
-                # Replace samples in modified arrays
-                x_sample_working[start_idx:end_idx] = x_new
-                y_sample_working[start_idx:end_idx] = y_new
-                z_sample_working[start_idx:end_idx] = z_new
-            
-            # Get samples (from original on first attempt, modified on retries)
-            x_slice = x_sample_working[start_idx:end_idx]
-            y_slice = y_sample_working[start_idx:end_idx]
-            z_slice = z_sample_working[start_idx:end_idx]
+        # Try to solve using Newton first (much faster).
+        lam0 = lam_cache[i] if (lam_cache is not None and
+                                    np.any(lam_cache[i] != 0.0)) else None
+        success, solution, lam = solve_group_newton(x_slice, y_slice, z_slice, U_i[i], lam0)
 
-            # Try to solve using Newton first (much faster).
-            lam0 = lam_cache[i] if (lam_cache is not None and
-                                     np.any(lam_cache[i] != 0.0)) else None
-            success, solution, lam = solve_group_newton(x_slice, y_slice, z_slice, U_i[i], lam0)
-
+        if success:
+            # Accept solution
+            weights[start_idx:end_idx] = solution
+            num_valid_samples[i] = np.sum(solution > 1e-12)
+            lam_out[i] = lam
+        elif not success:
+            success, solution, status = solve_group_cvxpy(x_slice, y_slice, z_slice, U_i[i])
             if success:
-                # Accept solution
                 weights[start_idx:end_idx] = solution
                 num_valid_samples[i] = np.sum(solution > 1e-12)
-                lam_out[i] = lam
-                break  # Exit retry loop
-            elif not success and attempt > 3:
-                success, solution, status = solve_group_cvxpy(x_slice, y_slice, z_slice, U_i[i])
-                if success:
-                    weights[start_idx:end_idx] = solution
-                    num_valid_samples[i] = np.sum(solution > 1e-12)
-                    lam_out[i] = np.zeros(5)
-                    break
+                lam_out[i] = np.zeros(5)
 
         if not success:
-            # if attempt == max_retries - 1:
-            print(f'Cell {p}, Group {i}: Failed after {max_retries} attempts ')
-            print(f'  moments:  {U_i[i]}')
-            print(f'  num_samples:   {n_samples_group}')
-            print(f'  sigma:    {sigma[i]:.4f}, thermal: {2/3*thermal[i]:.4f}')
-            print(f'  adaptive: x=[{adaptive_bounds[i,0]:.4f}, {adaptive_bounds[i,1]:.4f}] '
-                  f'y=[{adaptive_bounds[i,2]:.4f}, {adaptive_bounds[i,3]:.4f}] '
-                  f'z=[{adaptive_bounds[i,4]:.4f}, {adaptive_bounds[i,5]:.4f}]')
+            print(f'Cell {p}, Group {i}: Failed after Newton/CVXPY attempts')
+            print(f'  moments: {U_i[i]}')
+            print(f'  num_samples: {n_samples_group}')
             num_valid_samples[i] = 0
             weights[start_idx:end_idx] = 0.0
-            lam_out = np.zeros(5)
+            lam_out[i] = np.zeros(5)
 
-    return (weights, num_valid_samples, offsets,
-            x_sample_working, y_sample_working, z_sample_working, lam_out)
+    return (weights, num_valid_samples, lam_out)
 
 @jit(nopython=True)
 def collide(x_sample, y_sample, z_sample, weights, num_valid_samples, bounds_list, n_groups, n_coll,
-            CX_LB, CX_UB, CY_LB, CY_UB, CZ_LB, CZ_UB, key_type, sigma_coeff_hat, omega):
+            CX_LB, CX_UB, CY_LB, CY_UB, CZ_LB, CZ_UB, key_type, sigma_coeff_hat, omega, alpha):
 
     group_n  = np.zeros(n_groups)
     group_px = np.zeros(n_groups)
@@ -692,20 +715,30 @@ def collide(x_sample, y_sample, z_sample, weights, num_valid_samples, bounds_lis
         g  = np.sqrt(gx**2 + gy**2 + gz**2)
         g_arr[i] = g
 
+        # VHS isotropic scattering. If alpha != 1, then VSS anisotropic scattering.
         phi       = 2 * np.pi * Rf1[i]
-        cos_theta = 2 * Rf2[i] - 1
+        cos_theta = 2 * Rf2[i]**(1 / alpha) - 1
         sin_theta = np.sqrt(1 - cos_theta**2)
 
         V_x = 0.5 * (vx1 + vx2)
         V_y = 0.5 * (vy1 + vy2)
         V_z = 0.5 * (vz1 + vz2)
 
-        vx1p = V_x - 0.5 * g * sin_theta * np.cos(phi)
-        vy1p = V_y - 0.5 * g * sin_theta * np.sin(phi)
-        vz1p = V_z - 0.5 * g * cos_theta
-        vx2p = V_x + 0.5 * g * sin_theta * np.cos(phi)
-        vy2p = V_y + 0.5 * g * sin_theta * np.sin(phi)
-        vz2p = V_z + 0.5 * g * cos_theta
+        if alpha == 1.0:
+            gxp = 0.5 * g * sin_theta * np.cos(phi)
+            gyp = 0.5 * g * sin_theta * np.sin(phi)
+            gzp = 0.5 * g * cos_theta
+        else:
+            gxp = 0.5 * (gx * cos_theta + (sin_theta * (g * gy * np.cos(phi) - gz * gx * np.sin(phi))) / (np.sqrt(gx**2 + gy**2)))
+            gyp = 0.5 * (gy * cos_theta - (sin_theta * (g * gx * np.cos(phi) + gz * gy * np.sin(phi))) / (np.sqrt(gx**2 + gy**2)))
+            gzp = 0.5 * (gz * cos_theta + np.sin(phi) * sin_theta * np.sqrt(gx**2 + gy**2))
+
+        vx1p = V_x - gxp
+        vy1p = V_y - gyp
+        vz1p = V_z - gzp
+        vx2p = V_x + gxp
+        vy2p = V_y + gyp
+        vz2p = V_z + gzp
 
         vx1p_arr[i] = vx1p
         vy1p_arr[i] = vy1p

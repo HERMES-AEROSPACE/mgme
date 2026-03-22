@@ -9,7 +9,8 @@ from scipy import special
 
 # data = np.load('simulation_data/U20.npy')
 data1 = np.load('simulation_data/U1500.npy')
-data2 = np.load('simulation_data2/U1500.npy')
+data2 = np.load('simulation_data/U1140.npy')
+data3 = np.load('simulation_data3/U1360.npy')
 dsmc = np.loadtxt('src/dsmc.txt')
 dsmcT = np.loadtxt('src/dsmcT.txt')
 dsmc_hard = np.loadtxt('src/dsmc_hard.txt')
@@ -51,6 +52,7 @@ x2_scale = x2 * (lam_ref / lam_alsmeyer)
 # y = np.sum(data, axis=1)[:, 0]
 n1 = np.sum(data1, axis=1)[:, 0]
 n2 = np.sum(data2, axis=1)[:, 0]
+n3 = np.sum(data3, axis=1)[:, 0]
 u1 = np.sum(data1, axis=1)[:, 1]
 u2 = np.sum(data2, axis=1)[:, 1]
 T1 = np.sum(data1, axis=1)[:, 4]
@@ -60,11 +62,12 @@ temperature2 = 2/3 * ((T2 / n2) - (u2 / n2)**2)
 vel2 = u2 / n2
 n1_scale = (n1 - n1[0]) / (n1[-1] - n1[0])
 n2_scale = (n2 - n2[0]) / (n2[-1] - n2[0])
+n3_scale = (n3 - n3[0]) / (n3[-1] - n3[0])
 u2_scale = (u2 - u2[0]) / (u2[-1] - u2[0])
 T1_scale = (T1 - T1[0]) / (T1[-1] - T1[0])
 T2_scale = (T2 - T2[0]) / (T2[-1] - T2[0])
 temperature1_scale = (temperature1 - temperature1[0]) / (temperature1[-1] - temperature1[0])
-temperature2_scale = (temperature2 - temperature2.min()) / (temperature2.max() - temperature2.min())
+temperature2_scale = (temperature2 - temperature2[0]) / (temperature2[-1] - temperature2[0])
 vel2_scale = (vel2 - vel2[-1]) / (vel2[0] - vel2[-1])
 
 shock_thick  = np.max(np.abs(np.gradient(n2_scale, x2_scale)))
@@ -75,7 +78,7 @@ shock_thick_vhs = np.max(np.abs(np.gradient(dsmc_vhs[:, 1], dsmc_vhs[:, 0]))) / 
 print('Alsmeyer:', shock_thick_als, 'Current:', shock_thick)
 
 # Calculate some distributions and plot them.
-p = 50
+p = 6
 point = x2[p]
 fx_groups = []
 cx_vec, cy_vec, cz_vec, cx, cy, cz = calculate_velocity_grid(VELOCITY_SPACE)
@@ -145,7 +148,7 @@ x_center  = interp(0.5)
 
 x_centered = x2_scale - x_center
 mask = (x_centered >= -7.8) & (x_centered <= 9.1)
-mask = (x_centered >= -10) & (x_centered <= 10)
+mask = (x_centered >= -15) & (x_centered <= 12)
 idx  = np.where(mask)[0]
 f_als       = interp1d(alsmeyer_205[:, 0], alsmeyer_205[:, 1],
                         kind='cubic', bounds_error=False, fill_value=(0.0, 1.0))
@@ -154,9 +157,10 @@ y_als_fine  = f_als(x_als_fine)
 
 fig = plt.figure(figsize=(7, 6))
 ax1 = fig.add_subplot(111)
-ax1.plot(x_centered[idx], n1_scale[idx], '--', color='black', linewidth=1.6, label=r'$\omega = 0.811$')
-ax1.plot(x_centered[idx], n2_scale[idx], color='black', linewidth=1.6, label=r'$\omega = 0.7$')
-# ax1.plot(x_centered[idx[::3]], temperature2_scale[idx[::3]], color='red', linewidth=1.6)
+# ax1.plot(x_centered[idx], n1_scale[idx], '--', color='black', linewidth=1.6, label=r'$\omega = 0.811$')
+ax1.plot(x_centered[idx], n2_scale[idx], color='black', linewidth=1.6, label=r'$\omega = 0.81, \alpha = 1.4$')
+# ax1.plot(x_centered[idx], n3_scale[idx], '-.', color='black', linewidth=1.6, label=r'$\omega = 0.5$')
+ax1.plot(x_centered[idx], temperature2_scale[idx], color='red', linewidth=1.6)
 ax1.scatter(x_als_fine[0::10], y_als_fine[0::10],  color='black', marker='s', s=50, linewidths=1.1, facecolors='none', label=r'Alsmeyer')
 # ax1.plot(x2_scale + 0.07, n1_scale, color='purple')
 # ax1.plot(x2_scale + 0.055, temperature1_scale, color='indigo')
@@ -172,10 +176,11 @@ ax1.scatter(x_als_fine[0::10], y_als_fine[0::10],  color='black', marker='s', s=
 
 
 ax1.set_xlabel(r'$\mathbf{x/\lambda_{1}}$ ', fontsize=18)
-ax1.set_ylabel(r'$\mathbf{\rho_n}$', fontsize=18)
+ax1.set_ylabel(r'$\mathbf{\rho_n}, \mathbf{T_n}$', fontsize=18)
 ax1.tick_params(axis='both',labelsize=16)
-ax1.legend(fontsize=16)
-ax1.tick_params(axis='both', direction='out', length=6, width=1.2)
+ax1.legend(fontsize=16, frameon=False)
+ax1.tick_params(axis='both', which='major', direction='in', length=6, width=1.4)
+ax1.tick_params(axis='both', which='minor', direction='in')
 ax1.minorticks_on()
 # ax1.grid()
 # ax1.set_xlim(-10, 10)

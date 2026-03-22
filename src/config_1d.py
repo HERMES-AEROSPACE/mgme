@@ -29,11 +29,12 @@ GROUP_PARAMS = {
     'group_bounds_cz': np.array([[0, 106]])
 }
 
-# Collision parameters
+# Random simulation parameters
 SIMULATION_PARAMS = {
-    'n_coll': 40000,
-    'cfl': 0.67,
-    't_end': 35.0
+    'n_coll': 10000,
+    'cfl': 0.5,
+    't_end': 30.0,
+    'alpha': 1.4
 }
 
 CONSTANTS = {
@@ -47,6 +48,6 @@ CONSTANTS = {
 FREESTREAM_PARAMS = {
     'T1': 300, 
     'P1': 6.6667,
-    'Ma1': 2.05,
-    'omega': 0.7  # Variable Hard Sphere Model: 1.0 - Pseudo-Maxwell, 0.5 - Hard Sphere, 0.811 - VHS Argon
+    'Ma1': 2.0,
+    'omega': 0.81  # Variable Hard Sphere Model: 1.0 - Pseudo-Maxwell, 0.5 - Hard Sphere, 0.811 - VHS Argon
 }

@@ -1,6 +1,6 @@
 import numpy as np
 from .banner import print_banner
-from .shock_helper import calc_flux_int, ic, LF_central1, KT_central2, generate_regular_samples, collide, calculate_velocity_grid
+from .shock_helper import calc_flux_int, ic, KT_central2, generate_regular_samples, collide, calculate_velocity_grid, generate_grid, calc_flux_analytical
 from .config_1d import CONSTANTS, FREESTREAM_PARAMS, PHYS_SPACE, GROUP_PARAMS, VELOCITY_SPACE, SIMULATION_PARAMS
 import itertools
 from scipy import special
@@ -25,6 +25,7 @@ def run_simulation():
     k = CONSTANTS['k']
     omega = FREESTREAM_PARAMS['omega']
 
+    alpha = SIMULATION_PARAMS['alpha']
     n_coll = SIMULATION_PARAMS['n_coll']
     CX_LB, CX_UB = VELOCITY_SPACE['cx_range']
     CY_LB, CY_UB = VELOCITY_SPACE['cy_range']
@@ -36,6 +37,7 @@ def run_simulation():
     u1 = Ma1 * a1
     rho1 = P1/(R * T1)
     n1 = P1/(R * T1) * 1/m
+    m_r = 0.5  # reduced mass
 
     # Post shock quantities.
     T2 = T1 * (((gamma - 1) * Ma1**2 + 2) * (2 * gamma * Ma1**2 - (gamma - 1)))/((gamma + 1)**2 * Ma1**2)
@@ -58,7 +60,7 @@ def run_simulation():
     Kn = lam_ref / L_ref
     t_ref = L_ref / c_ref
     gamma_omega = special.gamma(5/2 - omega)
-    sigma_coeff_hat = 1/gamma_omega * (2)**(0.5 - omega)
+    sigma_coeff_hat = 1/gamma_omega * (1 / m_r)**(0.5 - omega)
     print('Reference mean free path:', lam_ref, '[m]')
     print('Characteristic length:', L_ref, '[m]')
     print('Knudsen number:', Kn)
@@ -151,15 +153,18 @@ def run_simulation():
     # Cache distribution parameters for Newton solver.
     lam_cache = np.zeros((numXj, num_groups, 5))
     pr = cProfile.Profile()
-    def step(i, U_i, bounds_list, num_groups, CX_LB, CX_UB, CY_LB, CY_UB, CZ_LB, CZ_UB, key_type, sigma_coeff_hat, omega, lam_cache_i):
-        # Calculate weights through convex optimization.
-        weights, num_valid_samples, offsets, x_sample, y_sample, z_sample, lam_out = generate_regular_samples(
-            i, U_i, num_groups, bounds_list, lam_cache_i, max_retries=10)
+    x_sample, y_sample, z_sample, offsets, num_samples = generate_grid(bounds_list, num_groups)
+
+    def step(i, U_i, bounds_list, num_groups, CX_LB, CX_UB, CY_LB, CY_UB, CZ_LB, CZ_UB, key_type, sigma_coeff_hat, omega, lam_cache_i, alpha, \
+        x_sample, y_sample, z_sample, offsets, num_samples):
+        # Calculate weights through optimization.
+        weights, num_valid_samples, lam_out = generate_regular_samples(
+            i, U_i, num_groups, lam_cache_i, x_sample, y_sample, z_sample, offsets, num_samples)
 
         # Advance the collision and flux forward.
         coll = collide(x_sample, y_sample, z_sample, weights, num_valid_samples, bounds_list, num_groups, \
-                        n_coll, CX_LB, CX_UB, CY_LB, CY_UB, CZ_LB, CZ_UB, key_type, sigma_coeff_hat, omega)
-        flux = calc_flux_int(num_groups, weights, offsets, x_sample, y_sample, z_sample)
+                        n_coll, CX_LB, CX_UB, CY_LB, CY_UB, CZ_LB, CZ_UB, key_type, sigma_coeff_hat, omega, alpha)
+        flux = calc_flux_analytical(lam_out, bounds_list, num_groups, U_i)
 
         return i, coll, flux, lam_out
 
@@ -176,7 +181,7 @@ def run_simulation():
         with parallel_backend('loky', inner_max_num_threads=1):
             step_dt = Parallel(n_jobs=32)(
                 delayed(step)(i, U[i], bounds_list, num_groups, CX_LB, CX_UB, CY_LB, CY_UB, CZ_LB, CZ_UB, \
-                            key_type, sigma_coeff_hat, omega, lam_cache[i].copy())
+                            key_type, sigma_coeff_hat, omega, lam_cache[i].copy(), alpha, x_sample, y_sample, z_sample, offsets, num_samples)
                 for i in range(0, numXj)
             )
 
@@ -194,7 +199,7 @@ def run_simulation():
         U += (k1_f + k1_c) * dt
 
         # Save solution.
-        f1 = 'simulation_data2/U{}.npy'.format(t + 0)
+        f1 = 'simulation_data/U{}.npy'.format(t + 0)
         with open(f1, 'wb') as file:
             np.save(file, U)
 
