@@ -8,15 +8,20 @@ from scipy import special
 
 
 # data = np.load('simulation_data/U20.npy')
-data1 = np.load('simulation_data/U1500.npy')
-data2 = np.load('simulation_data/U1140.npy')
+data1 = np.load('simulation_data/U150.npy')
+data2 = np.load('simulation_data2/U1000.npy')
+Tx = np.load('simulation_data2/Tx1000.npy')
 data3 = np.load('simulation_data3/U1360.npy')
-dsmc = np.loadtxt('src/dsmc.txt')
-dsmcT = np.loadtxt('src/dsmcT.txt')
-dsmc_hard = np.loadtxt('src/dsmc_hard.txt')
-dsmcT_hard = np.loadtxt('src/dsmcT_hard.txt')
-dsmc_vhs = np.loadtxt('src/dsmc_vhs.txt')
-dsmcT_vhs = np.loadtxt('src/dsmcT_vhs.txt')
+# dsmc = np.loadtxt('src/dsmc.txt')
+# dsmcT = np.loadtxt('src/dsmcT.txt')
+# dsmc_hard = np.loadtxt('src/dsmc_hard.txt')
+# dsmcT_hard = np.loadtxt('src/dsmcT_hard.txt')
+# dsmc_vhs = np.loadtxt('src/dsmc_vhs.txt')
+# dsmcT_vhs = np.loadtxt('src/dsmcT_vhs.txt')
+clarke_n = np.loadtxt('src/clarkemach9n.npy')
+clarke_T = np.loadtxt('src/clarkemach9T.npy')
+clarke_Tx = np.loadtxt('src/clarkemach9Tx.npy')
+
 
 alsmeyer_205 = np.loadtxt('src/alsmeyer_205.txt')
 # plt.plot([1, 2, 4, 8, 14], [65.3/65.3, 65.3/37.7, 65.3/24.8, 65.3/22.1, 65.3/19.9], '^-', color='black')
@@ -26,7 +31,7 @@ alsmeyer_205 = np.loadtxt('src/alsmeyer_205.txt')
 
 x = np.linspace(*PHYS_SPACE['xj_range'], PHYS_SPACE['num_xj'])
 # x = np.linspace(-20, 20, 201)
-x2 = np.linspace(-12, 10, 111)
+x2 = np.linspace(-23, 17, 101)
 
 R = CONSTANTS['R']
 m = CONSTANTS['m']
@@ -47,7 +52,7 @@ print(f'lam_ref      = {lam_ref*1000:.4f} mm')
 print(f'lam_alsmeyer = {lam_alsmeyer*1000:.4f} mm  (target: 1.098 mm)')
 
 x_scale = x #* lam_ref/0.001098
-x2_scale = x2 * (lam_ref / lam_alsmeyer)
+x2_scale = x2 #* (lam_ref / lam_alsmeyer)
 
 # y = np.sum(data, axis=1)[:, 0]
 n1 = np.sum(data1, axis=1)[:, 0]
@@ -66,6 +71,7 @@ n3_scale = (n3 - n3[0]) / (n3[-1] - n3[0])
 u2_scale = (u2 - u2[0]) / (u2[-1] - u2[0])
 T1_scale = (T1 - T1[0]) / (T1[-1] - T1[0])
 T2_scale = (T2 - T2[0]) / (T2[-1] - T2[0])
+Tx_scale = (Tx - Tx[0]) / (Tx[-1] - Tx[0])
 temperature1_scale = (temperature1 - temperature1[0]) / (temperature1[-1] - temperature1[0])
 temperature2_scale = (temperature2 - temperature2[0]) / (temperature2[-1] - temperature2[0])
 vel2_scale = (vel2 - vel2[-1]) / (vel2[0] - vel2[-1])
@@ -73,17 +79,16 @@ vel2_scale = (vel2 - vel2[-1]) / (vel2[0] - vel2[-1])
 shock_thick  = np.max(np.abs(np.gradient(n2_scale, x2_scale)))
 shock_thick_als  = np.max(np.abs(np.gradient(alsmeyer_205[:, 1], alsmeyer_205[:, 0])))
 
-shock_thick_dsmc = np.max(np.abs(np.gradient(dsmc[:, 1], dsmc[:, 0]))) / 50.0
-shock_thick_vhs = np.max(np.abs(np.gradient(dsmc_vhs[:, 1], dsmc_vhs[:, 0]))) / 50.0
+# shock_thick_dsmc = np.max(np.abs(np.gradient(dsmc[:, 1], dsmc[:, 0]))) / 50.0
+# shock_thick_vhs = np.max(np.abs(np.gradient(dsmc_vhs[:, 1], dsmc_vhs[:, 0]))) / 50.0
 print('Alsmeyer:', shock_thick_als, 'Current:', shock_thick)
 
 # Calculate some distributions and plot them.
-p = 6
-point = x2[p]
+p = 30
 fx_groups = []
 cx_vec, cy_vec, cz_vec, cx, cy, cz = calculate_velocity_grid(VELOCITY_SPACE)
 
-for i in range(0, 5):
+for i in range(0, 6):
     ci = GROUP_PARAMS['ci_cx'][i]
     cf = GROUP_PARAMS['cf_cx'][i]
     group_slice = slice(i*1, (i+1)*1)
@@ -93,14 +98,14 @@ for i in range(0, 5):
     ex = np.sum(data2[p, group_slice], axis=0)[4]
 
     # Use a tighter initial guess for non-first groups
-    initial_guess = [1.0, 0.0, 0.0, 0.0]
+    initial_guess = [0.1, 0.0, 0.0, 0.0]
 
     A, b, wx, _, _ = invert(
         [nx, ux, 0.0, 0.0, ex],
         initial_guess,
         {'ci_cx': ci, 'cf_cx': cf,
-         'ci_cy': -5, 'cf_cy': 5.5,
-         'ci_cz': -5, 'cf_cz': 5.5}
+         'ci_cy': -15, 'cf_cy': 15.0,
+         'ci_cz': -15, 'cf_cz': 15.0}
     )
 
     fx = np.trapezoid(
@@ -147,8 +152,9 @@ interp    = interp1d(n2_scale, x2_scale)
 x_center  = interp(0.5)
 
 x_centered = x2_scale - x_center
+point = x_centered[p]
 mask = (x_centered >= -7.8) & (x_centered <= 9.1)
-mask = (x_centered >= -15) & (x_centered <= 12)
+mask = (x_centered >= -25) & (x_centered <= 20)
 idx  = np.where(mask)[0]
 f_als       = interp1d(alsmeyer_205[:, 0], alsmeyer_205[:, 1],
                         kind='cubic', bounds_error=False, fill_value=(0.0, 1.0))
@@ -158,10 +164,11 @@ y_als_fine  = f_als(x_als_fine)
 fig = plt.figure(figsize=(7, 6))
 ax1 = fig.add_subplot(111)
 # ax1.plot(x_centered[idx], n1_scale[idx], '--', color='black', linewidth=1.6, label=r'$\omega = 0.811$')
-ax1.plot(x_centered[idx], n2_scale[idx], color='black', linewidth=1.6, label=r'$\omega = 0.81, \alpha = 1.4$')
+ax1.plot(x_centered[idx], n2_scale[idx], color='black', linewidth=1.6, label=r'$n$')
 # ax1.plot(x_centered[idx], n3_scale[idx], '-.', color='black', linewidth=1.6, label=r'$\omega = 0.5$')
-ax1.plot(x_centered[idx], temperature2_scale[idx], color='red', linewidth=1.6)
-ax1.scatter(x_als_fine[0::10], y_als_fine[0::10],  color='black', marker='s', s=50, linewidths=1.1, facecolors='none', label=r'Alsmeyer')
+ax1.plot(x_centered[idx], temperature2_scale[idx], color='red', linewidth=1.6, label=r'$T$')
+ax1.plot(x_centered[idx], Tx_scale[idx], color='blue', linewidth=1.6, label=r'$T_x$')
+# ax1.scatter(x_als_fine[0::10], y_als_fine[0::10],  color='black', marker='s', s=50, linewidths=1.1, facecolors='none', label=r'Alsmeyer')
 # ax1.plot(x2_scale + 0.07, n1_scale, color='purple')
 # ax1.plot(x2_scale + 0.055, temperature1_scale, color='indigo')
 # ax1.plot(x_scale, vel2_scale, color='blue')
@@ -173,14 +180,21 @@ ax1.scatter(x_als_fine[0::10], y_als_fine[0::10],  color='black', marker='s', s=
 # ax1.plot(1 - dsmcT[:, 0], dsmcT[:, 1], color='red', linewidth=1.3)
 # ax1.plot(1 - dsmcT_hard[:, 0], dsmcT_hard[:, 1], '--', color='red')
 # ax1.plot(1 - dsmcT_vhs[:, 0], dsmcT_vhs[:, 1], '--', color='red')
+interp    = interp1d(clarke_n[:, 1], 1 - clarke_n[:, 0])
+x_center_clarke  = interp(0.5)
+
+ax1.scatter(1 - clarke_n[:, 0] - x_center_clarke, clarke_n[:, 1], color='black', facecolors='none')
+ax1.scatter(1 - clarke_T[:, 0] - x_center_clarke, clarke_T[:, 1], color='red', facecolors='none')
+ax1.scatter(1 - clarke_Tx[:, 0] - x_center_clarke, clarke_Tx[:, 1], color='blue', facecolors='none')
 
 
-ax1.set_xlabel(r'$\mathbf{x/\lambda_{1}}$ ', fontsize=18)
+ax1.set_xlabel(r'$\mathbf{x/\lambda_{ref}}$ ', fontsize=18)
 ax1.set_ylabel(r'$\mathbf{\rho_n}, \mathbf{T_n}$', fontsize=18)
 ax1.tick_params(axis='both',labelsize=16)
 ax1.legend(fontsize=16, frameon=False)
 ax1.tick_params(axis='both', which='major', direction='in', length=6, width=1.4)
 ax1.tick_params(axis='both', which='minor', direction='in')
+ax1.set_title(r'$\omega = 0.81, \alpha = 1.0$', fontsize=18)
 ax1.minorticks_on()
 # ax1.grid()
 # ax1.set_xlim(-10, 10)
@@ -191,7 +205,7 @@ plt.savefig('plots/profile.pdf')
 
 fig3 = plt.figure(figsize=(6, 6))
 ax3 = fig3.add_subplot(111)
-for i in range(0, 5):
+for i in range(0, 6):
     bounds = GROUP_PARAMS['group_bounds_cx'][i]
     group_slice = slice(bounds[0], bounds[1])
     ax3.plot(cx_vec[group_slice], fx_groups[i][group_slice], linewidth=1.4)
@@ -199,7 +213,7 @@ ax3.set_xlabel(r'$C_x$', fontsize=20)
 ax3.set_ylabel(r'f', fontsize=20)
 ax3.tick_params(axis='both',labelsize=16)
 # ax3.legend([r'Group $x_0$', r'Group $x_1$', r'Group $x_2$'], fontsize=14, loc='upper left')
-ax3.set_title(r'$X_j$ = {}'.format(point), fontsize=18)
+ax3.set_title(r'$X_j$ = {:.2f}'.format(point), fontsize=18)
 plt.tight_layout()
 plt.savefig('plots/dist.pdf')
 

@@ -1,9 +1,11 @@
 import numpy as np
 from numba import jit
+from scipy.stats import qmc
+from scipy import special
 
 
-KL_THRESHOLD = 0.05
-KL_COARSEN_THRESHOLD = 0.005   # coarsen below this
+KL_THRESHOLD = 0.005
+KL_COARSEN_THRESHOLD = 0.01   # coarsen below this
 MIN_LIFETIME         = 5      # minimum steps before coarsening allowed
 
 def calculate_velocity_grid(velocity_space):
@@ -15,8 +17,38 @@ def calculate_velocity_grid(velocity_space):
 
     return cx_vec, cy_vec, cz_vec, cx, cy, cz 
 
-@jit(nopython=True)
-def max_entropy_newton(x_s, y_s, z_s, moments, lam0=None, max_iter=50, tol=1e-8):
+def generate_grid(bounds_list, num_groups):
+    num_samples = np.zeros(num_groups)
+    for i in range(0, num_groups):
+        volume = (bounds_list[i, 1] - bounds_list[i, 0]) * \
+            (bounds_list[i, 3] - bounds_list[i, 2]) * \
+            (bounds_list[i, 5] - bounds_list[i, 4])
+        num_samples[i] = np.max((300, int(np.ceil(15 * volume))))
+    
+    x_sample = np.zeros(int(np.sum(num_samples)))
+    y_sample = np.zeros(int(np.sum(num_samples)))
+    z_sample = np.zeros(int(np.sum(num_samples)))
+    offsets = np.concatenate([[0], np.cumsum(num_samples)])
+
+    for i in range(0, num_groups):
+        l_bounds = np.array([bounds_list[i, 0], bounds_list[i, 2], bounds_list[i, 4]])
+        u_bounds = np.array([bounds_list[i, 1], bounds_list[i, 3], bounds_list[i, 5]])
+
+        if np.any(l_bounds > u_bounds): continue
+
+        start_idx = int(offsets[i])
+        end_idx = int(offsets[i+1])
+
+        sampler = qmc.LatinHypercube(d=3)
+        sample = qmc.scale(sampler.random(n=int(num_samples[i])), l_bounds, u_bounds)
+    
+        x_sample[start_idx:end_idx] = sample[:, 0]
+        y_sample[start_idx:end_idx] = sample[:, 1]
+        z_sample[start_idx:end_idx] = sample[:, 2]
+
+    return x_sample, y_sample, z_sample, offsets, num_samples
+
+def solve_group_newton(x_s, y_s, z_s, moments, lam0, max_iter=50, tol=1e-6):
     """
     Solve max-entropy weights directly via Newton iterations on dual.
     
@@ -26,14 +58,13 @@ def max_entropy_newton(x_s, y_s, z_s, moments, lam0=None, max_iter=50, tol=1e-8)
     r2 = x_s**2 + y_s**2 + z_s**2
 
     # Initial lambda guess
-    if lam0 is None:
-        lam = np.zeros(5)
-    else:
-        lam = lam0.copy()
+    lam = lam0.copy()
 
+    converged = False
     for iteration in range(max_iter):
         # Compute weights from current lambda
         log_w = (lam[0] + lam[1]*x_s + lam[2]*y_s + lam[3]*z_s + lam[4]*r2)
+        # log_w = np.clip(log_w, None, 500.0)
         w = np.exp(log_w)
 
         # Compute moment residual
@@ -45,6 +76,7 @@ def max_entropy_newton(x_s, y_s, z_s, moments, lam0=None, max_iter=50, tol=1e-8)
         g[4] = np.sum(r2  * w) - moments[4]
 
         if np.linalg.norm(g) < tol:
+            converged = True
             break
 
         # Hessian: H_ij = sum(phi_i * phi_j * w)
@@ -64,284 +96,376 @@ def max_entropy_newton(x_s, y_s, z_s, moments, lam0=None, max_iter=50, tol=1e-8)
         dlam = np.linalg.solve(H, g)
         lam -= dlam
 
-    return w, lam
+    return w, lam, converged
 
-def solve_group_newton(x_sample, y_sample, z_sample, U_i, lam0):
-    """Attempt to solve for one group"""
-    try:
-        w, lam = max_entropy_newton(x_sample, y_sample, z_sample, U_i, lam0)
-        residual = np.abs(np.sum(w) - U_i[0]) / U_i[0]
-        if residual < 1e-6:
-            return True, w, lam
-        else:
-            return False, w, lam
-    except:
-        # print('Newton failed')
-        return False, np.zeros_like(x_sample), np.zeros(5)
+def coarsening_kl_analytic(left, right, cx_vec, cy_vec, cz_vec):
+    """
+    KL cost of merging: KL(f_left || f_parent) + KL(f_right || f_parent)
+    Parent Maxwellian fitted to merged moments analytically.
+    """
+    mu_m = left.mu + right.mu
+    if mu_m[0] < 1e-12:
+        return 0.0
 
-def solve_group_cvxpy(x_sample, y_sample, z_sample, U_i, flux_limit=10.0):
-    # Fallback to CVXPY for ill-conditioned cases
-    try:
-        x = cp.Variable(shape=int(x_sample.size), nonneg=True)
-        obj = cp.Maximize(cp.sum(cp.entr(x)))
+    parent_bounds = (left.bounds[0], right.bounds[1])
 
-        constraints = [
-            cp.sum(x) == U_i[0],
-            cp.sum(cp.multiply(x_sample, x)) == U_i[1],
-            cp.sum(cp.multiply(y_sample, x)) == U_i[2],
-            cp.sum(cp.multiply(z_sample, x)) == U_i[3],
-            cp.sum(cp.multiply(x_sample**2 + y_sample**2 + z_sample**2, x)) == U_i[4]
-        ]
+    def lam_from_mu(mu):
+        ux = mu[1]/mu[0]; uy = mu[2]/mu[0]; uz = mu[3]/mu[0]
+        thermal = mu[4]/mu[0] - ux**2 - uy**2 - uz**2
+        beta = 1.5 / max(thermal, 1e-10)
+        return np.array([0.0, 2*beta*ux, 2*beta*uy, 2*beta*uz, -beta])
+
+    lam_p = lam_from_mu(mu_m)
+
+    kl_total = 0.0
+    for child in [left, right]:
+        if child.mu[0] < 1e-12:
+            continue
+        lam_o = lam_from_mu(child.mu)   # ← moments-derived, not child.lam
+        kl_total += _kl_gaussian_static(
+            lam_o, child.mu, lam_p, mu_m,
+            cx_vec, cy_vec, cz_vec,
+            bounds_old=child.bounds,
+            bounds_new=parent_bounds)
+
+    return kl_total
+
+
+def _kl_gaussian_static(lam_old, mu_old, lam_new, mu_new,
+                         cx_vec, cy_vec, cz_vec, bounds_old, bounds_new=None):
+    """Standalone version of _kl_gaussian for use outside VelocityGroup."""
+    if bounds_new is None:
+        bounds_new = bounds_old
         
-        prob = cp.Problem(obj, constraints)
-        prob.solve(solver=cp.CLARABEL, verbose=False)
+    beta_o = -lam_old[4];  beta_n = -lam_new[4]
+    wx_o   = -lam_old[1] / (2*lam_old[4]);  wx_n = -lam_new[1] / (2*lam_new[4])
+    wy_o   = -lam_old[2] / (2*lam_old[4]);  wy_n = -lam_new[2] / (2*lam_new[4])
+    wz_o   = -lam_old[3] / (2*lam_old[4]);  wz_n = -lam_new[3] / (2*lam_new[4])
 
-        if x.value is not None and not np.any(np.isnan(x.value)):
-            predicted_flux = np.sum(x_sample * x.value)
-            
-            if np.abs(predicted_flux) < flux_limit:
-                return True, x.value, predicted_flux
-            else:
-                return False, None, f"flux_too_large_{predicted_flux:.3f}"
-        else:
-            return False, None, f"status_{prob.status}"
-    except Exception as e:
-        return False, None, str(e)
+    n_o = mu_old[0];  n_n = mu_new[0]
+    if n_o < 1e-12 or n_n < 1e-12:
+        return 0.0
+
+    sqb_o = np.sqrt(beta_o);  sqb_n = np.sqrt(beta_n)
+
+    ix_lo_o, ix_hi_o = bounds_old
+    ix_lo_n, ix_hi_n = bounds_new   #
+
+    I0x_o = _erf_integral(cx_vec[ix_lo_o], cx_vec[ix_hi_o-1], wx_o, sqb_o)
+    I0y_o = _erf_integral(cy_vec[0], cy_vec[-1], wy_o, sqb_o)
+    I0z_o = _erf_integral(cz_vec[0], cz_vec[-1], wz_o, sqb_o)
+    I0x_n = _erf_integral(cx_vec[ix_lo_n], cx_vec[ix_hi_n-1], wx_n, sqb_n)
+    I0y_n = _erf_integral(cy_vec[0], cy_vec[-1], wy_n, sqb_n)
+    I0z_n = _erf_integral(cz_vec[0], cz_vec[-1], wz_n, sqb_n)
+
+    if (abs(I0x_o*I0y_o*I0z_o) < 1e-30 or
+            abs(I0x_n*I0y_n*I0z_n) < 1e-30):
+        return 0.0
+
+    A_o = n_o / (I0x_o * I0y_o * I0z_o)
+    A_n = n_n / (I0x_n * I0y_n * I0z_n)
+
+    if A_o <= 0 or A_n <= 0:
+        return 0.0
+
+    ln_A_ratio = np.log(A_o / A_n)
+
+    kl = (n_o * ln_A_ratio
+          + (beta_n - beta_o) * mu_old[4]
+          + 2*(beta_o*wx_o - beta_n*wx_n) * mu_old[1]
+          + 2*(beta_o*wy_o - beta_n*wy_n) * mu_old[2]
+          + 2*(beta_o*wz_o - beta_n*wz_n) * mu_old[3]
+          - n_o*(beta_o*(wx_o**2+wy_o**2+wz_o**2)
+               - beta_n*(wx_n**2+wy_n**2+wz_n**2)))
+
+    return max(kl, 0.0)
+
+def _erf_integral(lo, hi, w, sqb):
+    """Truncated Gaussian integral: integral of exp(-beta*(v-w)^2) dv over [lo, hi]."""
+    return 0.5 * np.sqrt(np.pi) / sqb * (special.erf(sqb*(hi-w)) - special.erf(sqb*(lo-w)))
+
+def _warm_start_from_moments(mu):
+    if mu[0] < 1e-12:
+        return np.zeros(5)
+    ux = mu[1]/mu[0]; uy = mu[2]/mu[0]; uz = mu[3]/mu[0]
+    thermal = mu[4]/mu[0] - ux**2 - uy**2 - uz**2
+    beta = 1.5 / max(thermal, 1e-10)
+    return np.array([0.0, 2*beta*ux, 2*beta*uy, 2*beta*uz, -beta])
+
+def kl_div(p, q, cx_vec, cy_vec, cz_vec):
+    mask   = (p > 0) & (q > 1e-8)
+    safe_p = np.where(mask, p, 1.0)   # avoids log(0)
+    safe_q = np.where(mask, q, 1.0)   # avoids div by zero
+    integrand = np.where(mask, safe_p * np.log(safe_p / safe_q), 0.0)
+    kl = np.trapezoid(np.trapezoid(np.trapezoid(integrand, cz_vec, axis=2), cy_vec, axis=1), cx_vec, axis=0)
+
+    return max(kl, 0.0)
 
 class VelocityGroup:
-    def __init__(self, x_s, y_s, z_s, cx_vec_full, bounds, depth=0, max_depth=1, created_at=0):
+    def __init__(self, x_s, y_s, z_s, cx_vec_slice, cy_vec, cz_vec, bounds, depth=0, max_depth=1, created_at=0):
         """
-        x_s, y_s, z_s : samples whose vx falls in this group's vx range
-        cx_vec_full    : full 1D vx grid (needed for split midpoint lookup)
-        bounds         : (ix_lo, ix_hi) index bounds into cx_vec_full
+        bounds: (cx_lo, cx_hi) index bounds into the full grid
         """
-        self.x_s         = x_s
+        self.bounds      = bounds        # (ix_lo, ix_hi) index bounds in cx_vec
+        self.cx_vec      = cx_vec_slice  # 1D velocity vector for this group
+        self.cy_vec      = cy_vec
+        self.cz_vec      = cz_vec
+        self.x_s         = x_s   # sample arrays inside this group
         self.y_s         = y_s
         self.z_s         = z_s
-        self.cx_vec_full = cx_vec_full
-        self.bounds      = bounds
+
         self.depth       = depth
         self.max_depth   = max_depth
         self.created_at  = created_at
 
-        self.children    = []
+        self.children    = []            # empty = leaf node
         self.parent      = None
 
         # State
-        self.w           = None          # weights over x_s, y_s, z_s
-        self.lam         = np.zeros(5)   # dual variables — warm start
-        self.mu          = None          # moments [n, px, py, pz, e]
+        self.w           = None          # current fitted max entropy weights
+        self.lam         = np.zeros(5)   # lagrange multipliers
+        self.mu          = None          # moments
 
-        # Shadow children
-        self.shadow_w    = [None, None]
-        self.shadow_lam  = [np.zeros(5), np.zeros(5)]
-        self.shadow_x    = [None, None]  # filtered samples per shadow half
-        self.shadow_y    = [None, None]
-        self.shadow_z    = [None, None]
-        self.shadow_bounds = [None, None]
+        # Shadow children — trial split, always two halves in vx
+        self.shadow_lam     = [np.zeros(5), np.zeros(5)]   # multipliers for left/right shadow
+        self.shadow_w       = [None, None]   # weights for left/right shadow
+        self.shadow_bounds  = [None, None]   # index bounds for each shadow
+        self.shadow_x = [None, None]
+        self.shadow_y = [None, None]
+        self.shadow_z = [None, None]
 
-        # KL accumulation
-        self.kl_accum       = 0.0
-        self.kl_last_step   = 0.0
-        self.w_shadow_old   = [None, None]
+        # Accumulation
+        self.kl_accum      = 0.0
+        self.kl_last_step  = 0.0
+        self.shadow_state_old = [(None, None), (None, None)]
 
 
     def is_leaf(self):
         return len(self.children) == 0
 
+    
     def can_split(self):
-        return self.depth < self.max_depth and len(self.x_s) > 10  # need enough samples
+        return self.depth < self.max_depth
+
 
     def can_coarsen(self, current_t, min_lifetime=MIN_LIFETIME):
+        """
+        Node must have existed for min_lifetime steps before coarsening.
+        """
         return (current_t - self.created_at) > min_lifetime
 
+
     def get_sibling(self):
+        """
+        Return the sibling node — the other child of our parent.
+        Returns None if we are root or parent has unexpected children.
+        """
         if self.parent is None:
             return None
         siblings = [c for c in self.parent.children if c is not self]
-        return siblings[0] if len(siblings) == 1 else None
+        if len(siblings) == 1:
+            return siblings[0]
+        return None
 
 
-    def compute_moments(self):
-        """Moment sums over weighted samples."""
-        w = self.w
-        r2 = self.x_s**2 + self.y_s**2 + self.z_s**2
-        self.mu = np.array([
-            np.sum(w),
-            np.sum(self.x_s * w),
-            np.sum(self.y_s * w),
-            np.sum(self.z_s * w),
-            np.sum(r2 * w),
-        ])
-        return self.mu
-
-
-    def fit_weights(self):
+    def compute_moments_from_grid(self, f_slice, cx_s, cy_s, cz_s, cx_vec_s, cy_vec, cz_vec):
         """
-        Fit max-entropy weights to self.mu using Newton solver.
-        Uses self.lam as warm start; updates self.w and self.lam.
+        Only used when calculating the initial refinement by integrating against a known f0.
         """
-        if self.mu is None or self.mu[0] < 1e-12 or len(self.x_s) == 0:
-            self.w = np.zeros(len(self.x_s))
-            return
+        mu = np.zeros(5)
+        mu[0] = np.trapezoid(np.trapezoid(np.trapezoid(f_slice, cz_vec, axis=2), cy_vec, axis=1), cx_vec_s, axis=0)
+        mu[1] = np.trapezoid(np.trapezoid(np.trapezoid(cx_s * f_slice, cz_vec, axis=2), cy_vec, axis=1), cx_vec_s, axis=0)
+        mu[2] = np.trapezoid(np.trapezoid(np.trapezoid(cy_s * f_slice, cz_vec, axis=2), cy_vec, axis=1), cx_vec_s, axis=0)
+        mu[3] = np.trapezoid(np.trapezoid(np.trapezoid(cz_s * f_slice, cz_vec, axis=2), cy_vec, axis=1), cx_vec_s, axis=0)
+        r2    = cx_s**2 + cy_s**2 + cz_s**2
+        mu[4] = np.trapezoid(np.trapezoid(np.trapezoid(r2 * f_slice, cz_vec, axis=2), cy_vec, axis=1), cx_vec_s, axis=0)
+        self.mu = mu
 
-        success, w, lam = solve_group_newton(self.x_s, self.y_s, self.z_s, self.mu, lam0=self.lam)
+
+    def compute_moments(self, xs=None, ys=None, zs=None, ws=None):
+        """Moments from current weighted samples."""
+        xs = xs if xs is not None else self.x_s
+        ys = ys if ys is not None else self.y_s
+        zs = zs if zs is not None else self.z_s
+        ws = ws if ws is not None else self.w
+
+        if ws is None or len(xs) == 0:
+            mu = np.zeros(5)
+            if xs is self.x_s:
+                self.mu = mu
+            return mu
+
+        r2 = xs**2 + ys**2 + zs**2
+        mu = np.array([np.sum(ws), np.sum(xs*ws), np.sum(ys*ws), np.sum(zs*ws), np.sum(r2*ws)])
+        
+        if xs is self.x_s:
+            self.mu = mu
+        return mu
+
+
+    def fit_maxent_weights(self):
+        solution, lam, success = solve_group_newton(self.x_s, self.y_s, self.z_s, self.mu, self.lam)
         if success:
-            self.w   = w
+            self.w = solution
             self.lam = lam
-        elif not success:
-            success, w, status = solve_group_cvxpy(self.x_s, self.y_s, self.z_s, self.mu)
+        if not success:
+            solution, lam, success = solve_group_newton(self.x_s, self.y_s, self.z_s, self.mu, np.zeros(5))
             if success:
-                self.w   = w
-                self.lam = np.zeros(5)
+                self.w = solution
+                self.lam = lam
+            else:
+                print('die')
 
 
-    def update_shadows(self):
+    def update_shadows(self, cx_vec_full):
+        """
+        Split samples at vx midpoint, fit Newton weights on each half.
+        Shadow lam stored for KL checks and split initialization.
+        """
         ix_lo, ix_hi = self.bounds
-        ix_mid       = (ix_lo + ix_hi) // 2
-        vx_mid       = self.cx_vec_full[ix_mid]
+        ix_mid        = (ix_lo + ix_hi) // 2
+        vx_mid        = cx_vec_full[ix_mid]
 
-        masks  = [self.x_s < vx_mid, self.x_s >= vx_mid]
-        bounds = [(ix_lo, ix_mid + 1), (ix_mid, ix_hi)]
+        self.shadow_bounds = [(ix_lo, ix_mid + 1), (ix_mid, ix_hi)]
+        masks = [self.x_s < vx_mid, self.x_s >= vx_mid]
 
-        self.shadow_bounds = bounds
+        for i, mask in enumerate(masks):
+            xs = self.x_s[mask]
+            ys = self.y_s[mask]
+            zs = self.z_s[mask]
 
-        for i, (mask, bnd) in enumerate(zip(masks, bounds)):
-            xs = self.x_s[mask];  ys = self.y_s[mask];  zs = self.z_s[mask]
             self.shadow_x[i] = xs
             self.shadow_y[i] = ys
             self.shadow_z[i] = zs
 
-            if len(xs) < 5 or self.w is None:
-                self.shadow_w[i] = np.zeros(len(xs))
-                continue
-
-            # Moments of this half — use current weights filtered to half
+            # Moments of this half from current weights
             w_half = self.w[mask]
             r2     = xs**2 + ys**2 + zs**2
-            mu_s   = np.array([
-                np.sum(w_half), np.sum(xs*w_half), np.sum(ys*w_half),
-                np.sum(zs*w_half), np.sum(r2*w_half),
-            ])
+            mu_s   = self.compute_moments(xs, ys, zs, w_half)
 
-            success, w_fit, lam_fit = solve_group_newton(
-                xs, ys, zs, mu_s, lam0=self.shadow_lam[i]
-            )
-            self.shadow_w[i]   = w_fit   if success else w_half
-            self.shadow_lam[i] = lam_fit if success else self.shadow_lam[i]
-
-
-    def accumulate_kl(self):
-        """
-        KL proxy via shadow moment change — works regardless of whether
-        sample positions were refreshed since last step.
-        Compares normalised moment vectors of each shadow half.
-        """
-        # Compute current shadow moments from weights
-        shadow_mu_now = []
-        for i in range(2):
-            xs = self.shadow_x[i];  ys = self.shadow_y[i];  zs = self.shadow_z[i]
-            w  = self.shadow_w[i]
-            if xs is None or w is None or len(xs) == 0:
-                shadow_mu_now.append(None)
+            if mu_s[0] < 1e-6:
+                self.shadow_w[i]   = np.zeros(len(xs))
+                self.shadow_lam[i] = np.zeros(5)
                 continue
-            r2 = xs**2 + ys**2 + zs**2
-            shadow_mu_now.append(np.array([
-                np.sum(w), np.sum(xs*w), np.sum(ys*w), np.sum(zs*w), np.sum(r2*w)
-            ]))
+            lam_init = _warm_start_from_moments(mu_s)
+            w_fit, lam_fit, success = solve_group_newton(xs, ys, zs, mu_s, lam_init)
+            self.shadow_w[i]   = w_fit   if success else w_half
+            self.shadow_lam[i] = lam_fit if success else np.zeros(5)
 
-        if any(m is None for m in shadow_mu_now):
+
+    def accumulate_kl(self, cx_vec, cy_vec, cz_vec):
+        if self.shadow_x[0] is None or self.shadow_x[1] is None:
             return 0.0
 
-        # First call — establish baseline
-        if self.w_shadow_old[0] is None:
-            self.w_shadow_old = shadow_mu_now   # store moments, not weights
+        shadow_mu_now = [
+            self.compute_moments(self.shadow_x[i], self.shadow_y[i],
+                                self.shadow_z[i], self.shadow_w[i])
+            for i in range(2)
+        ]
+
+        if self.shadow_state_old[0][0] is None:
+            self.shadow_state_old = [
+                (_warm_start_from_moments(shadow_mu_now[i]), shadow_mu_now[i].copy())
+                for i in range(2)
+            ]
             return 0.0
 
-        eps = 1e-30
         kl_total = 0.0
         for i in range(2):
-            mu_now  = shadow_mu_now[i]
-            mu_prev = self.w_shadow_old[i]
-            n_now   = max(mu_now[0],  eps)
-            n_prev  = max(mu_prev[0], eps)
-            # Normalised moment vector — direction encodes bulk velocity and temperature
-            p = mu_now  / n_now
-            q = mu_prev / n_prev
-            # L2 norm on normalised moments as a KL proxy
-            kl_total += float(np.sum((p - q)**2))
+            mu_new = shadow_mu_now[i]
+            lam_old, mu_old = self.shadow_state_old[i]
 
-        self.kl_accum     += kl_total
-        self.kl_last_step  = kl_total
-        self.w_shadow_old  = shadow_mu_now
+            if mu_old[0] < 1e-12 or mu_new[0] < 1e-12:
+                continue
+
+            # Derive lam from moments — no Newton noise
+            lam_new = _warm_start_from_moments(mu_new)
+            if lam_new[4] >= 0 or lam_old[4] >= 0:
+                continue
+
+            kl_total += self._kl_gaussian(
+                lam_old, mu_old, lam_new, mu_new,
+                cx_vec, cy_vec, cz_vec,
+                self.shadow_bounds[i])
+
+        self.kl_accum    += kl_total
+        self.kl_last_step = kl_total
+        self.shadow_state_old = [
+            (_warm_start_from_moments(shadow_mu_now[i]), shadow_mu_now[i].copy())
+            for i in range(2)
+        ]
         return kl_total
 
+    def _kl_gaussian(self, lam_old, mu_old, lam_new, mu_new, cx_vec, cy_vec, cz_vec, bounds):
+        return _kl_gaussian_static(lam_old, mu_old, lam_new, mu_new, cx_vec, cy_vec, cz_vec, bounds)
 
-    def split(self, current_t=0):
+    def split(self, cx_vec_full, current_t=0):
         """
         Promote shadow children to real children.
-        Each child gets its filtered sample subset and fitted weights.
+        Samples are partitioned by vx midpoint.
+        Shadow weights/lam used to initialize children.
         """
         if not self.can_split():
+            print(f'Warning: tried to split at max_depth={self.max_depth}')
             return []
 
         ix_lo, ix_hi = self.bounds
         ix_mid = (ix_lo + ix_hi) // 2
-        vx_mid = self.cx_vec_full[ix_mid]
+        vx_mid = cx_vec_full[ix_mid]
 
         masks  = [self.x_s < vx_mid, self.x_s >= vx_mid]
         bounds = [(ix_lo, ix_mid + 1), (ix_mid, ix_hi)]
 
         for i, (mask, bnd) in enumerate(zip(masks, bounds)):
+            lo, hi   = bnd
+            cx_vec_s = cx_vec_full[lo:hi]
+
             child = VelocityGroup(
-                self.x_s[mask], self.y_s[mask], self.z_s[mask],
-                self.cx_vec_full,
+                self.x_s[mask].copy(),
+                self.y_s[mask].copy(),
+                self.z_s[mask].copy(),
+                cx_vec_s, self.cy_vec, self.cz_vec,
                 bounds=bnd,
                 depth=self.depth + 1,
                 max_depth=self.max_depth,
-                created_at=current_t,
-            )
+                created_at=current_t)
             child.parent = self
-            child.w      = self.shadow_w[i].copy() if self.shadow_w[i] is not None else np.zeros(np.sum(mask))
-            child.lam    = self.shadow_lam[i].copy()
+
+            # Initialize from shadow state
+            child.w   = self.shadow_w[i].copy() if self.shadow_w[i] is not None \
+                    else np.zeros(int(np.sum(mask)))
+        
+            # Reset lam to zeros if bad
+            child.lam = self.shadow_lam[i].copy() if self.shadow_lam[i][4] < 0.0 else np.zeros(5)
+
             child.compute_moments()
-            child.update_shadows()
-            child.kl_accum      = 0.0
-            child.w_shadow_old  = [None, None]
+            child.update_shadows(cx_vec_full)
+            child.kl_accum         = 0.0
+            child.shadow_state_old = [(None, None), (None, None)]
             self.children.append(child)
 
         self.kl_accum = 0.0
         return self.children
+    
 
-
-    def merge_children(self, current_t=0):
-        """
-        Merge two children back into this parent.
-        Concatenate sample arrays, sum moments, refit weights.
-        """
+    def merge_children(self, cx_vec_full, current_t=0):
         assert len(self.children) == 2
         left, right = self.children
 
-        # Merge sample arrays
+        # Concatenate samples
         self.x_s = np.concatenate([left.x_s, right.x_s])
         self.y_s = np.concatenate([left.y_s, right.y_s])
         self.z_s = np.concatenate([left.z_s, right.z_s])
+        self.mu  = left.mu + right.mu
+        self.lam = _warm_start_from_moments(self.mu)
+        self.fit_maxent_weights()
 
-        # Moments are additive
-        self.mu = left.mu + right.mu
-
-        # Refit max-entropy weights on merged sample set
-        self.fit_weights()
-
-        # Discard children
-        self.children = []
-
-        self.kl_accum      = 0.0
-        self.kl_last_step  = 0.0
-        self.w_shadow_old  = [None, None]
-        self.created_at    = current_t
-
-        self.update_shadows()
+        self.children         = []
+        self.kl_accum         = 0.0
+        self.kl_last_step     = 0.0
+        self.shadow_state_old = [(None, None), (None, None)]
+        self.created_at       = current_t
+        self.update_shadows(cx_vec_full)
 
 
     def get_leaves(self):
@@ -352,181 +476,68 @@ class VelocityGroup:
             leaves.extend(child.get_leaves())
         return leaves
 
-def resample_leaf(leaf, cx_vec, cy_vec, cz_vec, cell_idx=0):
+def bootstrap_refine(root, f0, cx, cy, cz, cx_vec, cy_vec, cz_vec, kl_threshold=KL_THRESHOLD, max_passes=20):
     """
-    Generate adaptive sample positions for a single leaf using generate_regular_samples.
-    Called on leaf creation, split, and merge — not every timestep.
-    Positions are then held fixed; only weights evolve via fit_weights().
+    Refine the AMR tree based on goodness-of-fit KL(f0 || f_maxwellian)
+    on each leaf. Runs until no splits occur or max_passes is reached.
     """
-    if leaf.mu is None or leaf.mu[0] < 1e-12:
-        return
-
-    U_i = leaf.mu[np.newaxis, :]           # (1, 5)
-    bounds = np.array([[
-        cx_vec[leaf.bounds[0]], cx_vec[leaf.bounds[1] - 1],
-        cy_vec[0], cy_vec[-1],
-        cz_vec[0], cz_vec[-1],
-    ]])                                     # (1, 6)
-
-    lam_cache = leaf.lam[np.newaxis, :]    # (1, 5)
-
-    weights, num_valid, offsets, xs, ys, zs, lam_out = \
-        generate_regular_samples(cell_idx, U_i, 1, bounds, lam_cache)
-
-    leaf.x_s = xs
-    leaf.y_s = ys
-    leaf.z_s = zs
-    leaf.w   = weights
-    leaf.lam = lam_out[0]
-
-
-def resample_all_leaves(leaves, cx_vec, cy_vec, cz_vec, cell_idx=0):
-    """
-    Batch version — builds combined inputs for all leaves in one
-    generate_regular_samples call, then scatters back.
-    More efficient than calling resample_leaf per leaf.
-    """
-    n_groups  = len(leaves)
-    U_i       = np.array([leaf.mu for leaf in leaves])          # (n_groups, 5)
-    bounds    = np.zeros((n_groups, 6))
-    lam_cache = np.zeros((n_groups, 5))
-
-    for g, leaf in enumerate(leaves):
-        bounds[g] = [
-            cx_vec[leaf.bounds[0]], cx_vec[leaf.bounds[1] - 1],
-            cy_vec[0], cy_vec[-1],
-            cz_vec[0], cz_vec[-1],
-        ]
-        if leaf.lam is not None:
-            lam_cache[g] = leaf.lam
-
-    weights, num_valid, offsets, xs, ys, zs, lam_out = \
-        generate_regular_samples(cell_idx, U_i, n_groups, bounds, lam_cache)
-
-    for g, leaf in enumerate(leaves):
-        lo, hi   = int(offsets[g]), int(offsets[g + 1])
-        leaf.x_s = xs[lo:hi]
-        leaf.y_s = ys[lo:hi]
-        leaf.z_s = zs[lo:hi]
-        leaf.w   = weights[lo:hi]
-        leaf.lam = lam_out[g]
-
-def apply_collision_deltas(leaves, group_deltas):
-    """Add collide() moment deltas to each leaf's mu. Clamp density positive."""
-    dn, dpx, dpy, dpz, de = group_deltas
-    for g, leaf in enumerate(leaves):
-        leaf.mu[0] += dn[g]
-        leaf.mu[1] += dpx[g]
-        leaf.mu[2] += dpy[g]
-        leaf.mu[3] += dpz[g]
-        leaf.mu[4] += de[g]
-
-
-def coarsening_kl_check_samples(left, right):
-    """
-    KL cost of merging left+right back into parent.
-    Fits max-entropy on merged sample set, compares to individual child weights.
-    """
-    eps = 1e-300
-
-    x_m = np.concatenate([left.x_s, right.x_s])
-    y_m = np.concatenate([left.y_s, right.y_s])
-    z_m = np.concatenate([left.z_s, right.z_s])
-    mu_m = left.mu + right.mu
-
-    success, w_par, _ = solve_group_newton(x_m, y_m, z_m, mu_m)
-    if not success:
-        return np.inf
-
-    n_left       = len(left.x_s)
-    w_par_left   = w_par[:n_left]
-    w_par_right  = w_par[n_left:]
-
-    kl_total = 0.0
-    for w_child, w_p in [(left.w, w_par_left), (right.w, w_par_right)]:
-        Sc = np.sum(w_child);  Sp = np.sum(w_p)
-        if Sc < eps or Sp < eps:
-            continue
-        p    = w_child / Sc
-        q    = w_p     / Sp
-        mask = (p > eps) & (q > eps)
-        kl_total += max(float(np.sum(p[mask] * np.log(p[mask] / q[mask]))), 0.0)
-
-    return kl_total
-
-def bootstrap_refine(root, f0, cx_vec, cy_vec, cz_vec,
-                     kl_threshold=KL_THRESHOLD, max_passes=20):
-    # Compute root moments from grid (only time we touch the grid)
-    dvx = cx_vec[1] - cx_vec[0]
-    dvy = cy_vec[1] - cy_vec[0]
-    dvz = cz_vec[1] - cz_vec[0]
-    dv  = dvx * dvy * dvz
-    CX, CY, CZ = np.meshgrid(cx_vec, cy_vec, cz_vec, indexing='ij')
-
-    def assign_grid_moments(leaf):
-        """Compute moments by integrating f0 over leaf's vx range."""
-        ix_lo, ix_hi = leaf.bounds
-        cx_s = CX[ix_lo:ix_hi]
-        cy_s = CY[ix_lo:ix_hi]
-        cz_s = CZ[ix_lo:ix_hi]
-        f_s  = f0[ix_lo:ix_hi]
-        leaf.mu = calc_moment(f_s, cx_s, cy_s, cz_s,
-                              cx_vec[ix_lo:ix_hi], cy_vec, cz_vec)
-
-    assign_grid_moments(root)
-    resample_leaf(root, cx_vec, cy_vec, cz_vec)  # establishes LHS sample positions
-
     for pass_idx in range(max_passes):
+        leaves = root.get_leaves()
         splits_this_pass = 0
 
-        for leaf in list(root.get_leaves()):
-            if not leaf.can_split():
-                continue
+        for leaf in leaves:
+            ix_lo, ix_hi = leaf.bounds
 
-            # Ground truth moments from grid integration
-            assign_grid_moments(leaf)
+            # Recompute moments from f0 and calculate weights
+            leaf.compute_moments_from_grid(f0[ix_lo:ix_hi], cx[ix_lo:ix_hi], cy[ix_lo:ix_hi], cz[ix_lo:ix_hi], cx_vec[ix_lo:ix_hi], cy_vec, cz_vec)
+            leaf.fit_maxent_weights()
+            leaf.update_shadows(cx_vec)
 
-            # Best max-entropy fit at current sample positions
-            success, w_me, lam = solve_group_newton(
-                leaf.x_s, leaf.y_s, leaf.z_s, leaf.mu, lam0=leaf.lam
-            )
-            if not success:
-                continue
+            w_true = f0[ix_lo:ix_hi]
 
-            # KL(grid_moments || max_entropy_moments)
-            # Compare by checking how well w_me reproduces the moments
-            r2      = leaf.x_s**2 + leaf.y_s**2 + leaf.z_s**2
-            mu_fit  = np.array([np.sum(w_me), np.sum(leaf.x_s*w_me),
-                                 np.sum(leaf.y_s*w_me), np.sum(leaf.z_s*w_me),
-                                 np.sum(r2*w_me)])
-            mu_ref  = leaf.mu
-            n       = max(mu_ref[0], 1e-30)
-            kl      = float(np.sum(((mu_fit - mu_ref) / n)**2))
+            beta = -leaf.lam[4]
+            wx   = -leaf.lam[1] / (2*leaf.lam[4])
+            wy   = -leaf.lam[2] / (2*leaf.lam[4])
+            wz   = -leaf.lam[3] / (2*leaf.lam[4])
 
-            print(f'  pass {pass_idx}: leaf {leaf.bounds} kl={kl:.4f}')
+            cx_s = cx[ix_lo:ix_hi]
+            cy_s = cy[ix_lo:ix_hi]
+            cz_s = cz[ix_lo:ix_hi]
 
-            if kl > kl_threshold:
-                leaf.split(current_t=0)
-                for child in leaf.children:
-                    assign_grid_moments(child)
-                    resample_leaf(child, cx_vec, cy_vec, cz_vec)
+            w_fit_grid = np.exp(-beta * ((cx_s - wx)**2 + (cy_s - wy)**2 + (cz_s - wz)**2))
+
+            n_true = np.trapezoid(np.trapezoid(np.trapezoid(w_true, cz_vec, axis=2), cy_vec, axis=1), cx_vec[ix_lo:ix_hi], axis=0)
+            n_fit  = np.trapezoid(np.trapezoid(np.trapezoid(w_fit_grid, cz_vec, axis=2), cy_vec, axis=1), cx_vec[ix_lo:ix_hi], axis=0)
+            w_fit_grid = w_fit_grid * (n_true / n_fit)
+
+            kl = kl_div(w_true, w_fit_grid, cx_vec[ix_lo:ix_hi], cy_vec, cz_vec)
+
+            if kl > kl_threshold and leaf.can_split():
+                print(f'  bootstrap pass {pass_idx}: splitting depth={leaf.depth} '
+                      f'bounds={leaf.bounds}, kl={kl:.4f}')
+                
+                leaf.split(cx_vec, current_t=0)
                 splits_this_pass += 1
-            else:
-                leaf.w   = w_me
-                leaf.lam = lam
 
         print(f'Bootstrap pass {pass_idx}: {splits_this_pass} split(s), '
-              f'{len(root.get_leaves())} leaves')
+              f'{len(root.get_leaves())} leaves total')
+
         if splits_this_pass == 0:
+            print(f'Bootstrap converged after {pass_idx + 1} pass(es).')
             break
 
-    # Final init
+    # Final pass: initialize shadows on all leaves after tree is stable
     for leaf in root.get_leaves():
-        assign_grid_moments(leaf)
-        resample_leaf(leaf, cx_vec, cy_vec, cz_vec)
-        leaf.update_shadows()
-        leaf.kl_accum     = 0.0
-        leaf.w_shadow_old = [None, None]
+        ix_lo, ix_hi = leaf.bounds
+
+        leaf.compute_moments_from_grid(f0[ix_lo:ix_hi], cx[ix_lo:ix_hi], cy[ix_lo:ix_hi], cz[ix_lo:ix_hi], cx_vec[ix_lo:ix_hi], cy_vec, cz_vec)
+        leaf.fit_maxent_weights()
+        leaf.update_shadows(cx_vec)
+
+        leaf.kl_accum = 0.0
+        leaf.shadow_state_old = [(None, None), (None, None)]
+
+
 
 @jit(nopython=True)
 def collide(x_sample, y_sample, z_sample, weights, num_valid_samples, bounds_list, n_groups, n_coll,

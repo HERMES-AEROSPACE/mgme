@@ -396,6 +396,10 @@ def calc_flux_analytical(lam_cache, bounds_list, num_groups, U_i):
                + 1.0 / (2.0 * beta) * (az * eaz - bz * ebz)
                + 0.5 * np.sqrt(np.pi / beta) * 1.0 / (2.0 * beta) * erf_z)
 
+        # Skip if mean velocity is outside group bounds (erf_x/y/z ≈ 0 → I0 = 0)
+        if I0x <= 0.0 or I0y <= 0.0 or I0z <= 0.0:
+            continue
+
         # A from known density
         A = U_i[g, 0] / (I0x * I0y * I0z)
 
@@ -480,11 +484,11 @@ def KT_central2(U_list, F_list, numXj, n_groups, dt, dx, CX_LB, CX_UB):
     return k
 
 @jit(nopython=True)
-def max_entropy_newton(x_s, y_s, z_s, moments, lam0, max_iter=70, tol=1e-4):
+def solve_group_newton(x_s, y_s, z_s, U, lam0, max_iter=50, tol=1e-8):
     """
     Solve max-entropy weights directly via Newton iterations on dual.
     
-    Dual problem: find lambda s.t. sum_i phi_i * exp(lam . phi_i) = moments
+    Dual problem: find lambda s.t. sum_i phi_i * exp(lam . phi_i) = U
     """
     n = x_s.shape[0]
     r2 = x_s**2 + y_s**2 + z_s**2
@@ -493,6 +497,7 @@ def max_entropy_newton(x_s, y_s, z_s, moments, lam0, max_iter=70, tol=1e-4):
     lam = lam0.copy()
 
     converged = False
+    # print(U)
     for iteration in range(max_iter):
         # Compute weights from current lambda
         log_w = (lam[0] + lam[1]*x_s + lam[2]*y_s + lam[3]*z_s + lam[4]*r2)
@@ -500,20 +505,13 @@ def max_entropy_newton(x_s, y_s, z_s, moments, lam0, max_iter=70, tol=1e-4):
 
         # Compute moment residual
         g = np.zeros(5)
-        g[0] = np.sum(w) - moments[0]
-        g[1] = np.sum(x_s * w) - moments[1]
-        g[2] = np.sum(y_s * w) - moments[2]
-        g[3] = np.sum(z_s * w) - moments[3]
-        g[4] = np.sum(r2  * w) - moments[4]
+        g[0] = np.sum(w) - U[0]
+        g[1] = np.sum(x_s * w) - U[1]
+        g[2] = np.sum(y_s * w) - U[2]
+        g[3] = np.sum(z_s * w) - U[3]
+        g[4] = np.sum(r2  * w) - U[4]
 
-        rel = np.zeros(5)
-        for k in range(5):
-            denom = np.abs(moments[k])
-            if denom > 1e-30:
-                rel[k] = np.abs(g[k]) / denom
-            else:
-                rel[k] = np.abs(g[k])
-        if np.max(rel) < tol:
+        if np.linalg.norm(g) < tol:
             converged = True
             break
 
@@ -530,21 +528,28 @@ def max_entropy_newton(x_s, y_s, z_s, moments, lam0, max_iter=70, tol=1e-4):
             for b in range(5):
                 H[a, b] = np.sum(phi[a] * phi[b] * w)
 
-        # Newton step: lam -= H^{-1} g
+        # Newton step with Armijo line search
         dlam = np.linalg.solve(H, g)
-        lam -= dlam
-
+        g_norm_sq = np.dot(g, g)
+        alpha = 1.0
+        beta_ls = 0.5
+        c_ls = 1e-3
+        while alpha > 1e-12:
+            lam_new = lam - alpha * dlam
+            log_w_new = lam_new[0] + lam_new[1]*x_s + lam_new[2]*y_s + lam_new[3]*z_s + lam_new[4]*r2
+            w_new = np.exp(log_w_new)
+            g_new = np.zeros(5)
+            g_new[0] = np.sum(w_new) - U[0]
+            g_new[1] = np.sum(x_s * w_new) - U[1]
+            g_new[2] = np.sum(y_s * w_new) - U[2]
+            g_new[3] = np.sum(z_s * w_new) - U[3]
+            g_new[4] = np.sum(r2  * w_new) - U[4]
+            if np.dot(g_new, g_new) <= g_norm_sq * (1.0 - 2.0 * c_ls * alpha):
+                break
+            alpha *= beta_ls
+        lam -= alpha * dlam
+        
     return w, lam, converged
-
-def solve_group_newton(x_sample, y_sample, z_sample, U_i, lam0):
-    """Attempt to solve for one group"""
-    try:
-        lam_init = lam0 if lam0 is not None else np.zeros(5)
-        w, lam, converged = max_entropy_newton(x_sample, y_sample, z_sample, U_i, lam_init)
-        return converged, w, lam
-    except:
-        # print('Newton failed')
-        return False, np.zeros_like(x_sample), np.zeros(5)
 
 def solve_group_cvxpy(x_sample, y_sample, z_sample, U_i, flux_limit=10.0):
     # Fallback to CVXPY for ill-conditioned cases
@@ -575,7 +580,7 @@ def solve_group_cvxpy(x_sample, y_sample, z_sample, U_i, flux_limit=10.0):
     except Exception as e:
         return False, None, str(e)
 
-def generate_regular_samples(p, U_i, num_groups, lam_cache, x_sample, y_sample, z_sample, offsets, num_samples):
+def generate_regular_samples(p, U_i, num_groups, lam_cache, x_sample, y_sample, z_sample, offsets, num_samples, bounds_list=None):
     num_valid_samples = np.zeros(num_groups, dtype=np.int64)
     weights = np.zeros(int(np.sum(num_samples)))
 
@@ -598,10 +603,9 @@ def generate_regular_samples(p, U_i, num_groups, lam_cache, x_sample, y_sample, 
         y_slice = y_sample[start_idx:end_idx]
         z_slice = z_sample[start_idx:end_idx]
 
+        lam_warm = lam_cache[i].copy()
         # Try to solve using Newton first (much faster).
-        lam0 = lam_cache[i] if (lam_cache is not None and
-                                    np.any(lam_cache[i] != 0.0)) else None
-        success, solution, lam = solve_group_newton(x_slice, y_slice, z_slice, U_i[i], lam0)
+        solution, lam, success = solve_group_newton(x_slice, y_slice, z_slice, U_i[i], lam_warm)
 
         if success:
             # Accept solution
@@ -613,7 +617,12 @@ def generate_regular_samples(p, U_i, num_groups, lam_cache, x_sample, y_sample, 
             if success:
                 weights[start_idx:end_idx] = solution
                 num_valid_samples[i] = np.sum(solution > 1e-12)
-                lam_out[i] = np.zeros(5)
+                print(U_i[i])
+                try:
+                    bounds_i = bounds_list[i] if bounds_list is not None else None
+                    lam_out[i] = maxwellian_lambda(U_i[i], bounds_i)
+                except ValueError:
+                    lam_out[i] = np.zeros(5)
 
         if not success:
             print(f'Cell {p}, Group {i}: Failed after Newton/CVXPY attempts')
@@ -658,6 +667,8 @@ def collide(x_sample, y_sample, z_sample, weights, num_valid_samples, bounds_lis
     nonzero_indices = np.where(weights > 1e-12)[0]
     w_nonzero   = weights[nonzero_indices]
     W           = w_nonzero.sum()
+    if W == 0.0:
+        return [group_n, group_px, group_py, group_pz, group_e]
     w_cdf       = np.cumsum(w_nonzero) / W   # normalized CDF, goes from 0 to 1
 
     # Sample using searchsorted with cdf. Clip to prevent out of bounds errors.

@@ -3,12 +3,96 @@ from itertools import product
 from scipy import optimize, special
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
+from scipy.stats import qmc
+from numba import jit
+import time
 
 
 MAX_DEPTH    = 4       # 0 = no splitting, 1 = one split etc.
-KL_THRESHOLD = 0.05
+KL_THRESHOLD = 0.02
 KL_COARSEN_THRESHOLD = 0.005   # coarsen below this
-MIN_LIFETIME         = 5      # minimum steps before coarsening allowed
+MIN_LIFETIME         = 10      # minimum steps before coarsening allowed
+
+def generate_grid(bounds_list, num_groups):
+    num_samples = np.zeros(num_groups)
+    for i in range(0, num_groups):
+        volume = (bounds_list[i, 1] - bounds_list[i, 0]) * \
+            (bounds_list[i, 3] - bounds_list[i, 2]) * \
+            (bounds_list[i, 5] - bounds_list[i, 4])
+        num_samples[i] = np.max((300, int(np.ceil(15 * volume))))
+    
+    x_sample = np.zeros(int(np.sum(num_samples)))
+    y_sample = np.zeros(int(np.sum(num_samples)))
+    z_sample = np.zeros(int(np.sum(num_samples)))
+    offsets = np.concatenate([[0], np.cumsum(num_samples)])
+
+    for i in range(0, num_groups):
+        l_bounds = np.array([bounds_list[i, 0], bounds_list[i, 2], bounds_list[i, 4]])
+        u_bounds = np.array([bounds_list[i, 1], bounds_list[i, 3], bounds_list[i, 5]])
+
+        if np.any(l_bounds > u_bounds): continue
+
+        start_idx = int(offsets[i])
+        end_idx = int(offsets[i+1])
+
+        sampler = qmc.LatinHypercube(d=3)
+        sample = qmc.scale(sampler.random(n=int(num_samples[i])), l_bounds, u_bounds)
+    
+        x_sample[start_idx:end_idx] = sample[:, 0]
+        y_sample[start_idx:end_idx] = sample[:, 1]
+        z_sample[start_idx:end_idx] = sample[:, 2]
+
+    return x_sample, y_sample, z_sample, offsets, num_samples
+
+def solve_group_newton(x_s, y_s, z_s, moments, lam0, max_iter=50, tol=1e-6):
+    """
+    Solve max-entropy weights directly via Newton iterations on dual.
+    
+    Dual problem: find lambda s.t. sum_i phi_i * exp(lam . phi_i) = moments
+    """
+    n = x_s.shape[0]
+    r2 = x_s**2 + y_s**2 + z_s**2
+
+    # Initial lambda guess
+    lam = lam0.copy()
+
+    converged = False
+    for iteration in range(max_iter):
+        # Compute weights from current lambda
+        log_w = (lam[0] + lam[1]*x_s + lam[2]*y_s + lam[3]*z_s + lam[4]*r2)
+        log_w = np.clip(log_w, None, 500.0)
+        w = np.exp(log_w)
+
+        # Compute moment residual
+        g = np.zeros(5)
+        g[0] = np.sum(w) - moments[0]
+        g[1] = np.sum(x_s * w) - moments[1]
+        g[2] = np.sum(y_s * w) - moments[2]
+        g[3] = np.sum(z_s * w) - moments[3]
+        g[4] = np.sum(r2  * w) - moments[4]
+
+        if np.linalg.norm(g) < tol:
+            converged = True
+            break
+
+        # Hessian: H_ij = sum(phi_i * phi_j * w)
+        phi = np.zeros((5, n))
+        phi[0] = np.ones(n)
+        phi[1] = x_s
+        phi[2] = y_s
+        phi[3] = z_s
+        phi[4] = r2
+
+        H = np.zeros((5, 5))
+        for a in range(5):
+            for b in range(5):
+                H[a, b] = np.sum(phi[a] * phi[b] * w)
+
+        # Newton step: lam -= H^{-1} g
+        dlam = np.linalg.solve(H, g)
+        lam -= dlam
+
+    return w, lam, converged
 
 def plot_amr_state(root, ft, cx_vec, cy_vec, cz_vec, t, ax_dist, ax_kl, kl_history):
     """
@@ -30,41 +114,55 @@ def plot_amr_state(root, ft, cx_vec, cy_vec, cz_vec, t, ax_dist, ax_kl, kl_histo
         ix_lo, ix_hi = leaf.bounds
         cx_vec_leaf = cx_vec[ix_lo:ix_hi]
 
-        # Fitted Maxwellian — 1D marginal
-        A, b, wx, wy, wz = leaf.params
-        f_leaf_1d = A * (np.pi / b) * np.exp(-b * (cx_vec_leaf - wx)**2)
+        # Recover continuous params from lam
+        if leaf.lam[4] >= 0: continue
+        beta = -leaf.lam[4]
+        wx   = -leaf.lam[1] / (2*leaf.lam[4])
+        wy   = -leaf.lam[2] / (2*leaf.lam[4])
+        wz   = -leaf.lam[3] / (2*leaf.lam[4])
+
+        # 1D marginal: integrate over vy, vz analytically
+        sqb  = np.sqrt(beta)
+        I0y  = 0.5*np.sqrt(np.pi/beta) * (special.erf(sqb*(cy_vec[-1]-wy))
+                                           - special.erf(sqb*(cy_vec[0]-wy)))
+        I0z  = 0.5*np.sqrt(np.pi/beta) * (special.erf(sqb*(cz_vec[-1]-wz))
+                                           - special.erf(sqb*(cz_vec[0]-wz)))
+        I0x  = 0.5*np.sqrt(np.pi/beta) * (special.erf(sqb*(cx_vec[ix_hi-1]-wx))
+                                           - special.erf(sqb*(cx_vec[ix_lo]-wx)))
+
+        if abs(I0x * I0y * I0z) < 1e-30:
+            continue
+
+        A        = leaf.mu[0] / (I0x * I0y * I0z)
+        f_leaf_1d = A * I0y * I0z * np.exp(-beta * (cx_vec_leaf - wx)**2)
         ax_dist.plot(cx_vec_leaf, f_leaf_1d, '--', linewidth=1.8,
-                     label=f'Leaf {i} Maxwellian', zorder=4)
+                     label=f'Leaf {i}', zorder=4)
 
         # Shadow boundaries and their Maxwellians
-        for j, (sp, sb) in enumerate(zip(leaf.shadow_params, leaf.shadow_bounds)):
-            if sp is None or sb is None:
+        for sb in leaf.shadow_bounds:
+            if sb is None:
                 continue
-            A_s, b_s, wx_s, _, _ = sp
-            if A_s == 0: continue
             lo, hi = sb
+            ax_dist.axvline(x=cx_vec[lo], linewidth=0.8, linestyle=':',
+                            alpha=0.7, color='gray')
 
-            # Shadow boundary marker
-            ax_dist.axvline(x=cx_vec[lo], linewidth=0.8, linestyle=':', alpha=0.7, color='black')
-
-        ax_dist.axvline(x=cx_vec[ix_hi-1], linewidth=1.5, linestyle='-', alpha=0.9, color='black')
+        ax_dist.axvline(x=cx_vec[ix_hi-1], linewidth=1.5, linestyle='-',
+                        alpha=0.9, color='black')
 
     ax_dist.set_xlabel(r'$v_x$', fontsize=18)
     ax_dist.set_ylabel(r'$f_{1D}(v_x)$', fontsize=18)
     ax_dist.set_title(f't = {t}', fontsize=14)
-    # ax_dist.legend(fontsize=14, loc='upper left')
     ax_dist.set_xlim(cx_vec[0], cx_vec[-1])
     ax_dist.grid(True, alpha=0.2)
 
     # --- KL accumulation history ---
     ax_kl.cla()
-    for i, (bounds, data) in enumerate(kl_history.items()):
+    for bounds, data in kl_history.items():
         created_at = data['created_at']
         values     = data['values']
-
-        timesteps = np.arange(created_at, created_at + len(values))
-
-        ax_kl.plot(timesteps, values, linewidth=1.8, label=f'vx[{cx_vec[bounds[0]]:.1f}, {cx_vec[bounds[1]-1]:.1f}] '
+        timesteps  = np.arange(created_at, created_at + len(values))
+        ax_kl.plot(timesteps, values, linewidth=1.8,
+                   label=f'vx[{cx_vec[bounds[0]]:.1f}, {cx_vec[bounds[1]-1]:.1f}] '
                          f'depth={get_depth(root, bounds)}')
 
     ax_kl.axhline(y=KL_THRESHOLD, color='red', linestyle='--',
@@ -72,109 +170,7 @@ def plot_amr_state(root, ft, cx_vec, cy_vec, cz_vec, t, ax_dist, ax_kl, kl_histo
     ax_kl.set_xlabel('Timestep', fontsize=18)
     ax_kl.set_ylabel('Accumulated KL', fontsize=18)
     ax_kl.set_title('KL accumulation per leaf', fontsize=14)
-    # ax_kl.legend(fontsize=14)
     ax_kl.grid(True, alpha=0.2)
-
-def calc_moment(f, cx, cy, cz, cx_vec, cy_vec, cz_vec):
-    """
-    Calculate moments (density, momentum, energy) for a given distribution function.
-    
-    Args:
-        f: Distribution function
-        cx, cy, cz: Velocity components
-        cx_vec, cy_vec, cz_vec: Velocity grid vectors
-    
-    Returns:
-        Array of moments [density, x-momentum, y-momentum, z-momentum, energy]
-    """
-    mu = np.zeros(5)
-
-    # Density moment
-    mu[0] = np.trapezoid(np.trapezoid(np.trapezoid(f, cz_vec, axis=2), cy_vec, axis=1), cx_vec, axis=0)
-
-    # Momentum moment
-    uk = cx * f
-    mu[1] = np.trapezoid(np.trapezoid(np.trapezoid(uk, cz_vec, axis=2), cy_vec, axis=1), cx_vec, axis=0)
-
-    uk = cy * f
-    mu[2] = np.trapezoid(np.trapezoid(np.trapezoid(uk, cz_vec, axis=2), cy_vec, axis=1), cx_vec, axis=0)
-
-    uk = cz * f
-    mu[3] = np.trapezoid(np.trapezoid(np.trapezoid(uk, cz_vec, axis=2), cy_vec, axis=1), cx_vec, axis=0)
-
-    # Energy moment
-    c2 = cx**2 + cy**2 + cz**2
-    ek = c2 * f
-    mu[4] = np.trapezoid(np.trapezoid(np.trapezoid(ek, cz_vec, axis=2), cy_vec, axis=1), cx_vec, axis=0)
-
-    return mu 
-
-def invert(mu, initial_guess, group_bounds):
-    A, b, wx, wy, wz = 0.0, 0.0, 0.0, 0.0, 0.0
-    ci_cx = group_bounds['ci_cx']
-    cf_cx = group_bounds['cf_cx']
-    ci_cy = group_bounds['ci_cy']
-    cf_cy = group_bounds['cf_cy']
-    ci_cz = group_bounds['ci_cz']
-    cf_cz = group_bounds['cf_cz']
-
-    sol = optimize.least_squares(moment_eq, initial_guess, args=(mu[1] / mu[0], mu[2] / mu[0], \
-                                    mu[3] / mu[0], mu[4] / mu[0], \
-                                    ci_cx, cf_cx, ci_cy, cf_cy, ci_cz, cf_cz), \
-                                        bounds=([0.0, -10, -10, -10], [np.inf, 10, 10, 10]), method='trf', loss='soft_l1')
-    # print(sol)
-    # print('residual:', np.linalg.norm(sol.fun))
-    
-    # sol = optimize.root(moment_eq, initial_guess, args=(mu[1] / mu[0], mu[2] / mu[0], \
-    #                                 mu[3] / mu[0], mu[4] / mu[0], \
-    #                                     ci_cx, cf_cx, ci_cy, cf_cy, ci_cz, cf_cz), method='lm')
-    if sol.success:
-        b = sol.x[0]
-        wx = sol.x[1]
-        wy = sol.x[2]
-        wz = sol.x[3]
-    
-    I0x = np.sqrt(np.pi / (4 * b)) * (special.erf(np.sqrt(b) * (group_bounds['cf_cx'] - wx)) - special.erf(np.sqrt(b) * (group_bounds['ci_cx'] - wx)))
-    I0y = np.sqrt(np.pi / (4 * b)) * (special.erf(np.sqrt(b) * (group_bounds['cf_cy'] - wy)) - special.erf(np.sqrt(b) * (group_bounds['ci_cy'] - wy)))
-    I0z = np.sqrt(np.pi / (4 * b)) * (special.erf(np.sqrt(b) * (group_bounds['cf_cz'] - wz)) - special.erf(np.sqrt(b) * (group_bounds['ci_cz'] - wz)))
-    A = mu[0] / (I0x * I0y * I0z)
-
-    return A, b, wx, wy, wz
-
-def moment_eq(x, ux, uy, uz, e, ci_cx, cf_cx, ci_cy, cf_cy, ci_cz, cf_cz):
-    """
-    Moment equation for solving distribution parameters.
-    
-    Args:
-        x: Array containing [beta, wx, wy, wz]
-        u: Target velocity
-        e: Target energy
-        ci: Lower bound
-        cf: Upper bound
-    
-    Returns:
-        Array of moment equations
-    """
-    I0x = np.sqrt(np.pi / (4 * x[0])) * (special.erf(np.sqrt(x[0]) * (cf_cx - x[1])) - special.erf(np.sqrt(x[0]) * (ci_cx - x[1])))
-    I0y = np.sqrt(np.pi / (4 * x[0])) * (special.erf(np.sqrt(x[0]) * (cf_cy - x[2])) - special.erf(np.sqrt(x[0]) * (ci_cy - x[2])))
-    I0z = np.sqrt(np.pi / (4 * x[0])) * (special.erf(np.sqrt(x[0]) * (cf_cz - x[3])) - special.erf(np.sqrt(x[0]) * (ci_cz - x[3])))
-
-    I1x = (np.exp(-x[0] * (ci_cx - x[1])**2) - np.exp(-x[0] * (cf_cx - x[1])**2)) / (2 * x[0])
-    I1y = (np.exp(-x[0] * (ci_cy - x[2])**2) - np.exp(-x[0] * (cf_cy - x[2])**2)) / (2 * x[0])
-    I1z = (np.exp(-x[0] * (ci_cz - x[3])**2) - np.exp(-x[0] * (cf_cz - x[3])**2)) / (2 * x[0])
-
-    I2x = -np.sqrt(np.pi) / (2 * np.sqrt(x[0])) * \
-        ((np.exp(-x[0] * (cf_cx - x[1])**2) * (cf_cx - x[1]))/np.sqrt(np.pi * x[0]) - (np.exp(-x[0] * (ci_cx - x[1])**2) * (ci_cx - x[1])) / np.sqrt(np.pi * x[0])) + \
-            np.sqrt(np.pi)/(4 * np.sqrt(x[0]**3)) * (special.erf(np.sqrt(x[0]) * (cf_cx - x[1])) - special.erf(np.sqrt(x[0]) * (ci_cx - x[1])))
-    I2y = -np.sqrt(np.pi) / (2 * np.sqrt(x[0])) * \
-        ((np.exp(-x[0] * (cf_cy - x[2])**2) * (cf_cy - x[2]))/np.sqrt(np.pi * x[0]) - (np.exp(-x[0] * (ci_cy - x[2])**2) * (ci_cy - x[2])) / np.sqrt(np.pi * x[0])) + \
-            np.sqrt(np.pi)/(4 * np.sqrt(x[0]**3)) * (special.erf(np.sqrt(x[0]) * (cf_cy - x[2])) - special.erf(np.sqrt(x[0]) * (ci_cy - x[2])))
-    I2z = -np.sqrt(np.pi) / (2 * np.sqrt(x[0])) * \
-        ((np.exp(-x[0] * (cf_cz - x[3])**2) * (cf_cz - x[3]))/np.sqrt(np.pi * x[0]) - (np.exp(-x[0] * (ci_cz - x[3])**2) * (ci_cz - x[3])) / np.sqrt(np.pi * x[0])) + \
-            np.sqrt(np.pi)/(4 * np.sqrt(x[0]**3)) * (special.erf(np.sqrt(x[0]) * (cf_cz - x[3])) - special.erf(np.sqrt(x[0]) * (ci_cz - x[3])))
-
-    return [(I1x + x[1] * I0x) / I0x - ux, (I1y + x[2] * I0y) / I0y - uy, (I1z + x[3] * I0z) / I0z - uz, \
-            (I2x + 2 * x[1] * I1x + x[1]**2 * I0x) / (I0x) + (I2y + 2 * x[2] * I1y + x[2]**2 * I0y) / (I0y) + (I2z + 2 * x[3] * I1z + x[3]**2 * I0z) / (I0z) - e]
 
 def kl_div(p, q, cx_vec, cy_vec, cz_vec):
     kl = np.trapezoid(np.trapezoid(np.trapezoid(p * np.log(p / q), cz_vec, axis=2), cy_vec, axis=1), cx_vec, axis=0)
@@ -186,70 +182,96 @@ def get_depth(root, bounds):
             return leaf.depth
     return 0
 
-def coarsening_kl_check(left, right, cx_full, cy_full, cz_full, cx_vec_full, cy_vec_full, cz_vec_full, invert_fn):
+def coarsening_kl_analytic(left, right, cx_vec, cy_vec, cz_vec):
     """
-    KL = integral_{left domain}  f_L * ln(f_L / f_parent) dv
-       + integral_{right domain} f_R * ln(f_R / f_parent) dv
+    KL cost of merging: KL(f_left || f_parent) + KL(f_right || f_parent)
+    Parent Maxwellian fitted to merged moments analytically.
     """
-    U_parent = left.mu + right.mu
-    M0_total = U_parent[0]
+    mu_m = left.mu + right.mu
+    if mu_m[0] < 1e-12:
+        return 0.0
 
-    ix_lo = min(left.bounds[0],  right.bounds[0])
-    ix_hi = max(left.bounds[1],  right.bounds[1])
+    ux = mu_m[1]/mu_m[0]; uy = mu_m[2]/mu_m[0]; uz = mu_m[3]/mu_m[0]
+    thermal = mu_m[4]/mu_m[0] - ux**2 - uy**2 - uz**2
+    beta_p  = 1.5 / max(thermal, 1e-10)
 
-    # Fit parent Maxwellian to merged moments
-    group_bounds_dict = {
-        'ci_cx': cx_vec_full[ix_lo],  'cf_cx': cx_vec_full[ix_hi - 1],
-        'group_bounds_cx': np.array([ix_lo, ix_hi]),
-        'ci_cy': cy_vec_full[0],      'cf_cy': cy_vec_full[-1],
-        'group_bounds_cy': np.array([0, len(cy_vec_full)]),
-        'ci_cz': cz_vec_full[0],      'cf_cz': cz_vec_full[-1],
-        'group_bounds_cz': np.array([0, len(cz_vec_full)]),
-    }
+    # Parent lam from merged moments
+    lam_p    = np.zeros(5)
+    lam_p[4] = -beta_p
+    lam_p[1] = 2*beta_p*ux
+    lam_p[2] = 2*beta_p*uy
+    lam_p[3] = 2*beta_p*uz
+    # lam_p[0] not needed — A recovered from density in _kl_gaussian
 
-    try:
-        A_p, b_p, wx_p, wy_p, wz_p = invert_fn(
-            U_parent, [1.0, 0.0, 0.0, 0.0], group_bounds_dict
-        )
-    except Exception:
-        return np.inf, None, U_parent
+    kl_total = 0.0
+    for child in [left, right]:
+        if child.lam[4] >= 0 or not np.all(np.isfinite(child.lam)):
+            return np.inf
+        kl_total += _kl_gaussian_static(
+            child.lam, child.mu, lam_p, mu_m,
+            cx_vec, cy_vec, cz_vec, child.bounds)
 
-    params_parent = (A_p, b_p, wx_p, wy_p, wz_p)
+    return kl_total
 
-    def kl_on_subdomain(child):
-        """
-        Compute integral_{child domain} f_child * ln(f_child / f_parent) dv
-        """
-        lo, hi = child.bounds
-        cx_s     = cx_full[lo:hi]
-        cy_s     = cy_full[lo:hi]
-        cz_s     = cz_full[lo:hi]
-        cx_vec_s = cx_vec_full[lo:hi]
 
-        A_c, b_c, wx_c, wy_c, wz_c = child.params
+def _kl_gaussian_static(lam_old, mu_old, lam_new, mu_new,
+                         cx_vec, cy_vec, cz_vec, bounds):
+    """Standalone version of _kl_gaussian for use outside VelocityGroup."""
+    beta_o = -lam_old[4];  beta_n = -lam_new[4]
+    wx_o   = -lam_old[1] / (2*lam_old[4]);  wx_n = -lam_new[1] / (2*lam_new[4])
+    wy_o   = -lam_old[2] / (2*lam_old[4]);  wy_n = -lam_new[2] / (2*lam_new[4])
+    wz_o   = -lam_old[3] / (2*lam_old[4]);  wz_n = -lam_new[3] / (2*lam_new[4])
 
-        f_child = A_c * np.exp(-b_c * ((cx_s - wx_c)**2 +
-                                         (cy_s - wy_c)**2 +
-                                         (cz_s - wz_c)**2))
+    n_o = mu_old[0];  n_n = mu_new[0]
+    if n_o < 1e-12 or n_n < 1e-12:
+        return 0.0
 
-        # Parent evaluated on this child's subdomain
-        f_par_s = A_p * np.exp(-b_p * ((cx_s - wx_p)**2 +
-                                         (cy_s - wy_p)**2 +
-                                         (cz_s - wz_p)**2))
+    ix_lo, ix_hi = bounds
+    sqb_o = np.sqrt(beta_o);  sqb_n = np.sqrt(beta_n)
 
-        integrand = f_child * np.log(f_child / f_par_s)
-        kl = np.trapezoid(np.trapezoid(np.trapezoid(integrand, cz_vec_full, axis=2), cy_vec_full, axis=1), cx_vec_s, axis=0)
+    I0x_o = _erf_integral(cx_vec[ix_lo], cx_vec[ix_hi-1], wx_o, sqb_o)
+    I0y_o = _erf_integral(cy_vec[0], cy_vec[-1], wy_o, sqb_o)
+    I0z_o = _erf_integral(cz_vec[0], cz_vec[-1], wz_o, sqb_o)
+    I0x_n = _erf_integral(cx_vec[ix_lo], cx_vec[ix_hi-1], wx_n, sqb_n)
+    I0y_n = _erf_integral(cy_vec[0], cy_vec[-1], wy_n, sqb_n)
+    I0z_n = _erf_integral(cz_vec[0], cz_vec[-1], wz_n, sqb_n)
 
-        return max(kl, 0.0)
+    if (abs(I0x_o*I0y_o*I0z_o) < 1e-30 or
+            abs(I0x_n*I0y_n*I0z_n) < 1e-30):
+        return 0.0
 
-    kl_left  = kl_on_subdomain(left)
-    kl_right = kl_on_subdomain(right)
-    kl_total = kl_left + kl_right
+    A_o = n_o / (I0x_o * I0y_o * I0z_o)
+    A_n = n_n / (I0x_n * I0y_n * I0z_n)
 
-    return kl_total, params_parent, U_parent
+    if A_o <= 0 or A_n <= 0:
+        return 0.0
+
+    ln_A_ratio = np.log(A_o / A_n)
+
+    kl = (n_o * ln_A_ratio
+          + (beta_n - beta_o) * mu_old[4]
+          + 2*(beta_o*wx_o - beta_n*wx_n) * mu_old[1]
+          + 2*(beta_o*wy_o - beta_n*wy_n) * mu_old[2]
+          + 2*(beta_o*wz_o - beta_n*wz_n) * mu_old[3]
+          - n_o*(beta_o*(wx_o**2+wy_o**2+wz_o**2)
+               - beta_n*(wx_n**2+wy_n**2+wz_n**2)))
+
+    return max(kl, 0.0)
+
+def _erf_integral(lo, hi, w, sqb):
+    """Truncated Gaussian integral: integral of exp(-beta*(v-w)^2) dv over [lo, hi]."""
+    return 0.5 * np.sqrt(np.pi) / sqb * (special.erf(sqb*(hi-w)) - special.erf(sqb*(lo-w)))
+
+def _warm_start_from_moments(mu):
+    if mu[0] < 1e-12:
+        return np.zeros(5)
+    ux = mu[1]/mu[0]; uy = mu[2]/mu[0]; uz = mu[3]/mu[0]
+    thermal = mu[4]/mu[0] - ux**2 - uy**2 - uz**2
+    beta = 1.5 / max(thermal, 1e-10)
+    return np.array([0.0, 2*beta*ux, 2*beta*uy, 2*beta*uz, -beta])
 
 class VelocityGroup:
-    def __init__(self, cx_slice, cy, cz, cx_vec_slice, cy_vec, cz_vec, bounds, depth=0, max_depth=1, created_at=0):
+    def __init__(self, x_s, y_s, z_s, cx_vec_slice, cy_vec, cz_vec, bounds, depth=0, max_depth=1, created_at=0):
         """
         bounds: (cx_lo, cx_hi) index bounds into the full grid
         """
@@ -257,9 +279,9 @@ class VelocityGroup:
         self.cx_vec      = cx_vec_slice  # 1D velocity vector for this group
         self.cy_vec      = cy_vec
         self.cz_vec      = cz_vec
-        self.cx          = cx_slice      # meshgrid slices
-        self.cy          = cy
-        self.cz          = cz
+        self.x_s         = x_s   # sample arrays inside this group
+        self.y_s         = y_s
+        self.z_s         = z_s
 
         self.depth       = depth
         self.max_depth   = max_depth
@@ -269,19 +291,22 @@ class VelocityGroup:
         self.parent      = None
 
         # State
-        self.f           = None          # current fitted Maxwellian on full grid
-        self.params      = None          # (A, b, wx, wy, wz)
+        self.w           = None          # current fitted max entropy weights
+        self.lam         = np.zeros(5)   # lagrange multipliers
         self.mu          = None          # moments
 
         # Shadow children — trial split, always two halves in vx
-        self.shadow_params = [None, None]   # params for left/right shadow
-        self.shadow_f      = [None, None]   # distributions for left/right shadow
-        self.shadow_bounds = [None, None]   # index bounds for each shadow
+        self.shadow_lam     = [np.zeros(5), np.zeros(5)]   # multipliers for left/right shadow
+        self.shadow_w       = [None, None]   # weights for left/right shadow
+        self.shadow_bounds  = [None, None]   # index bounds for each shadow
+        self.shadow_x = [None, None]
+        self.shadow_y = [None, None]
+        self.shadow_z = [None, None]
 
         # Accumulation
-        self.kl_accum    = 0.0
-        self.kl_last_step   = 0.0
-        self.f_shadow_old = [None, None]
+        self.kl_accum      = 0.0
+        self.kl_last_step  = 0.0
+        self.shadow_state_old = [(None, None), (None, None)]
 
 
     def is_leaf(self):
@@ -312,96 +337,140 @@ class VelocityGroup:
         return None
 
 
-    def compute_moments(self, f):
-        self.mu = calc_moment(f, self.cx, self.cy, self.cz,
-                              self.cx_vec, self.cy_vec, self.cz_vec)
-        return self.mu
-
-
-    def fit_maxwellian(self, invert, group_bounds_dict):
-        if self.mu[0] < 1e-6:
-            self.params = (0, 0, 0, 0, 0)
-            self.f = np.zeros_like(self.cx)
-            return self.params
-
-        A, b, wx, wy, wz = invert(self.mu, [1.0, 0.0, 0.0, 0.0], group_bounds_dict)
-        self.params = (A, b, wx, wy, wz)
-        self.f = A * np.exp(-b * ((self.cx - wx)**2 + (self.cy - wy)**2 + (self.cz - wz)**2))
-
-        return self.params
-
-
-    def update_shadows(self, invert, cx_full, cy_full, cz_full, cx_vec_full, cy_vec_full, cz_vec_full):
+    def compute_moments_from_grid(self, f_slice, cx_s, cy_s, cz_s, cx_vec_s, cy_vec, cz_vec):
         """
-        Project current fitted Maxwellian onto two shadow children.
-        Split at midpoint of vx domain.
+        Only used when calculating the initial refinement by integrating against a known f0.
+        """
+        mu = np.zeros(5)
+        mu[0] = np.trapezoid(np.trapezoid(np.trapezoid(f_slice, cz_vec, axis=2), cy_vec, axis=1), cx_vec_s, axis=0)
+        mu[1] = np.trapezoid(np.trapezoid(np.trapezoid(cx_s * f_slice, cz_vec, axis=2), cy_vec, axis=1), cx_vec_s, axis=0)
+        mu[2] = np.trapezoid(np.trapezoid(np.trapezoid(cy_s * f_slice, cz_vec, axis=2), cy_vec, axis=1), cx_vec_s, axis=0)
+        mu[3] = np.trapezoid(np.trapezoid(np.trapezoid(cz_s * f_slice, cz_vec, axis=2), cy_vec, axis=1), cx_vec_s, axis=0)
+        r2    = cx_s**2 + cy_s**2 + cz_s**2
+        mu[4] = np.trapezoid(np.trapezoid(np.trapezoid(r2 * f_slice, cz_vec, axis=2), cy_vec, axis=1), cx_vec_s, axis=0)
+        self.mu = mu
+
+
+    def compute_moments(self, xs=None, ys=None, zs=None, ws=None):
+        """Moments from current weighted samples."""
+        xs = xs if xs is not None else self.x_s
+        ys = ys if ys is not None else self.y_s
+        zs = zs if zs is not None else self.z_s
+        ws = ws if ws is not None else self.w
+
+        if ws is None or len(xs) == 0:
+            mu = np.zeros(5)
+            if xs is self.x_s:
+                self.mu = mu
+            return mu
+
+        r2 = xs**2 + ys**2 + zs**2
+        mu = np.array([np.sum(ws), np.sum(xs*ws), np.sum(ys*ws), np.sum(zs*ws), np.sum(r2*ws)])
+        
+        if xs is self.x_s:
+            self.mu = mu
+        return mu
+
+
+    def fit_maxent_weights(self):
+        solution, lam, success = solve_group_newton(self.x_s, self.y_s, self.z_s, self.mu, self.lam)
+        if success:
+            self.w = solution
+            self.lam = lam
+        if not success:
+            solution, lam, success = solve_group_newton(self.x_s, self.y_s, self.z_s, self.mu, np.zeros(5))
+            if success:
+                self.w = solution
+                self.lam = lam
+            else:
+                print('die')
+
+
+    def update_shadows(self, cx_vec_full):
+        """
+        Split samples at vx midpoint, fit Newton weights on each half.
+        Shadow lam stored for KL checks and split initialization.
         """
         ix_lo, ix_hi = self.bounds
-        ix_mid = (ix_lo + ix_hi) // 2
-        shadow_index_bounds = [(ix_lo, ix_mid + 1), (ix_mid, ix_hi)]
+        ix_mid        = (ix_lo + ix_hi) // 2
+        vx_mid        = cx_vec_full[ix_mid]
 
-        for i, (lo, hi) in enumerate(shadow_index_bounds):
-            self.shadow_bounds[i] = (lo, hi)
+        self.shadow_bounds = [(ix_lo, ix_mid + 1), (ix_mid, ix_hi)]
+        masks = [self.x_s < vx_mid, self.x_s >= vx_mid]
 
-            cx_s    = cx_full[lo:hi]
-            cy_s    = cy_full[lo:hi]
-            cz_s    = cz_full[lo:hi]
-            cx_vec_s = cx_vec_full[lo:hi]
+        for i, mask in enumerate(masks):
+            xs = self.x_s[mask]
+            ys = self.y_s[mask]
+            zs = self.z_s[mask]
 
-            # Moments of the fitted Maxwellian over shadow subdomain
-            mu_s = calc_moment(self.f[lo - ix_lo : hi - ix_lo], cx_s, cy_s, cz_s,
-                                cx_vec_s, cy_vec_full, cz_vec_full)
-                                
-            group_bounds_dict = {
-                'ci_cx': cx_vec_full[lo], 'cf_cx': cx_vec_full[hi - 1],
-                'group_bounds_cx': np.array([lo, hi]),
-                'ci_cy': cy_vec_full[0],  'cf_cy': cy_vec_full[-1],
-                'group_bounds_cy': np.array([0, len(cy_vec_full)]),
-                'ci_cz': cz_vec_full[0],  'cf_cz': cz_vec_full[-1],
-                'group_bounds_cz': np.array([0, len(cz_vec_full)]),
-            }
+            self.shadow_x[i] = xs
+            self.shadow_y[i] = ys
+            self.shadow_z[i] = zs
 
-            if mu_s[0] > 1e-6: 
-                A, b, wx, wy, wz = invert(mu_s, [1.0, 0.0, 0.0, 0.0], group_bounds_dict)
-            else:
-                A, b, wx, wy, wz = 0, 0, 0, 0, 0
-            self.shadow_params[i] = (A, b, wx, wy, wz)
-            self.shadow_f[i] = A * np.exp(-b * ((cx_s - wx)**2 + (cy_s - wy)**2 + (cz_s - wz)**2))
+            # Moments of this half from current weights
+            w_half = self.w[mask]
+            r2     = xs**2 + ys**2 + zs**2
+            mu_s   = self.compute_moments(xs, ys, zs, w_half)
+
+            if mu_s[0] < 1e-6:
+                self.shadow_w[i]   = np.zeros(len(xs))
+                self.shadow_lam[i] = np.zeros(5)
+                continue
+            lam_init = _warm_start_from_moments(mu_s)
+            w_fit, lam_fit, success = solve_group_newton(xs, ys, zs, mu_s, lam_init)
+
+            self.shadow_w[i]   = w_fit   if success else w_half
+            self.shadow_lam[i] = lam_fit if success else np.zeros(5)
 
 
-    def accumulate_kl(self, kl_fn):
-        """
-        Accumulate intra-shadow KL: how much has each shadow changed.
-        Returns total accumulated KL across both shadows.
-        """
-        # if not self.can_split():
-        #     return 0.0
-        if self.shadow_f[0] is None or self.shadow_f[1] is None:
+    def accumulate_kl(self, cx_vec, cy_vec, cz_vec):
+        if self.shadow_x[0] is None or self.shadow_x[1] is None:
             return 0.0
-        if self.f_shadow_old[0] is None:
-            self.f_shadow_old = [s.copy() for s in self.shadow_f]
+
+        # Compute current shadow moments
+        shadow_mu_now = [
+            self.compute_moments(self.shadow_x[i], self.shadow_y[i],
+                                self.shadow_z[i], self.shadow_w[i])
+            for i in range(2)
+        ]
+
+        if self.shadow_state_old[0][0] is None:
+            self.shadow_state_old = [
+                (self.shadow_lam[i].copy(), shadow_mu_now[i].copy())
+                for i in range(2)
+            ]
             return 0.0
 
         kl_total = 0.0
-        ix_lo = self.bounds[0]
-        for i, (lo, hi) in enumerate(self.shadow_bounds):
-            # Relative index within this group's array
-            kl = kl_fn(self.shadow_f[i],
-                        self.f_shadow_old[i],
-                        self.cx_vec[lo - ix_lo : hi - ix_lo],
-                        self.cy_vec, self.cz_vec)
-            kl_total += kl
+        for i in range(2):
+            lam_new = self.shadow_lam[i]
+            lam_old, mu_old = self.shadow_state_old[i]
+            mu_new = shadow_mu_now[i]
 
-        self.kl_accum += kl_total
-        self.kl_last_step = kl_total
-        self.f_shadow_old = [s.copy() for s in self.shadow_f]
+            if lam_old is None: continue
+            if lam_new[4] >= 0 or lam_old[4] >= 0: continue
+
+            kl_total += self._kl_gaussian(
+                lam_old, mu_old, lam_new, mu_new,
+                cx_vec, cy_vec, cz_vec,
+                self.shadow_bounds[i])
+
+        self.kl_accum     += kl_total
+        self.kl_last_step  = kl_total
+        self.shadow_state_old = [
+            (self.shadow_lam[i].copy(), shadow_mu_now[i].copy())
+            for i in range(2)
+        ]
         return kl_total
 
+    def _kl_gaussian(self, lam_old, mu_old, lam_new, mu_new, cx_vec, cy_vec, cz_vec, bounds):
+        return _kl_gaussian_static(lam_old, mu_old, lam_new, mu_new, cx_vec, cy_vec, cz_vec, bounds)
 
-    def split(self, cx_full, cy_full, cz_full, cx_vec_full, cy_vec_full, cz_vec_full, invert, f_current, current_t=0):
+    def split(self, cx_vec_full, current_t=0):
         """
         Promote shadow children to real children.
-        Returns list of two child VelocityGroup nodes.
+        Samples are partitioned by vx midpoint.
+        Shadow weights/lam used to initialize children.
         """
         if not self.can_split():
             print(f'Warning: tried to split at max_depth={self.max_depth}')
@@ -409,81 +478,62 @@ class VelocityGroup:
 
         ix_lo, ix_hi = self.bounds
         ix_mid = (ix_lo + ix_hi) // 2
+        vx_mid = cx_vec_full[ix_mid]
 
-        for (lo, hi) in [(ix_lo, ix_mid + 1), (ix_mid, ix_hi)]:
-            cx_s     = cx_full[lo:hi]
-            cy_s     = cy_full[lo:hi]
-            cz_s     = cz_full[lo:hi]
+        masks  = [self.x_s < vx_mid, self.x_s >= vx_mid]
+        bounds = [(ix_lo, ix_mid + 1), (ix_mid, ix_hi)]
+
+        for i, (mask, bnd) in enumerate(zip(masks, bounds)):
+            lo, hi   = bnd
             cx_vec_s = cx_vec_full[lo:hi]
 
-            child = VelocityGroup(cx_s, cy_s, cz_s,
-                                   cx_vec_s, cy_vec_full, cz_vec_full,
-                                   bounds=(lo, hi),
-                                   depth=self.depth+1, max_depth=self.max_depth,
-                                   created_at=current_t)
+            child = VelocityGroup(
+                self.x_s[mask].copy(),
+                self.y_s[mask].copy(),
+                self.z_s[mask].copy(),
+                cx_vec_s, self.cy_vec, self.cz_vec,
+                bounds=bnd,
+                depth=self.depth + 1,
+                max_depth=self.max_depth,
+                created_at=current_t)
             child.parent = self
 
-            # Initialize child moments from the current f in its subdomain
-            f_slice = f_current[lo - ix_lo : hi - ix_lo]
-            child.compute_moments(f_slice)
+            # Initialize from shadow state
+            child.w   = self.shadow_w[i].copy() if self.shadow_w[i] is not None \
+                    else np.zeros(int(np.sum(mask)))
+        
+            # Reset lam to zeros — child will cold-start Newton against
+            # grid moments on first time loop iteration, avoiding mismatch
+            child.lam = self.shadow_lam[i].copy() if self.shadow_lam[i][4] < 0.0 else np.zeros(5)
 
-            group_bounds_dict = {
-                'ci_cx': cx_vec_full[lo], 'cf_cx': cx_vec_full[hi - 1],
-                'group_bounds_cx': np.array([lo, hi]),
-                'ci_cy': cy_vec_full[0],  'cf_cy': cy_vec_full[-1],
-                'group_bounds_cy': np.array([0, len(cy_vec_full)]),
-                'ci_cz': cz_vec_full[0],  'cf_cz': cz_vec_full[-1],
-                'group_bounds_cz': np.array([0, len(cz_vec_full)]),
-            }
-            print(group_bounds_dict)
-            child.fit_maxwellian(invert, group_bounds_dict)
-
-            # Initialize shadows for child (no further splitting)
-            child.update_shadows(invert, cx_full, cy_full, cz_full,
-                                  cx_vec_full, cy_vec_full, cz_vec_full)
-            child.kl_accum = 0.0
+            child.compute_moments()
+            child.update_shadows(cx_vec_full)
+            child.kl_accum         = 0.0
+            child.shadow_state_old = [(None, None), (None, None)]
             self.children.append(child)
 
         self.kl_accum = 0.0
         return self.children
     
 
-    def merge_children(self, cx_full, cy_full, cz_full, cx_vec_full, cy_vec_full, cz_vec_full, invert_fn, current_t=0):
-        """
-        Merge two children back into this parent node.
-        Moments are summed, Maxwellian refit, shadows reinitialised.
-        """
-        assert len(self.children) == 2, "Can only merge exactly 2 children"
-
+    def merge_children(self, cx_vec_full, current_t=0):
+        assert len(self.children) == 2
         left, right = self.children
 
-        # Merged moments — exact, just sum
-        self.mu = left.mu + right.mu
+        # Concatenate samples
+        self.x_s = np.concatenate([left.x_s, right.x_s])
+        self.y_s = np.concatenate([left.y_s, right.y_s])
+        self.z_s = np.concatenate([left.z_s, right.z_s])
+        self.mu  = left.mu + right.mu
+        self.lam = _warm_start_from_moments(self.mu)
+        self.fit_maxent_weights()
 
-        # Refit Maxwellian to merged moments
-        ix_lo, ix_hi = self.bounds
-        group_bounds_dict = {
-            'ci_cx': cx_vec_full[ix_lo],  'cf_cx': cx_vec_full[ix_hi - 1],
-            'group_bounds_cx': np.array([ix_lo, ix_hi]),
-            'ci_cy': cy_vec_full[0],      'cf_cy': cy_vec_full[-1],
-            'group_bounds_cy': np.array([0, len(cy_vec_full)]),
-            'ci_cz': cz_vec_full[0],      'cf_cz': cz_vec_full[-1],
-            'group_bounds_cz': np.array([0, len(cz_vec_full)]),
-        }
-        self.fit_maxwellian(invert_fn, group_bounds_dict)
-
-        # Discard children
-        self.children = []
-
-        # Reset accumulator — fresh start after merge
-        self.kl_accum       = 0.0
-        self.kl_last_step   = 0.0
-        self.f_shadow_old   = [None, None]
-        self.created_at     = current_t   # reset lifetime for future coarsen check
-
-        # Reinitialise shadows from merged Maxwellian
-        self.update_shadows(invert_fn, cx_full, cy_full, cz_full,
-                             cx_vec_full, cy_vec_full, cz_vec_full)
+        self.children         = []
+        self.kl_accum         = 0.0
+        self.kl_last_step     = 0.0
+        self.shadow_state_old = [(None, None), (None, None)]
+        self.created_at       = current_t
+        self.update_shadows(cx_vec_full)
 
 
     def get_leaves(self):
@@ -494,8 +544,7 @@ class VelocityGroup:
             leaves.extend(child.get_leaves())
         return leaves
 
-def bootstrap_refine(root, f0, cx, cy, cz, cx_vec, cy_vec, cz_vec, invert_fn,
-                     kl_threshold=KL_THRESHOLD, max_passes=20):
+def bootstrap_refine(root, f0, cx, cy, cz, cx_vec, cy_vec, cz_vec, kl_threshold=KL_THRESHOLD, max_passes=20):
     """
     Refine the AMR tree based on goodness-of-fit KL(f0 || f_maxwellian)
     on each leaf. Runs until no splits occur or max_passes is reached.
@@ -508,45 +557,35 @@ def bootstrap_refine(root, f0, cx, cy, cz, cx_vec, cy_vec, cz_vec, invert_fn,
             ix_lo, ix_hi = leaf.bounds
             f_slice = f0[ix_lo:ix_hi]
 
-            # Recompute moments and refit Maxwellian from f0
-            leaf.compute_moments(f_slice)
+            # Recompute moments from f0 and calculate weights
+            leaf.compute_moments_from_grid(f_slice, cx[ix_lo:ix_hi], cy[ix_lo:ix_hi], cz[ix_lo:ix_hi], cx_vec[ix_lo:ix_hi], cy_vec, cz_vec)
+            leaf.fit_maxent_weights()
+            leaf.update_shadows(cx_vec)
 
-            group_bounds_dict = {
-                'ci_cx': cx_vec[ix_lo], 'cf_cx': cx_vec[ix_hi - 1],
-                'group_bounds_cx': np.array([ix_lo, ix_hi]),
-                'ci_cy': cy_vec[0],     'cf_cy': cy_vec[-1],
-                'group_bounds_cy': np.array([0, len(cy_vec)]),
-                'ci_cz': cz_vec[0],     'cf_cz': cz_vec[-1],
-                'group_bounds_cz': np.array([0, len(cz_vec)]),
-            }
-            leaf.fit_maxwellian(invert_fn, group_bounds_dict)
+            w_true = f_slice
 
-            # Goodness-of-fit KL: how well does the Maxwellian represent f0?
-            eps = 1e-300
-            f_fit = leaf.f
-            f_true = f_slice
+            beta = -leaf.lam[4]
+            wx   = -leaf.lam[1] / (2*leaf.lam[4])
+            wy   = -leaf.lam[2] / (2*leaf.lam[4])
+            wz   = -leaf.lam[3] / (2*leaf.lam[4])
 
-            # Avoid log(0): only compute where both are positive
-            mask = (f_true > eps) & (f_fit > eps)
-            if not np.any(mask):
-                continue
+            cx_s = cx[ix_lo:ix_hi]
+            cy_s = cy[ix_lo:ix_hi]
+            cz_s = cz[ix_lo:ix_hi]
 
-            integrand = np.where(mask, f_true * np.log(f_true / (f_fit + eps)), 0.0)
-            kl = np.trapezoid(
-                np.trapezoid(
-                    np.trapezoid(integrand, cz_vec, axis=2),
-                    cy_vec, axis=1),
-                cx_vec[ix_lo:ix_hi], axis=0)
-            kl = max(kl, 0.0)
+            w_fit_grid = np.exp(-beta * ((cx_s - wx)**2 + (cy_s - wy)**2 + (cz_s - wz)**2))
+
+            n_true = np.trapezoid(np.trapezoid(np.trapezoid(w_true, cz_vec, axis=2), cy_vec, axis=1), cx_vec[ix_lo:ix_hi], axis=0)
+            n_fit  = np.trapezoid(np.trapezoid(np.trapezoid(w_fit_grid, cz_vec, axis=2), cy_vec, axis=1), cx_vec[ix_lo:ix_hi], axis=0)
+            w_fit_grid = w_fit_grid * (n_true / n_fit)
+            
+            kl = kl_div(w_true, w_fit_grid, cx_vec[ix_lo:ix_hi], cy_vec, cz_vec)
 
             if kl > kl_threshold and leaf.can_split():
                 print(f'  bootstrap pass {pass_idx}: splitting depth={leaf.depth} '
                       f'bounds={leaf.bounds}, kl={kl:.4f}')
-                # Initialize shadows before split uses them
-                leaf.update_shadows(invert_fn, cx, cy, cz,
-                                    cx_vec, cy_vec, cz_vec)
-                leaf.split(cx, cy, cz, cx_vec, cy_vec, cz_vec,
-                           invert_fn, f_slice, current_t=0)
+                
+                leaf.split(cx_vec, current_t=0)
                 splits_this_pass += 1
 
         print(f'Bootstrap pass {pass_idx}: {splits_this_pass} split(s), '
@@ -560,20 +599,12 @@ def bootstrap_refine(root, f0, cx, cy, cz, cx_vec, cy_vec, cz_vec, invert_fn,
     for leaf in root.get_leaves():
         ix_lo, ix_hi = leaf.bounds
         f_slice = f0[ix_lo:ix_hi]
-        leaf.compute_moments(f_slice)
+        leaf.compute_moments_from_grid(f_slice, cx[ix_lo:ix_hi], cy[ix_lo:ix_hi], cz[ix_lo:ix_hi], cx_vec[ix_lo:ix_hi], cy_vec, cz_vec)
 
-        group_bounds_dict = {
-            'ci_cx': cx_vec[ix_lo], 'cf_cx': cx_vec[ix_hi - 1],
-            'group_bounds_cx': np.array([ix_lo, ix_hi]),
-            'ci_cy': cy_vec[0],     'cf_cy': cy_vec[-1],
-            'group_bounds_cy': np.array([0, len(cy_vec)]),
-            'ci_cz': cz_vec[0],     'cf_cz': cz_vec[-1],
-            'group_bounds_cz': np.array([0, len(cz_vec)]),
-        }
-        leaf.fit_maxwellian(invert_fn, group_bounds_dict)
-        leaf.update_shadows(invert_fn, cx, cy, cz, cx_vec, cy_vec, cz_vec)
+        leaf.fit_maxent_weights()
+        leaf.update_shadows(cx_vec)
         leaf.kl_accum = 0.0
-        leaf.f_shadow_old = [None, None]  # fresh — no temporal history yet
+        leaf.shadow_state_old = [(None, None), (None, None)]
 
 # ============================================================
 # Setup
@@ -587,16 +618,12 @@ f0  = 1 / (np.pi**1.5) * np.exp(-1 * ((cx - 3)**2 + cy**2 + cz**2))
 f02 = 0.04 / (np.pi**1.5) * np.exp(-0.2 * ((cx + 1)**2 + cy**2 + cz**2))
 
 # Build root node
-root = VelocityGroup(cx, cy, cz, cx_vec, cy_vec, cz_vec, bounds=(0, 121), depth=0, max_depth=MAX_DEPTH)
-root.compute_moments(f0)
+bounds_list = np.array([[-7, 7, -7, 7, -7, 7]])
+x_sample, y_sample, z_sample, _, _ = generate_grid(bounds_list, 1)
+root = VelocityGroup(x_sample, y_sample, z_sample, cx_vec, cy_vec, cz_vec, bounds=(0, 121), depth=0, max_depth=MAX_DEPTH)
 
-group_bounds_root = {
-    'ci_cx': -7, 'cf_cx': 7, 'group_bounds_cx': np.array([0, 121]),
-    'ci_cy': -7, 'cf_cy': 7, 'group_bounds_cy': np.array([0, 121]),
-    'ci_cz': -7, 'cf_cz': 7, 'group_bounds_cz': np.array([0, 121]),
-}
-root.fit_maxwellian(invert, group_bounds_root)
-bootstrap_refine(root, f0, cx, cy, cz, cx_vec, cy_vec, cz_vec, invert)
+# Refine the root node using f0 knowledge.
+bootstrap_refine(root, f0, cx, cy, cz, cx_vec, cy_vec, cz_vec)
 
 # ============================================================
 # Time loop
@@ -630,26 +657,16 @@ for t in range(0, 201):
 
         # Update moments from new ft on this leaf's domain
         f_slice = ft[ix_lo:ix_hi]
-        leaf.compute_moments(f_slice)
+        leaf.compute_moments_from_grid(f_slice, cx[ix_lo:ix_hi], cy[ix_lo:ix_hi], cz[ix_lo:ix_hi], cx_vec[ix_lo:ix_hi], cy_vec, cz_vec)
 
-        # Refit Maxwellian
-        cx_lo_v = cx_vec[ix_lo]
-        cx_hi_v = cx_vec[ix_hi - 1]
-        group_bounds = {
-            'ci_cx': cx_lo_v, 'cf_cx': cx_hi_v,
-            'group_bounds_cx': np.array([ix_lo, ix_hi]),
-            'ci_cy': cy_vec[0],  'cf_cy': cy_vec[-1],
-            'group_bounds_cy': np.array([0, 121]),
-            'ci_cz': cz_vec[0],  'cf_cz': cz_vec[-1],
-            'group_bounds_cz': np.array([0, 121]),
-        }
-        leaf.fit_maxwellian(invert, group_bounds)
+        # Refit max entropy weights
+        leaf.fit_maxent_weights()
 
         # Project onto shadow children
-        leaf.update_shadows(invert, cx, cy, cz, cx_vec, cy_vec, cz_vec)
+        leaf.update_shadows(cx_vec)
 
         # Accumulate KL
-        leaf.accumulate_kl(kl_div)
+        leaf.accumulate_kl(cx_vec, cy_vec, cz_vec)
 
         # Track KL history per leaf
         key = leaf.bounds
@@ -667,7 +684,10 @@ for t in range(0, 201):
                 print(f't={t}: splitting depth={leaf.depth} '
                     f'bounds={leaf.bounds}, kl={leaf.kl_accum:.4f}')
                 split_times.append(t)
-                leaf.split(cx, cy, cz, cx_vec, cy_vec, cz_vec, invert, leaf.f, t)
+                leaf.split(cx_vec, t)
+                for child in leaf.children:
+                    print(f'child bounds={child.bounds} mu={child.mu}')
+                
             else:
                 # At max depth — log the signal but can't split
                 print(f't={t}: max depth reached at bounds={leaf.bounds}, '
@@ -677,42 +697,45 @@ for t in range(0, 201):
     checked_parents = set()
     for leaf in list(root.get_leaves()):
         if leaf.parent is None:
-            continue  # root — never coarsen
+            continue
 
         parent = leaf.parent
         if id(parent) in checked_parents:
-            continue  # already checked this pair
+            continue
         checked_parents.add(id(parent))
 
-        if not parent.is_leaf() and len(parent.children) == 2:
-            left_child, right_child = parent.children
+        if not (not parent.is_leaf() and len(parent.children) == 2):
+            continue
 
-            # Both must be leaves
-            if not (left_child.is_leaf() and right_child.is_leaf()):
-                continue
+        left_child, right_child = parent.children
 
-            # Both must have lived long enough
-            if not (left_child.can_coarsen(t, MIN_LIFETIME) and
-                    right_child.can_coarsen(t, MIN_LIFETIME)):
-                continue
+        if not (left_child.is_leaf() and right_child.is_leaf()):
+            continue
 
-            # KL of merged state — coarsen if information loss is small
-            kl, params_p, U_p = coarsening_kl_check(left_child, right_child, cx, cy, cz, cx_vec, cy_vec, cz_vec, invert)
+        if not (left_child.can_coarsen(t) and right_child.can_coarsen(t)):
+            continue
 
-            if kl < KL_COARSEN_THRESHOLD:
-                print(f't={t}: coarsening '
-                      f'{left_child.bounds} + {right_child.bounds} '
-                      f'-> {parent.bounds}, kl={kl:.6f}')
-                coarse_times.append(t)
+        # Skip if either child has invalid lam
+        if (left_child.lam is None  or left_child.lam[4]  >= 0 or
+            right_child.lam is None or right_child.lam[4] >= 0):
+            continue
 
-                parent.merge_children(cx, cy, cz, cx_vec, cy_vec, cz_vec, invert, current_t=t)
+        if (left_child.mu is None or left_child.mu[0]   < 1e-6 or
+            right_child.mu is None or right_child.mu[0] < 1e-6):
+            continue
 
-                # Update kl_history for parent — restart from merge time
-                key = parent.bounds
-                kl_history[key] = {
-                    'created_at': t,
-                    'values':     [0.0]   # fresh accumulator after merge
-                }
+        # Analytic KL cost of merging
+        kl = coarsening_kl_analytic(left_child, right_child, cx_vec, cy_vec, cz_vec)
+
+        if kl < KL_COARSEN_THRESHOLD:
+            print(f't={t}: coarsening '
+                f'{left_child.bounds}+{right_child.bounds}'
+                f'->{parent.bounds}')
+            coarse_times.append(t)
+            parent.merge_children(cx_vec, current_t=t)
+
+            key = parent.bounds
+            kl_history[key] = {'created_at': t, 'values': [0.0]}
 
     fig, axes = plt.subplots(1, 2, figsize=(16, 6))
 

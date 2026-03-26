@@ -3,9 +3,9 @@ import numpy as np
 
 # Velocity space grid parameters
 VELOCITY_SPACE = {
-    'num_cx': 121,
-    'num_cy': 121,
-    'num_cz': 121,
+    'num_cx': 241,
+    'num_cy': 241,
+    'num_cz': 241,
     'cx_range': (-3.0, 3.0),
     'cy_range': (-3.0, 3.0),
     'cz_range': (-3.0, 3.0)
@@ -31,7 +31,11 @@ AMR = {
 
 # Collision parameters
 COLLISION_PARAMS = {
-    'n_coll': 20000
+    'n_coll': 20000,
+    'n_t': 100,
+    'omega': 1.0,
+    'alpha': 1.0,
+    'dt': 0.1
 }
 
 CONSTANTS = {

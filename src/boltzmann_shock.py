@@ -1,6 +1,6 @@
 import numpy as np
 from .banner import print_banner
-from .shock_helper import calc_flux_int, ic, KT_central2, generate_regular_samples, collide, calculate_velocity_grid, generate_grid, calc_flux_analytical
+from .shock_helper import ic, KT_central2, generate_regular_samples, collide, calculate_velocity_grid, generate_grid, calc_flux_analytical, calc_flux_int
 from .config_1d import CONSTANTS, FREESTREAM_PARAMS, PHYS_SPACE, GROUP_PARAMS, VELOCITY_SPACE, SIMULATION_PARAMS
 import itertools
 from scipy import special
@@ -47,6 +47,7 @@ def run_simulation():
     u2 = u1 * rho1/rho2
     Ma2 = Ma1 * u2/u1 * (T1/T2)**0.5
     n2 = P2/(R * T2) * 1/m
+    print(n1)
 
     # Set up reference variables.
     m_ref = m
@@ -65,7 +66,7 @@ def run_simulation():
     print('Characteristic length:', L_ref, '[m]')
     print('Knudsen number:', Kn)
     print('Collision cross section omega:', omega)
-
+    
     print("---------------------------SETTING UP INITIAL CONDITION---------------------------")
     # Set up velocity and physical space grid.
     cx_vec, cy_vec, cz_vec, cx, cy, cz = calculate_velocity_grid(VELOCITY_SPACE)
@@ -97,7 +98,7 @@ def run_simulation():
     print('dx:', dx)
 
     # Calculate intial condition on physical grid.
-    transition_start = -5
+    transition_start = -20
     transition_end = 5
     ramp_length = transition_end - transition_start
 
@@ -136,7 +137,7 @@ def run_simulation():
         U = data
     else:
         U = U0.copy()
-
+    print(U[0])
     # plt.plot(xj_vec, 2/3 * ((np.sum(U[:, :, 4], axis=1) / np.sum(U[:, :, 0], axis=1)) - (np.sum(U[:, :, 1], axis=1) / np.sum(U[:, :, 0], axis=1))**2))
     # plt.plot(xj_vec, T_val, '--')
     # plt.xlabel('xj', fontsize=16)
@@ -159,14 +160,26 @@ def run_simulation():
         x_sample, y_sample, z_sample, offsets, num_samples):
         # Calculate weights through optimization.
         weights, num_valid_samples, lam_out = generate_regular_samples(
-            i, U_i, num_groups, lam_cache_i, x_sample, y_sample, z_sample, offsets, num_samples)
+            i, U_i, num_groups, lam_cache_i, x_sample, y_sample, z_sample, offsets, num_samples, bounds_list)
 
         # Advance the collision and flux forward.
         coll = collide(x_sample, y_sample, z_sample, weights, num_valid_samples, bounds_list, num_groups, \
                         n_coll, CX_LB, CX_UB, CY_LB, CY_UB, CZ_LB, CZ_UB, key_type, sigma_coeff_hat, omega, alpha)
         flux = calc_flux_analytical(lam_out, bounds_list, num_groups, U_i)
 
-        return i, coll, flux, lam_out
+        second_moment_x = 0.0
+        rho  = np.sum(U_i[:, 0])          # cell total density
+        rhou = np.sum(U_i[:, 1])          # cell total x-momentum
+        ux   = rhou / rho 
+        for j in range(num_groups):
+            start = int(offsets[j])
+            end   = int(offsets[j+1])
+            w_i   = weights[start:end]     # f * dv for this group
+            vx_i  = x_sample[start:end]
+            second_moment_x += np.sum(vx_i**2 * w_i)
+        Tx = second_moment_x / rho - ux**2
+
+        return i, coll, flux, lam_out, Tx
 
     for t in range(0, int(np.ceil(int(t_end / dt) / 100) * 100) + 1):
         # Boundary conditions.
@@ -185,7 +198,9 @@ def run_simulation():
                 for i in range(0, numXj)
             )
 
-        for i, coll, flux, lam_out in step_dt:
+        Tx_hist = np.zeros(numXj)
+
+        for i, coll, flux, lam_out, Tx in step_dt:
             k1_c[i, :, 0] = coll[0]
             k1_c[i, :, 1] = coll[1]
             k1_c[i, :, 2] = coll[2]
@@ -193,17 +208,23 @@ def run_simulation():
             k1_c[i, :, 4] = coll[4]
             F1[i] = flux
             lam_cache[i] = lam_out
+            Tx_hist[i] = Tx
 
         # 2nd order central difference using MUSCL reconstruction and slope limiters.
         k1_f = KT_central2(U, F1, numXj, num_groups, dt, dx, CX_LB, CX_UB)
         U += (k1_f + k1_c) * dt
+        U[:, :, 2] = 0.0   # enforce uy = 0 (1D shock symmetry)
+        U[:, :, 3] = 0.0   # enforce uz = 0 (1D shock symmetry)
 
-        # Save solution.
-        f1 = 'simulation_data/U{}.npy'.format(t + 0)
-        with open(f1, 'wb') as file:
-            np.save(file, U)
+        if t % 50 == 0:
+            # Save solution.
+            f1 = 'simulation_data2/U{}.npy'.format(t + 0)
+            with open(f1, 'wb') as file:
+                np.save(file, U)
 
-        if t % 10 == 0:
+            f2 = 'simulation_data2/Tx{}.npy'.format(t + 0)
+            with open(f2, 'wb') as file:
+                np.save(file, Tx_hist)
             print(t * dt,  t + 0)
 
 if __name__ == '__main__':

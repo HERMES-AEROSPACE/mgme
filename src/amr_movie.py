@@ -2,7 +2,7 @@ import glob
 from PIL import Image
 
 frames = []
-for path in sorted(glob.glob('plots/amr_t*.png')):
+for path in sorted(glob.glob('plots/f_*.png')):
     frames.append(Image.open(path).copy())  # .copy() to avoid lazy loading issues
 
 frames[0].save(
