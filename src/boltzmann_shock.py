@@ -1,6 +1,7 @@
 import numpy as np
 from .banner import print_banner
-from .shock_helper import ic, KT_central2, generate_regular_samples, collide, calculate_velocity_grid, generate_grid, calc_flux_analytical, calc_flux_int
+from .shock_helper import ic, KT_central2, generate_regular_samples, collide, calculate_velocity_grid
+from .shock_helper import generate_grid_regular, generate_grid, calc_flux_analytical, calc_flux_int
 from .config_1d import CONSTANTS, FREESTREAM_PARAMS, PHYS_SPACE, GROUP_PARAMS, VELOCITY_SPACE, SIMULATION_PARAMS
 import itertools
 from scipy import special
@@ -98,8 +99,8 @@ def run_simulation():
     print('dx:', dx)
 
     # Calculate intial condition on physical grid.
-    transition_start = -20
-    transition_end = 5
+    transition_start = -25
+    transition_end = 15
     ramp_length = transition_end - transition_start
 
     t = (xj_vec - transition_start) / ramp_length
@@ -137,36 +138,40 @@ def run_simulation():
         U = data
     else:
         U = U0.copy()
-    print(U[0])
+
+    initial_f = 'simulation_data/U{}.npy'.format(0)
+    with open(initial_f, 'wb') as file:
+        np.save(file, U)
+
     # plt.plot(xj_vec, 2/3 * ((np.sum(U[:, :, 4], axis=1) / np.sum(U[:, :, 0], axis=1)) - (np.sum(U[:, :, 1], axis=1) / np.sum(U[:, :, 0], axis=1))**2))
-    # plt.plot(xj_vec, T_val, '--')
+    # plt.plot(T_val, '--')
     # plt.xlabel('xj', fontsize=16)
     # plt.ylabel('T', fontsize=16)
     # plt.savefig('plots/ic.pdf')
     # f[f < 1e-12] = 0.0
-    plt.plot(cx_vec, np.trapezoid(np.trapezoid(n_val[-1] * f[-1], cz_vec, axis=2), cy_vec, axis=1))
-    # plt.plot(cz_vec, np.trapezoid(np.trapezoid(n_val[-1] * f[-1], cy_vec, axis=1), cx_vec, axis=0))
-    plt.plot(cx_vec, np.trapezoid(np.trapezoid(f[0], cz_vec, axis=2), cy_vec, axis=1))
-    plt.savefig('plots/icdist.pdf')
+    # plt.plot(cx_vec, np.trapezoid(np.trapezoid(n_val[-1] * f[-1], cz_vec, axis=2), cy_vec, axis=1))
+    # plt.plot(cz_vec, np.trapezoid(np.trapezoid(n_val[0] * f[0], cy_vec, axis=1), cx_vec, axis=0))
+    # plt.plot(cx_vec, np.trapezoid(np.trapezoid(f[0], cz_vec, axis=2), cy_vec, axis=1))
+    # plt.savefig('plots/icdist.pdf')
     # plt.show()
     
     print("--------------------------------BEGIN SIMULATION----------------------------------")
     # Cache distribution parameters for Newton solver.
     lam_cache = np.zeros((numXj, num_groups, 5))
     pr = cProfile.Profile()
-    x_sample, y_sample, z_sample, offsets, num_samples = generate_grid(bounds_list, num_groups)
-
-    def step(i, U_i, bounds_list, num_groups, CX_LB, CX_UB, CY_LB, CY_UB, CZ_LB, CZ_UB, key_type, sigma_coeff_hat, omega, lam_cache_i, alpha, \
-        x_sample, y_sample, z_sample, offsets, num_samples):
+    # x_s, y_s, z_s, offsets, num_samples = generate_grid(bounds_list, num_groups, 3)
+    # print(num_samples)
+    
+    def step(i, U_i, bounds_list, num_groups, CX_LB, CX_UB, CY_LB, CY_UB, CZ_LB, CZ_UB, key_type, sigma_coeff_hat, omega, alpha, lam_cache_i):
         # Calculate weights through optimization.
-        weights, num_valid_samples, lam_out = generate_regular_samples(
-            i, U_i, num_groups, lam_cache_i, x_sample, y_sample, z_sample, offsets, num_samples, bounds_list)
-
+        weights, num_valid_samples, lam_out, x_s, y_s, z_s, offsets = generate_regular_samples(i, U_i, num_groups, bounds_list, lam_cache_i)
+        
         # Advance the collision and flux forward.
-        coll = collide(x_sample, y_sample, z_sample, weights, num_valid_samples, bounds_list, num_groups, \
+        coll = collide(x_s, y_s, z_s, weights, num_valid_samples, bounds_list, num_groups, \
                         n_coll, CX_LB, CX_UB, CY_LB, CY_UB, CZ_LB, CZ_UB, key_type, sigma_coeff_hat, omega, alpha)
-        flux = calc_flux_analytical(lam_out, bounds_list, num_groups, U_i)
-
+        # flux = calc_flux_analytical(lam_out, bounds_list, num_groups, U_i)
+        flux = calc_flux_int(num_groups, weights, offsets, x_s, y_s, z_s)
+        
         second_moment_x = 0.0
         rho  = np.sum(U_i[:, 0])          # cell total density
         rhou = np.sum(U_i[:, 1])          # cell total x-momentum
@@ -175,13 +180,14 @@ def run_simulation():
             start = int(offsets[j])
             end   = int(offsets[j+1])
             w_i   = weights[start:end]     # f * dv for this group
-            vx_i  = x_sample[start:end]
+            vx_i  = x_s[start:end]
             second_moment_x += np.sum(vx_i**2 * w_i)
         Tx = second_moment_x / rho - ux**2
 
         return i, coll, flux, lam_out, Tx
 
-    for t in range(0, int(np.ceil(int(t_end / dt) / 100) * 100) + 1):
+    for t in range(1, int(np.ceil(int(t_end / dt) / 100) * 100) + 1):
+        # print(t)
         # Boundary conditions.
         U[0, :] = U0[0, :]
         U[-1, :] = U[-2, :]
@@ -194,7 +200,7 @@ def run_simulation():
         with parallel_backend('loky', inner_max_num_threads=1):
             step_dt = Parallel(n_jobs=32)(
                 delayed(step)(i, U[i], bounds_list, num_groups, CX_LB, CX_UB, CY_LB, CY_UB, CZ_LB, CZ_UB, \
-                            key_type, sigma_coeff_hat, omega, lam_cache[i].copy(), alpha, x_sample, y_sample, z_sample, offsets, num_samples)
+                            key_type, sigma_coeff_hat, omega, alpha, lam_cache[i])
                 for i in range(0, numXj)
             )
 
@@ -213,16 +219,14 @@ def run_simulation():
         # 2nd order central difference using MUSCL reconstruction and slope limiters.
         k1_f = KT_central2(U, F1, numXj, num_groups, dt, dx, CX_LB, CX_UB)
         U += (k1_f + k1_c) * dt
-        U[:, :, 2] = 0.0   # enforce uy = 0 (1D shock symmetry)
-        U[:, :, 3] = 0.0   # enforce uz = 0 (1D shock symmetry)
 
         if t % 50 == 0:
             # Save solution.
-            f1 = 'simulation_data2/U{}.npy'.format(t + 0)
+            f1 = 'simulation_data/U{}.npy'.format(t + 0)
             with open(f1, 'wb') as file:
                 np.save(file, U)
 
-            f2 = 'simulation_data2/Tx{}.npy'.format(t + 0)
+            f2 = 'simulation_data/Tx{}.npy'.format(t + 0)
             with open(f2, 'wb') as file:
                 np.save(file, Tx_hist)
             print(t * dt,  t + 0)

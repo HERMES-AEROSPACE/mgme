@@ -1,4 +1,4 @@
-from numba import jit, types
+from numba import jit, types, njit
 from numba.typed import Dict
 import numpy as np
 from scipy import optimize, special, interpolate
@@ -8,6 +8,7 @@ import cvxpy as cp
 import sys
 from scipy.special import erf
 from scipy.stats import norm, qmc
+import time
 
 
 def calculate_velocity_grid(velocity_space):
@@ -19,13 +20,13 @@ def calculate_velocity_grid(velocity_space):
 
     return cx_vec, cy_vec, cz_vec, cx, cy, cz 
 
-def generate_grid(bounds_list, num_groups):
+def generate_grid(bounds_list, num_groups, factor):
     num_samples = np.zeros(num_groups)
     for i in range(0, num_groups):
         volume = (bounds_list[i, 1] - bounds_list[i, 0]) * \
             (bounds_list[i, 3] - bounds_list[i, 2]) * \
             (bounds_list[i, 5] - bounds_list[i, 4])
-        num_samples[i] = np.max((300, int(np.ceil(15 * volume))))
+        num_samples[i] = np.max((300, int(np.ceil(factor * volume))))
     
     x_sample = np.zeros(int(np.sum(num_samples)))
     y_sample = np.zeros(int(np.sum(num_samples)))
@@ -47,6 +48,44 @@ def generate_grid(bounds_list, num_groups):
         x_sample[start_idx:end_idx] = sample[:, 0]
         y_sample[start_idx:end_idx] = sample[:, 1]
         z_sample[start_idx:end_idx] = sample[:, 2]
+
+    return x_sample, y_sample, z_sample, offsets, num_samples
+
+def generate_grid_regular(bounds_list, num_groups, factor):
+    num_samples = np.zeros(num_groups)
+    for i in range(num_groups):
+        volume = (bounds_list[i, 1] - bounds_list[i, 0]) * \
+            (bounds_list[i, 3] - bounds_list[i, 2]) * \
+            (bounds_list[i, 5] - bounds_list[i, 4])
+        total = np.max((300, int(np.ceil(factor * volume))))
+        # points per axis so that n^3 >= total
+        n_per_axis = int(np.ceil(total ** (1/3)))
+        num_samples[i] = n_per_axis ** 3
+
+    x_sample = np.zeros(int(np.sum(num_samples)))
+    y_sample = np.zeros(int(np.sum(num_samples)))
+    z_sample = np.zeros(int(np.sum(num_samples)))
+    offsets = np.concatenate([[0], np.cumsum(num_samples)])
+
+    for i in range(num_groups):
+        l_bounds = np.array([bounds_list[i, 0], bounds_list[i, 2], bounds_list[i, 4]])
+        u_bounds = np.array([bounds_list[i, 1], bounds_list[i, 3], bounds_list[i, 5]])
+
+        if np.any(l_bounds > u_bounds): continue
+
+        start_idx = int(offsets[i])
+        end_idx = int(offsets[i+1])
+        n_per_axis = int(round(num_samples[i] ** (1/3)))
+
+        gx = np.linspace(l_bounds[0], u_bounds[0], n_per_axis)
+        gy = np.linspace(l_bounds[1], u_bounds[1], n_per_axis)
+        gz = np.linspace(l_bounds[2], u_bounds[2], n_per_axis)
+
+        GX, GY, GZ = np.meshgrid(gx, gy, gz, indexing='ij')
+
+        x_sample[start_idx:end_idx] = GX.ravel()
+        y_sample[start_idx:end_idx] = GY.ravel()
+        z_sample[start_idx:end_idx] = GZ.ravel()
 
     return x_sample, y_sample, z_sample, offsets, num_samples
 
@@ -338,7 +377,7 @@ def calc_flux_analytical(lam_cache, bounds_list, num_groups, U_i):
 
     for g in range(num_groups):
         lam = lam_cache[g]
-        if lam[4] >= 0.0 or U_i[g, 0] < 1e-6:
+        if lam[4] >= 0.0 or U_i[g, 0] < 1e-5:
             continue
 
         beta = -lam[4]
@@ -483,73 +522,43 @@ def KT_central2(U_list, F_list, numXj, n_groups, dt, dx, CX_LB, CX_UB):
 
     return k
 
-@jit(nopython=True)
-def solve_group_newton(x_s, y_s, z_s, U, lam0, max_iter=50, tol=1e-8):
+def solve_group_newton(x_s, y_s, z_s, U, lam, max_iter=50, tol=1e-10):
     """
     Solve max-entropy weights directly via Newton iterations on dual.
     
     Dual problem: find lambda s.t. sum_i phi_i * exp(lam . phi_i) = U
     """
     n = x_s.shape[0]
-    r2 = x_s**2 + y_s**2 + z_s**2
 
-    # Initial lambda guess
-    lam = lam0.copy()
+    phi = np.empty((5, n))
+    phi[0] = np.ones(n)
+    phi[1] = x_s
+    phi[2] = y_s
+    phi[3] = z_s
+    phi[4] = x_s**2 + y_s**2 + z_s**2
 
     converged = False
-    # print(U)
     for iteration in range(max_iter):
         # Compute weights from current lambda
-        log_w = (lam[0] + lam[1]*x_s + lam[2]*y_s + lam[3]*z_s + lam[4]*r2)
-        w = np.exp(log_w)
+        w = np.exp(lam @ phi)
 
-        # Compute moment residual
-        g = np.zeros(5)
-        g[0] = np.sum(w) - U[0]
-        g[1] = np.sum(x_s * w) - U[1]
-        g[2] = np.sum(y_s * w) - U[2]
-        g[3] = np.sum(z_s * w) - U[3]
-        g[4] = np.sum(r2  * w) - U[4]
+        phi_w = phi @ w  # broadcast: each row of phi scaled by w
+        # Gradient: g = phi @ w - U  (moment residuals)
+        g = phi_w - U
 
+        # Convergence check.
         if np.linalg.norm(g) < tol:
             converged = True
             break
 
         # Hessian: H_ij = sum(phi_i * phi_j * w)
-        phi = np.zeros((5, n))
-        phi[0] = np.ones(n)
-        phi[1] = x_s
-        phi[2] = y_s
-        phi[3] = z_s
-        phi[4] = r2
-
-        H = np.zeros((5, 5))
-        for a in range(5):
-            for b in range(5):
-                H[a, b] = np.sum(phi[a] * phi[b] * w)
-
-        # Newton step with Armijo line search
-        dlam = np.linalg.solve(H, g)
-        g_norm_sq = np.dot(g, g)
-        alpha = 1.0
-        beta_ls = 0.5
-        c_ls = 1e-3
-        while alpha > 1e-12:
-            lam_new = lam - alpha * dlam
-            log_w_new = lam_new[0] + lam_new[1]*x_s + lam_new[2]*y_s + lam_new[3]*z_s + lam_new[4]*r2
-            w_new = np.exp(log_w_new)
-            g_new = np.zeros(5)
-            g_new[0] = np.sum(w_new) - U[0]
-            g_new[1] = np.sum(x_s * w_new) - U[1]
-            g_new[2] = np.sum(y_s * w_new) - U[2]
-            g_new[3] = np.sum(z_s * w_new) - U[3]
-            g_new[4] = np.sum(r2  * w_new) - U[4]
-            if np.dot(g_new, g_new) <= g_norm_sq * (1.0 - 2.0 * c_ls * alpha):
-                break
-            alpha *= beta_ls
-        lam -= alpha * dlam
+        H = phi @ (w[:, None] * phi.T)
+        # Newton step
+        lam -= np.linalg.solve(H, g)
+    
+    w = np.exp(lam @ phi) 
         
-    return w, lam, converged
+    return w, lam, converged, g
 
 def solve_group_cvxpy(x_sample, y_sample, z_sample, U_i, flux_limit=10.0):
     # Fallback to CVXPY for ill-conditioned cases
@@ -568,71 +577,113 @@ def solve_group_cvxpy(x_sample, y_sample, z_sample, U_i, flux_limit=10.0):
         prob = cp.Problem(obj, constraints)
         prob.solve(solver=cp.CLARABEL, verbose=False)
 
+        dual_vals = np.zeros(5)
+        for i in range(5):
+            dual_vals[i] = constraints[i].dual_value
+
         if x.value is not None and not np.any(np.isnan(x.value)):
             predicted_flux = np.sum(x_sample * x.value)
             
             if np.abs(predicted_flux) < flux_limit:
-                return True, x.value, predicted_flux
+                return True, x.value, dual_vals
             else:
-                return False, None, f"flux_too_large_{predicted_flux:.3f}"
+                return False, None, np.zeros(5)
         else:
-            return False, None, f"status_{prob.status}"
+            return False, None, np.zeros(5)
     except Exception as e:
-        return False, None, str(e)
+        return False, None, np.zeros(5)
 
-def generate_regular_samples(p, U_i, num_groups, lam_cache, x_sample, y_sample, z_sample, offsets, num_samples, bounds_list=None):
+def generate_regular_samples(p, U_i, num_groups, bounds_list, lam_cache_i, n_sigma=3.0):
     num_valid_samples = np.zeros(num_groups, dtype=np.int64)
-    weights = np.zeros(int(np.sum(num_samples)))
-
-    # Initialize output lambda array for all groups
+    n_x = 5
+    n_y = 5
+    n_z = 5
+    total = n_x * n_y * n_z
     lam_out = np.zeros((num_groups, 5))
+
+    n_fine = 31
+    weights = np.zeros(n_fine**3 * num_groups)
+    offsets = np.arange(num_groups + 1) * n_fine**3
+    x_sample = np.zeros(n_fine**3 * num_groups)
+    y_sample = np.zeros(n_fine**3 * num_groups)
+    z_sample = np.zeros(n_fine**3 * num_groups)
 
     for i in range(num_groups):
         start_idx = int(offsets[i])
         end_idx = int(offsets[i+1])
-        n_samples_group = end_idx - start_idx
 
         # Skip if density too small
-        if U_i[i, 0] <= 1e-6:
+        if U_i[i, 0] <= 1e-5:
             num_valid_samples[i] = 0
             weights[start_idx:end_idx] = 0.0
             continue
 
         success = False
-        x_slice = x_sample[start_idx:end_idx]
-        y_slice = y_sample[start_idx:end_idx]
-        z_slice = z_sample[start_idx:end_idx]
 
-        lam_warm = lam_cache[i].copy()
-        # Try to solve using Newton first (much faster).
-        solution, lam, success = solve_group_newton(x_slice, y_slice, z_slice, U_i[i], lam_warm)
+        ux  = U_i[i, 1] / U_i[i, 0]
+        uy  = U_i[i, 2] / U_i[i, 0]
+        uz  = U_i[i, 3] / U_i[i, 0]
+        T   = max(2 * (U_i[i, 4] / U_i[i, 0] - ux**2 - uy**2 - uz**2) / 3.0, 1e-10)
+        v_th = np.sqrt(T)
+
+        xlo = np.max([ux - n_sigma * v_th, bounds_list[i, 0]]) + (1e-10 if i > 0 else 0)
+        xhi = np.min([ux + n_sigma * v_th, bounds_list[i, 1]]) - (1e-10 if i < num_groups-1 else 0)
+        ylo = np.max([uy - n_sigma * v_th, bounds_list[i, 2]])
+        yhi = np.min([uy + n_sigma * v_th, bounds_list[i, 3]])
+        zlo = np.max([uz - n_sigma * v_th, bounds_list[i, 4]])
+        zhi = np.min([uz + n_sigma * v_th, bounds_list[i, 5]])
+        
+        if np.all(lam_cache_i[i] == 0):
+            # ──────────── CVXPY ──────────────
+            gx = np.linspace(xlo, xhi, n_x)
+            gy = np.linspace(ylo, yhi, n_y)
+            gz = np.linspace(zlo, zhi, n_z)
+
+            GX, GY, GZ = np.meshgrid(gx, gy, gz, indexing='ij')
+            x_sub = GX.ravel()
+            y_sub = GY.ravel()
+            z_sub = GZ.ravel()
+
+            
+            success, solution, dual_vals = solve_group_cvxpy(x_sub, y_sub, z_sub, U_i[i])
+            dual_vals = -dual_vals
+            lam = dual_vals.copy()
+        else:
+            lam = lam_cache_i[i]
+
+        # ──────────── Newton (project onto grid) ──────────────
+        gx_fine = np.linspace(xlo, xhi, n_fine)
+        gy_fine = np.linspace(ylo, yhi, n_fine)
+        gz_fine = np.linspace(zlo, zhi, n_fine)
+        GX, GY, GZ = np.meshgrid(gx_fine, gy_fine, gz_fine, indexing='ij')
+        x_slice = GX.ravel()
+        y_slice = GY.ravel()
+        z_slice = GZ.ravel()
+        
+        w_init = np.exp(lam[1]*x_slice + lam[2]*y_slice + lam[3]*z_slice + 
+                lam[4]*(x_slice**2 + y_slice**2 + z_slice**2))
+        lam[0] = np.log(U_i[i, 0]) - np.log(np.sum(w_init))
+        
+        solution, lam, success, rel_err = solve_group_newton(x_slice, y_slice, z_slice, U_i[i], lam)
 
         if success:
-            # Accept solution
             weights[start_idx:end_idx] = solution
             num_valid_samples[i] = np.sum(solution > 1e-12)
             lam_out[i] = lam
-        elif not success:
-            success, solution, status = solve_group_cvxpy(x_slice, y_slice, z_slice, U_i[i])
-            if success:
-                weights[start_idx:end_idx] = solution
-                num_valid_samples[i] = np.sum(solution > 1e-12)
-                print(U_i[i])
-                try:
-                    bounds_i = bounds_list[i] if bounds_list is not None else None
-                    lam_out[i] = maxwellian_lambda(U_i[i], bounds_i)
-                except ValueError:
-                    lam_out[i] = np.zeros(5)
+
+            x_sample[start_idx:end_idx] = x_slice
+            y_sample[start_idx:end_idx] = y_slice
+            z_sample[start_idx:end_idx] = z_slice
 
         if not success:
-            print(f'Cell {p}, Group {i}: Failed after Newton/CVXPY attempts')
+            print(f'Cell {p}, Group {i}: Failed')
             print(f'  moments: {U_i[i]}')
-            print(f'  num_samples: {n_samples_group}')
+            print(f'  rel error: {rel_err}')
             num_valid_samples[i] = 0
             weights[start_idx:end_idx] = 0.0
             lam_out[i] = np.zeros(5)
 
-    return (weights, num_valid_samples, lam_out)
+    return (weights, num_valid_samples, lam_out, x_sample, y_sample, z_sample, offsets)
 
 @jit(nopython=True)
 def collide(x_sample, y_sample, z_sample, weights, num_valid_samples, bounds_list, n_groups, n_coll,
@@ -652,10 +703,10 @@ def collide(x_sample, y_sample, z_sample, weights, num_valid_samples, bounds_lis
     cf_cz = bounds_list[:, 5]
 
     def find_group(vx, vy, vz):
-        x_valid = (vx >= ci_cx) & (vx <= cf_cx)
-        y_valid = (vy >= ci_cy) & (vy <= cf_cy)
-        z_valid = (vz >= ci_cz) & (vz <= cf_cz)
-        return np.argmax(x_valid & y_valid & z_valid)
+        for g in range(len(ci_cx)):
+            if ci_cx[g] <= vx <= cf_cx[g] and ci_cy[g] <= vy <= cf_cy[g] and ci_cz[g] <= vz <= cf_cz[g]:
+                return g
+        return 0
 
     def clamp_and_find_group(vx, vy, vz):
         vx_c = np.minimum(np.maximum(vx, CX_LB), CX_UB)
@@ -670,6 +721,11 @@ def collide(x_sample, y_sample, z_sample, weights, num_valid_samples, bounds_lis
     if W == 0.0:
         return [group_n, group_px, group_py, group_pz, group_e]
     w_cdf       = np.cumsum(w_nonzero) / W   # normalized CDF, goes from 0 to 1
+
+    # plt.figure()
+    # plt.plot(w_cdf)
+    # plt.savefig('temp.pdf')
+    # sys.exit()
 
     # Sample using searchsorted with cdf. Clip to prevent out of bounds errors.
     u1 = np.random.uniform(0.0, 1.0, n_coll)
@@ -762,8 +818,7 @@ def collide(x_sample, y_sample, z_sample, weights, num_valid_samples, bounds_lis
         post_group1[i] = clamp_and_find_group(vx1p, vy1p, vz1p)
         post_group2[i] = clamp_and_find_group(vx2p, vy2p, vz2p)
 
-    # --- Apply collision rates ---
-    for i in range(n_actual):
+        # --- Apply collision rates ---
         g1,  g2  = pre_group1[i],  pre_group2[i]
         g1r, g2r = post_group1[i], post_group2[i]
         g = g_arr[i]
