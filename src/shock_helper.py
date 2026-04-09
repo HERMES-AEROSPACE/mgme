@@ -685,7 +685,7 @@ def generate_regular_samples(p, U_i, num_groups, bounds_list, lam_cache_i, n_sig
 
     return (weights, num_valid_samples, lam_out, x_sample, y_sample, z_sample, offsets)
 
-@jit(nopython=True)
+@njit
 def collide(x_sample, y_sample, z_sample, weights, num_valid_samples, bounds_list, n_groups, n_coll,
             CX_LB, CX_UB, CY_LB, CY_UB, CZ_LB, CZ_UB, key_type, sigma_coeff_hat, omega, alpha):
 
@@ -718,14 +718,7 @@ def collide(x_sample, y_sample, z_sample, weights, num_valid_samples, bounds_lis
     nonzero_indices = np.where(weights > 1e-12)[0]
     w_nonzero   = weights[nonzero_indices]
     W           = w_nonzero.sum()
-    if W == 0.0:
-        return [group_n, group_px, group_py, group_pz, group_e]
     w_cdf       = np.cumsum(w_nonzero) / W   # normalized CDF, goes from 0 to 1
-
-    # plt.figure()
-    # plt.plot(w_cdf)
-    # plt.savefig('temp.pdf')
-    # sys.exit()
 
     # Sample using searchsorted with cdf. Clip to prevent out of bounds errors.
     u1 = np.random.uniform(0.0, 1.0, n_coll)
@@ -747,19 +740,6 @@ def collide(x_sample, y_sample, z_sample, weights, num_valid_samples, bounds_lis
     Rf2       = Rf2[mask]
     n_actual  = depl_idx1.size
 
-    # --- Precompute all pre and post collision groups in one pass ---
-    pre_group1  = np.zeros(n_actual, dtype=np.int64)
-    pre_group2  = np.zeros(n_actual, dtype=np.int64)
-    post_group1 = np.zeros(n_actual, dtype=np.int64)
-    post_group2 = np.zeros(n_actual, dtype=np.int64)
-
-    # Store post-collision velocities for second pass
-    vx1_arr  = np.zeros(n_actual);  vy1_arr  = np.zeros(n_actual);  vz1_arr  = np.zeros(n_actual)
-    vx2_arr  = np.zeros(n_actual);  vy2_arr  = np.zeros(n_actual);  vz2_arr  = np.zeros(n_actual)
-    vx1p_arr = np.zeros(n_actual);  vy1p_arr = np.zeros(n_actual);  vz1p_arr = np.zeros(n_actual)
-    vx2p_arr = np.zeros(n_actual);  vy2p_arr = np.zeros(n_actual);  vz2p_arr = np.zeros(n_actual)
-    g_arr = np.zeros(n_actual)
-
     for i in range(n_actual):
         vx1 = x_sample[depl_idx1[i]]
         vy1 = y_sample[depl_idx1[i]]
@@ -768,19 +748,15 @@ def collide(x_sample, y_sample, z_sample, weights, num_valid_samples, bounds_lis
         vy2 = y_sample[depl_idx2[i]]
         vz2 = z_sample[depl_idx2[i]]
 
-        vx1_arr[i] = vx1;  vy1_arr[i] = vy1;  vz1_arr[i] = vz1
-        vx2_arr[i] = vx2;  vy2_arr[i] = vy2;  vz2_arr[i] = vz2
-
         # Pre-collision groups
-        pre_group1[i] = find_group(vx1, vy1, vz1)
-        pre_group2[i] = find_group(vx2, vy2, vz2)
+        g1 = find_group(vx1, vy1, vz1)
+        g2 = find_group(vx2, vy2, vz2)
 
         # Post-collision velocities
         gx = vx2 - vx1
         gy = vy2 - vy1
         gz = vz2 - vz1
         g  = np.sqrt(gx**2 + gy**2 + gz**2)
-        g_arr[i] = g
 
         # VHS isotropic scattering. If alpha != 1, then VSS anisotropic scattering.
         phi       = 2 * np.pi * Rf1[i]
@@ -807,45 +783,33 @@ def collide(x_sample, y_sample, z_sample, weights, num_valid_samples, bounds_lis
         vy2p = V_y + gyp
         vz2p = V_z + gzp
 
-        vx1p_arr[i] = vx1p
-        vy1p_arr[i] = vy1p
-        vz1p_arr[i] = vz1p
-        vx2p_arr[i] = vx2p
-        vy2p_arr[i] = vy2p
-        vz2p_arr[i] = vz2p
-
         # Post-collision groups
-        post_group1[i] = clamp_and_find_group(vx1p, vy1p, vz1p)
-        post_group2[i] = clamp_and_find_group(vx2p, vy2p, vz2p)
-
-        # --- Apply collision rates ---
-        g1,  g2  = pre_group1[i],  pre_group2[i]
-        g1r, g2r = post_group1[i], post_group2[i]
-        g = g_arr[i]
+        g1r = clamp_and_find_group(vx1p, vy1p, vz1p)
+        g2r = clamp_and_find_group(vx2p, vy2p, vz2p)
 
         # Single collision weight — used for BOTH loss and gain
         C = 0.5 * W**2 / n_actual * g**(2 - 2*omega) * sigma_coeff_hat
 
         # Loss from pre-collision groups
         group_n[g1]  -= C;       group_n[g2]  -= C
-        group_px[g1] -= C * vx1_arr[i]
-        group_py[g1] -= C * vy1_arr[i]
-        group_pz[g1] -= C * vz1_arr[i]
-        group_e[g1]  -= C * (vx1_arr[i]**2 + vy1_arr[i]**2 + vz1_arr[i]**2)
-        group_px[g2] -= C * vx2_arr[i]
-        group_py[g2] -= C * vy2_arr[i]
-        group_pz[g2] -= C * vz2_arr[i]
-        group_e[g2]  -= C * (vx2_arr[i]**2 + vy2_arr[i]**2 + vz2_arr[i]**2)
+        group_px[g1] -= C * vx1
+        group_py[g1] -= C * vy1
+        group_pz[g1] -= C * vz1
+        group_e[g1]  -= C * (vx1**2 + vy1**2 + vz1**2)
+        group_px[g2] -= C * vx2
+        group_py[g2] -= C * vy2
+        group_pz[g2] -= C * vz2
+        group_e[g2]  -= C * (vx2**2 + vy2**2 + vz2**2)
 
         # Gain into post-collision groups
         group_n[g1r]  += C;       group_n[g2r]  += C
-        group_px[g1r] += C * vx1p_arr[i]
-        group_py[g1r] += C * vy1p_arr[i]
-        group_pz[g1r] += C * vz1p_arr[i]
-        group_e[g1r]  += C * (vx1p_arr[i]**2 + vy1p_arr[i]**2 + vz1p_arr[i]**2)
-        group_px[g2r] += C * vx2p_arr[i]
-        group_py[g2r] += C * vy2p_arr[i]
-        group_pz[g2r] += C * vz2p_arr[i]
-        group_e[g2r]  += C * (vx2p_arr[i]**2 + vy2p_arr[i]**2 + vz2p_arr[i]**2)
+        group_px[g1r] += C * vx1p
+        group_py[g1r] += C * vy1p
+        group_pz[g1r] += C * vz1p
+        group_e[g1r]  += C * (vx1p**2 + vy1p**2 + vz1p**2)
+        group_px[g2r] += C * vx2p
+        group_py[g2r] += C * vy2p
+        group_pz[g2r] += C * vz2p
+        group_e[g2r]  += C * (vx2p**2 + vy2p**2 + vz2p**2)
 
     return [group_n, group_px, group_py, group_pz, group_e]
