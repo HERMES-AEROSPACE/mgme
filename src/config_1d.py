@@ -19,7 +19,7 @@ VELOCITY_SPACE = {
 
 PHYS_SPACE = {
     'num_xj': 101,
-    'xj_range': [-23, 17]
+    'xj_range': [-25, 15]
 }
 
 # Group parameters
@@ -33,9 +33,9 @@ GROUP_PARAMS = {
     # 'ci_cz': np.array([-5.0]), 
     # 'cf_cz': np.array([5.5]),
     # 'group_bounds_cz': np.array([[0, 106]])
-    'ci_cx': np.array([-15.0, -5.0, 0.0, 4.0, 6.0, 8.0]),
-    'cf_cx': np.array([-5.0, 0.0, 4.0, 6.0, 8.0, 17.0]),
-    'group_bounds_cx': np.array([[0, 101], [100, 151], [150, 191], [190, 211], [210, 231], [230, 321]]),
+    'ci_cx': np.array([-15.0, -7.0, 0.0, 6.5]),
+    'cf_cx': np.array([-7.0, 0.0, 6.5, 17.0]),
+    'group_bounds_cx': np.array([[0, 81], [80, 151], [150, 216], [215, 321]]),
     'ci_cy': np.array([-15.0]), 
     'cf_cy': np.array([15.0]),
     'group_bounds_cy': np.array([[0, 106]]),
@@ -46,9 +46,9 @@ GROUP_PARAMS = {
 
 # Random simulation parameters
 SIMULATION_PARAMS = {
-    'n_coll': 40000,
-    'cfl': 0.5,
-    't_end': 30.0,
+    'n_coll': 20000,
+    'cfl': 0.7,
+    't_end': 25.0,
     'alpha': 1.0
 }
 
@@ -62,7 +62,7 @@ CONSTANTS = {
 
 FREESTREAM_PARAMS = {
     'T1': 300, 
-    'P1': 0.4142,
+    'P1': 6.667,
     'Ma1': 9.0,
     'omega': 0.81  # Variable Hard Sphere Model: 1.0 - Pseudo-Maxwell, 0.5 - Hard Sphere, 0.811 - VHS Argon
 }

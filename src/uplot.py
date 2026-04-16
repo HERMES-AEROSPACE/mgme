@@ -8,9 +8,9 @@ from scipy import special
 
 
 # data = np.load('simulation_data/U20.npy')
-data1 = np.load('simulation_data/U150.npy')
-data2 = np.load('simulation_data2/U1000.npy')
-Tx = np.load('simulation_data2/Tx1000.npy')
+data1 = np.load('simulation_data/U100.npy')
+data2 = np.load('simulation_data/U400.npy')
+Tx = np.load('simulation_data/Tx400.npy')
 data3 = np.load('simulation_data3/U1360.npy')
 # dsmc = np.loadtxt('src/dsmc.txt')
 # dsmcT = np.loadtxt('src/dsmcT.txt')
@@ -31,7 +31,7 @@ alsmeyer_205 = np.loadtxt('src/alsmeyer_205.txt')
 
 x = np.linspace(*PHYS_SPACE['xj_range'], PHYS_SPACE['num_xj'])
 # x = np.linspace(-20, 20, 201)
-x2 = np.linspace(-23, 17, 101)
+x2 = np.linspace(-25, 15, 101)
 
 R = CONSTANTS['R']
 m = CONSTANTS['m']
@@ -84,11 +84,11 @@ shock_thick_als  = np.max(np.abs(np.gradient(alsmeyer_205[:, 1], alsmeyer_205[:,
 print('Alsmeyer:', shock_thick_als, 'Current:', shock_thick)
 
 # Calculate some distributions and plot them.
-p = 30
+p = 42
 fx_groups = []
 cx_vec, cy_vec, cz_vec, cx, cy, cz = calculate_velocity_grid(VELOCITY_SPACE)
 
-for i in range(0, 6):
+for i in range(0, 4):
     ci = GROUP_PARAMS['ci_cx'][i]
     cf = GROUP_PARAMS['cf_cx'][i]
     group_slice = slice(i*1, (i+1)*1)
@@ -154,7 +154,7 @@ x_center  = interp(0.5)
 x_centered = x2_scale - x_center
 point = x_centered[p]
 mask = (x_centered >= -7.8) & (x_centered <= 9.1)
-mask = (x_centered >= -25) & (x_centered <= 20)
+mask = (x_centered >= -27) & (x_centered <= 20)
 idx  = np.where(mask)[0]
 f_als       = interp1d(alsmeyer_205[:, 0], alsmeyer_205[:, 1],
                         kind='cubic', bounds_error=False, fill_value=(0.0, 1.0))
@@ -183,12 +183,13 @@ ax1.plot(x_centered[idx], Tx_scale[idx], color='blue', linewidth=1.6, label=r'$T
 interp    = interp1d(clarke_n[:, 1], 1 - clarke_n[:, 0])
 x_center_clarke  = interp(0.5)
 
-ax1.scatter(1 - clarke_n[:, 0] - x_center_clarke, clarke_n[:, 1], color='black', facecolors='none')
-ax1.scatter(1 - clarke_T[:, 0] - x_center_clarke, clarke_T[:, 1], color='red', facecolors='none')
-ax1.scatter(1 - clarke_Tx[:, 0] - x_center_clarke, clarke_Tx[:, 1], color='blue', facecolors='none')
+# ax1.scatter(1 - clarke_n[:, 0] - x_center_clarke, clarke_n[:, 1], color='black', facecolors='none')
+# ax1.scatter(1 - clarke_T[:, 0] - x_center_clarke, clarke_T[:, 1], color='red', facecolors='none')
+# ax1.scatter(1 - clarke_Tx[:, 0] - x_center_clarke, clarke_Tx[:, 1], color='blue', facecolors='none')
 
 
-ax1.set_xlabel(r'$\mathbf{x/\lambda_{ref}}$ ', fontsize=18)
+# ax1.set_xlabel(r'$\mathbf{x/\lambda_{ref}}$ ', fontsize=18)
+ax1.set_xlabel(r'$\mathbf{x} [m]$ ', fontsize=18)
 ax1.set_ylabel(r'$\mathbf{\rho_n}, \mathbf{T_n}$', fontsize=18)
 ax1.tick_params(axis='both',labelsize=16)
 ax1.legend(fontsize=16, frameon=False)
@@ -205,7 +206,7 @@ plt.savefig('plots/profile.pdf')
 
 fig3 = plt.figure(figsize=(6, 6))
 ax3 = fig3.add_subplot(111)
-for i in range(0, 6):
+for i in range(0, 4):
     bounds = GROUP_PARAMS['group_bounds_cx'][i]
     group_slice = slice(bounds[0], bounds[1])
     ax3.plot(cx_vec[group_slice], fx_groups[i][group_slice], linewidth=1.4)
