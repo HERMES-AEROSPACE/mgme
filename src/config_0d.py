@@ -26,8 +26,8 @@ GROUP_PARAMS = {
 
 # AMR parameters
 AMR = {
-    'kl_threshold': 0.1,
-    'kl_coarsen_threshold': 0.01,   # coarsen below this
+    'h2_threshold': 0.1,
+    'h2_coarsen_threshold': 0.01,   # coarsen below this
     'min_lifetime': 5,      # minimum steps before coarsening allowed
     'max_depth': 4
 }

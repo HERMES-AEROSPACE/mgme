@@ -42,7 +42,7 @@ class VelocityGroup:
         # do I need to store the shadow sample locations?
 
         # Accumulation
-        self.kl_accum = 0.0
+        self.h2_accum = 0.0
 
     def is_leaf(self):
         return len(self.children) == 0
@@ -151,9 +151,9 @@ class VelocityGroup:
 
             self.children.append(child)
 
-    def accumulate_kl(self):
+    def accumulate_h2(self):
         """
-        Calculate the KL divergence between the current leaves and its children. Add it to the current leaves.
+        Calculate the squared Hellinger distance between the current leaves and its children. Add it to the current leaves.
 
         Evaluate the children shadow groups on the current group sample locations.
         """
@@ -180,12 +180,13 @@ class VelocityGroup:
             if success: 
                 q[mask] = np.exp(lam @ phi)
 
-        p = self.w / np.sum(self.w)
-        q = q / np.sum(q)
-        mask = (p > 0) & (q > 0)
-        kl = np.sum(p[mask] * np.log(p[mask] / q[mask]))
+        p_norm = self.w / np.sum(self.w)
+        q_norm = q / np.sum(q)
+        mask = (p_norm > 0) & (q_norm > 0)
+        hellinger_sq = 1.0 - np.sum(np.sqrt(p_norm[mask] * q_norm[mask]))
+        hellinger_sq = np.clip(hellinger_sq, 0.0, 1.0)  # guard against float noise
 
-        self.kl_accum += kl
+        self.h2_accum += hellinger_sq
 
     def merge_children(self, current_t=0):
         assert len(self.children) == 2
@@ -197,7 +198,7 @@ class VelocityGroup:
         self.update_shadows()
 
         self.children         = []
-        self.kl_accum         = 0.0
+        self.h2_accum         = 0.0
         self.created_at       = current_t
 
     def reactivate(self, current_t=0):
@@ -212,7 +213,7 @@ class VelocityGroup:
         self.update_shadows()
         self.is_empty = False
         self.created_at = current_t
-        self.kl_accum = 0.0  # fresh start, don't trigger immediate re-split
+        self.h2_accum = 0.0  # fresh start, don't trigger immediate re-split
 
 def calculate_velocity_grid(velocity_space):
     # Helper function to get velocity space grid
@@ -292,9 +293,9 @@ def fit_maxent_weights(mu, xbounds, ybounds, zbounds, n_sigma=3.0):
     if success:
         return solution, lam, x_slice, y_slice, z_slice
 
-def coarsening_kl_analytic(left, right, parent):
+def coarsening_h2_analytic(left, right, parent):
     """
-    KL divergence of merging: KL(f_left + f_right | f_parent).
+    Square Hellinger distance of merging: H^2(f_left + f_right | f_parent).
     
     Evaluate the child left and right groups on the parent sample locations.
     """
@@ -306,7 +307,7 @@ def coarsening_kl_analytic(left, right, parent):
     right_idx = ~left_idx
 
     masks = np.array([left_idx, right_idx])
-    kl = 0
+    hellinger_sq = 0
 
     for mask, child in zip(masks, children):
         n = np.sum(parent.w[mask])
@@ -321,9 +322,9 @@ def coarsening_kl_analytic(left, right, parent):
 
         p = child.w / np.sum(child.w)
         q = sub_parent_w / np.sum(sub_parent_w)
-        kl += np.sum(p * np.log(p / q))
+        hellinger_sq += np.clip(1.0 - np.sum(np.sqrt(p * q)), 0.0, 1.0)
 
-    return kl
+    return hellinger_sq
     
 def calc_moment(f, cx, cy, cz, cx_vec, cy_vec, cz_vec):
     mu = np.zeros(5)
@@ -338,9 +339,9 @@ def calc_moment(f, cx, cy, cz, cx_vec, cy_vec, cz_vec):
 
     return mu
 
-def initial_refine(root, f0, cx, cy, cz, cx_vec, cy_vec, cz_vec, kl_threshold=AMR['kl_threshold'], max_passes=10):
+def initial_refine(root, f0, cx, cy, cz, cx_vec, cy_vec, cz_vec, h2_threshold=AMR['h2_threshold'], max_passes=10):
     """
-    Refine the AMR tree based on goodness-of-fit KL(f0 || f_maxent)
+    Refine the AMR tree based on goodness-of-fit H^2(f0 || f_maxent)
     on each leaf. Runs until no splits occur or max_passes is reached.
     """
     for pass_idx in range(max_passes):
@@ -365,7 +366,7 @@ def initial_refine(root, f0, cx, cy, cz, cx_vec, cy_vec, cz_vec, kl_threshold=AM
             leaf.w, leaf.lam, leaf.x_s, leaf.y_s, leaf.z_s = fit_maxent_weights(mu, leaf.xbounds, leaf.ybounds, leaf.zbounds)
             leaf.update_shadows()
 
-            # Calculate the KL divergence between the current group and true f0.
+            # Calculate the squared Hellinger distance between the current group and true f0.
             dcx = (cx_hi - cx_lo) / (30 - 1)
             dcy = (cy_hi - cy_lo) / (30 - 1)
             dcz = (cz_hi - cz_lo) / (30 - 1)
@@ -374,12 +375,13 @@ def initial_refine(root, f0, cx, cy, cz, cx_vec, cy_vec, cz_vec, kl_threshold=AM
 
             p = f0_weights / np.sum(f0_weights)
             q = leaf.w / np.sum(leaf.w)
-            kl = np.sum(p * np.log(p / q))
+            hellinger_sq = 1.0 - np.sum(np.sqrt(p * q))
+            hellinger_sq = np.clip(hellinger_sq, 0.0, 1.0)  # guard against float noise
             
             # If divergence is larger than threshold, split the current group (update shadow children to real children).
-            if kl > kl_threshold and leaf.can_split():
+            if hellinger_sq > h2_threshold and leaf.can_split():
                 print(f'pass {pass_idx}: splitting depth={leaf.depth} '
-                      f'bounds={leaf.xbounds}, kl={kl:.4f}')
+                      f'bounds={leaf.xbounds}, h2={hellinger_sq:.4f}')
                 
                 leaf.split(current_t=0)
                 splits_this_pass += 1

@@ -7,7 +7,7 @@ from .config_0d import (
     AMR,
     COLLISION_PARAMS
 )
-from .collision_helper import calculate_velocity_grid, VelocityGroup, initial_refine, collide, fit_maxent_weights, coarsening_kl_analytic, calc_moment
+from .collision_helper import calculate_velocity_grid, VelocityGroup, initial_refine, collide, fit_maxent_weights, coarsening_h2_analytic, calc_moment
 from .banner import print_banner
 from .moment_utils import invert
 import copy
@@ -32,14 +32,14 @@ def run_simulation():
     # f0  = 1 / (np.pi**1.5) * np.exp(-1 * ((cx - 3)**2 + cy**2 + cz**2))
     
     def f0(cx, cy, cz):
-        # return 0.5 * (3 / np.pi)**1.5 * (np.exp(-3.0 * (cx - 1)**2) + np.exp(-3.0 * (cx + 1)**2)) * np.exp(-3 * (cy**2 + cz**2))
+        return 0.5 * (3 / np.pi)**1.5 * (np.exp(-3.0 * (cx - 1)**2) + np.exp(-3.0 * (cx + 1)**2)) * np.exp(-3 * (cy**2 + cz**2))
         # return 1 / (2 * K * (np.pi * K)**1.5) * (5 * K - 3 + 2 * (1 - K) / K * (cx**2 + cy**2 + cz**2)) * np.exp(-(cx**2 + cy**2 + cz**2) / K)
-        return 1 / (np.pi**1.5) * np.exp(-1 * ((cx - 3)**2 + cy**2 + cz**2))
+        # return 1 / (np.pi**1.5) * np.exp(-1 * ((cx - 3)**2 + cy**2 + cz**2))
 
     # Create the root node of the AMR tree.
     MAX_DEPTH = AMR['max_depth']       # 0 = no splitting, 1 = one split etc.
-    KL_THRESHOLD = AMR['kl_threshold']
-    KL_COARSEN_THRESHOLD = AMR['kl_coarsen_threshold']  # coarsen below this
+    H2_THRESHOLD = AMR['h2_threshold']
+    H2_COARSEN_THRESHOLD = AMR['h2_coarsen_threshold']  # coarsen below this
     MIN_LIFETIME         = AMR['min_lifetime']    # minimum steps before coarsening allowed
     bounds_list = np.array([[-7, 7, -7, 7, -7, 7]])
 
@@ -50,10 +50,6 @@ def run_simulation():
     # Choose between using custom groups or AMR to get initial groups.
     # custom_groups(f0, cx, cy, cz, cx_vec, cy_vec, cz_vec, root, GROUP_PARAMS)
     initial_refine(root, f0, cx, cy, cz, cx_vec, cy_vec, cz_vec)
-
-    kl_history   = {}
-    split_times  = []
-    coarse_times = []
 
     CX_LB = cx_vec[0];  CX_UB = cx_vec[-1]
     CY_LB = cy_vec[0];  CY_UB = cy_vec[-1]
@@ -109,11 +105,6 @@ def run_simulation():
         # f2 = 1 / (np.pi**1.5) * np.exp(-1 * (cx**2 + cy**2 + cz**2))
         # plt.plot(cx_vec, np.trapezoid(np.trapezoid(f, cz_vec, axis=2), cy_vec, axis=1), '--', color='black')
         # plt.plot(cx_vec, np.trapezoid(np.trapezoid(f2, cz_vec, axis=2), cy_vec, axis=1), '-.', color='red')
-        plt.title(f't = {t}')
-        plt.xlabel('Cx', fontsize=18)
-        plt.ylabel('f', fontsize=18)
-        plt.savefig(f'plots/amr/f_{t:04d}.png', dpi=300)
-        plt.close(fig)
 
         if t % 10 == 0:
             print('Time step: ', t)
@@ -122,36 +113,37 @@ def run_simulation():
         n_groups = len(leaves)
 
         # Calculate arrays necessary to run collision step.
-        # active_leaves = [leaf for leaf in leaves if not leaf.is_empty]
+        # Need to filter for active leaves since building the arrays will break if we try to use sample arrays that are empty.
+        active_leaves = [leaf for leaf in leaves if not leaf.is_empty]
 
-        # bounds_list = np.array([
-        #     [leaf.xbounds[0], leaf.xbounds[1],
-        #      leaf.ybounds[0], leaf.ybounds[1],
-        #      leaf.zbounds[0], leaf.zbounds[1]]
-        #     for leaf in active_leaves
-        # ])
-        # n_total  = sum(len(leaf.x_s) for leaf in active_leaves)
-        # x_flat   = np.zeros(n_total)
-        # y_flat   = np.zeros(n_total)
-        # z_flat   = np.zeros(n_total)
-        # w_flat   = np.zeros(n_total)
-        # offset   = 0
-        # for leaf in active_leaves:
-        #     n = len(leaf.x_s)
-        #     x_flat[offset:offset + n] = leaf.x_s
-        #     y_flat[offset:offset + n] = leaf.y_s
-        #     z_flat[offset:offset + n] = leaf.z_s
-        #     w_flat[offset:offset + n] = leaf.w
-        #     offset += n
+        bounds_list = np.array([
+            [leaf.xbounds[0], leaf.xbounds[1],
+             leaf.ybounds[0], leaf.ybounds[1],
+             leaf.zbounds[0], leaf.zbounds[1]]
+            for leaf in active_leaves
+        ])
+        n_total  = sum(len(leaf.x_s) for leaf in active_leaves)
+        x_flat   = np.zeros(n_total)
+        y_flat   = np.zeros(n_total)
+        z_flat   = np.zeros(n_total)
+        w_flat   = np.zeros(n_total)
+        offset   = 0
+        for leaf in active_leaves:
+            n = len(leaf.x_s)
+            x_flat[offset:offset + n] = leaf.x_s
+            y_flat[offset:offset + n] = leaf.y_s
+            z_flat[offset:offset + n] = leaf.z_s
+            w_flat[offset:offset + n] = leaf.w
+            offset += n
 
-        # # Run collision step.
-        # coll = collide(
-        #     x_flat, y_flat, z_flat, w_flat,
-        #     len(w_flat),
-        #     bounds_list, n_groups, n_coll,
-        #     CX_LB, CX_UB, CY_LB, CY_UB, CZ_LB, CZ_UB,
-        #     key_type, sigma_coeff_hat, omega, alpha
-        # )
+        # Run collision step.
+        coll = collide(
+            x_flat, y_flat, z_flat, w_flat,
+            len(w_flat),
+            bounds_list, n_groups, n_coll,
+            CX_LB, CX_UB, CY_LB, CY_UB, CZ_LB, CZ_UB,
+            key_type, sigma_coeff_hat, omega, alpha
+        )
 
         # Define test distribution if using to simulate forcing/flux terms.
         def ft(cx, cy, cz):
@@ -174,28 +166,28 @@ def run_simulation():
             return ft
 
         # ── update moments, refit weights, update shadows ───────────────────
-        # for i, leaf in enumerate(active_leaves):
+        for i, leaf in enumerate(active_leaves):
             # Update moments.
-            # leaf.mu += COLLISION_PARAMS['dt'] * np.array(coll)[:, i]
+            leaf.mu += COLLISION_PARAMS['dt'] * np.array(coll)[:, i]
 
         for i, leaf in enumerate(leaves):
             # Arbitrary test distribution.
-            cx_lo, cx_hi = leaf.xbounds
-            cy_lo, cy_hi = leaf.ybounds
-            cz_lo, cz_hi = leaf.zbounds
-            cx_vec = np.linspace(cx_lo, cx_hi, 30)
-            cy_vec = np.linspace(cy_lo, cy_hi, 30)
-            cz_vec = np.linspace(cz_lo, cz_hi, 30) 
-            cx, cy, cz = np.meshgrid(cx_vec, cy_vec, cz_vec, indexing='ij')
-            f_slice = ft(cx, cy, cz)
-
-            mu = calc_moment(f_slice, cx, cy, cz, cx_vec, cy_vec, cz_vec)
-            leaf.mu = mu
+            # cx_lo, cx_hi = leaf.xbounds
+            # cy_lo, cy_hi = leaf.ybounds
+            # cz_lo, cz_hi = leaf.zbounds
+            # cx_vec = np.linspace(cx_lo, cx_hi, 30)
+            # cy_vec = np.linspace(cy_lo, cy_hi, 30)
+            # cz_vec = np.linspace(cz_lo, cz_hi, 30) 
+            # cx, cy, cz = np.meshgrid(cx_vec, cy_vec, cz_vec, indexing='ij')
+            # f_slice = ft(cx, cy, cz)
+            # plt.plot(cx_vec, np.trapezoid(np.trapezoid(f_slice, cz_vec, axis=2), cy_vec, axis=1), '--', color='black')
+            # mu = calc_moment(f_slice, cx, cy, cz, cx_vec, cy_vec, cz_vec)
+            # leaf.mu = mu
 
             if leaf.is_empty:
                 if leaf.mu[0] >= leaf.n_threshold:
                     leaf.reactivate(current_t=t)
-                continue  # skip fit/shadow/kl until reactivated
+                continue  # skip fit/shadow/h2 until reactivated
 
             # Refit weights and update shadows.
             result = fit_maxent_weights(leaf.mu, leaf.xbounds, leaf.ybounds, leaf.zbounds)
@@ -204,23 +196,28 @@ def run_simulation():
                 continue
 
             leaf.w, leaf.lam, leaf.x_s, leaf.y_s, leaf.z_s = result
-            # Accumulate KL
-            leaf.accumulate_kl()
-            
+            # Accumulate squared Hellinger distance
+            leaf.accumulate_h2()
+        
+        plt.title(f't = {t}')
+        plt.xlabel('Cx', fontsize=18)
+        plt.ylabel('f', fontsize=18)
+        plt.savefig(f'plots/amr/f_{t:04d}.png', dpi=300)
+        plt.close(fig)
         # --- Refinement check ---
         for leaf in list(root.get_leaves()):
             if leaf.is_empty:
                 continue
-            if leaf.kl_accum > KL_THRESHOLD:
+            if leaf.h2_accum > H2_THRESHOLD:
                 if leaf.can_split():
                     print(f't={t}: splitting depth={leaf.depth} '
-                        f'bounds={leaf.xbounds}, kl={leaf.kl_accum:.4f}')
+                        f'bounds={leaf.xbounds}, h2={leaf.h2_accum:.4f}')
 
                     leaf.split(t)
                 else:
                     # At max depth — log the signal but can't split
                     print(f't={t}: max depth reached at bounds={leaf.xbounds}, '
-                        f'kl={leaf.kl_accum:.4f} — consider increasing MAX_DEPTH')
+                        f'h2={leaf.h2_accum:.4f} — consider increasing MAX_DEPTH')
 
         # --- Coarsen check ---
         checked_parents = set()
@@ -248,10 +245,10 @@ def run_simulation():
             if not (left_child.can_coarsen(t) and right_child.can_coarsen(t)):
                 continue
 
-            # Analytic KL cost of merging
-            kl = coarsening_kl_analytic(left_child, right_child, parent)
+            # Analytic H^2 cost of merging
+            h2 = coarsening_h2_analytic(left_child, right_child, parent)
 
-            if kl < KL_COARSEN_THRESHOLD:
+            if h2 < H2_COARSEN_THRESHOLD:
                 print(f't={t}: coarsening '
                     f'{left_child.xbounds}+{right_child.xbounds}'
                     f'->{parent.xbounds}')
