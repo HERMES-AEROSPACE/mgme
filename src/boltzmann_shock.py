@@ -1,7 +1,7 @@
 import numpy as np
 from .banner import print_banner
 from .shock_helper import ic, KT_central2, generate_regular_samples, collide, calculate_velocity_grid
-from .shock_helper import generate_grid_regular, generate_grid, calc_flux_analytical, calc_flux_int
+from .shock_helper import calc_flux_analytical, calc_flux_int
 from .config_1d import CONSTANTS, FREESTREAM_PARAMS, PHYS_SPACE, GROUP_PARAMS, VELOCITY_SPACE, SIMULATION_PARAMS
 import itertools
 from scipy import special
@@ -159,8 +159,6 @@ def run_simulation():
     # Cache distribution parameters for Newton solver.
     lam_cache = np.zeros((numXj, num_groups, 5))
     pr = cProfile.Profile()
-    # x_s, y_s, z_s, offsets, num_samples = generate_grid(bounds_list, num_groups, 3)
-    # print(num_samples)
     
     def step(i, U_i, bounds_list, num_groups, CX_LB, CX_UB, CY_LB, CY_UB, CZ_LB, CZ_UB, key_type, sigma_coeff_hat, omega, alpha, lam_cache_i):
         # Calculate weights through optimization.
@@ -187,7 +185,6 @@ def run_simulation():
         return i, coll, flux, lam_out, Tx
 
     for t in range(1, int(np.ceil(int(t_end / dt) / 100) * 100) + 1):
-        # print(t)
         # Boundary conditions.
         U[0, :] = U0[0, :]
         U[-1, :] = U[-2, :]
