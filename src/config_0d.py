@@ -6,9 +6,9 @@ VELOCITY_SPACE = {
     'num_cx': 241,
     'num_cy': 241,
     'num_cz': 241,
-    'cx_range': (-3.0, 3.0),
-    'cy_range': (-3.0, 3.0),
-    'cz_range': (-3.0, 3.0)
+    'cx_range': (-7.0, 7.0),
+    'cy_range': (-7.0, 7.0),
+    'cz_range': (-7.0, 7.0)
 }
 
 # Group parameters
@@ -26,13 +26,16 @@ GROUP_PARAMS = {
 
 # AMR parameters
 AMR = {
-    'entropy_threshold': 0.01
+    'kl_threshold': 0.1,
+    'kl_coarsen_threshold': 0.01,   # coarsen below this
+    'min_lifetime': 5,      # minimum steps before coarsening allowed
+    'max_depth': 4
 }
 
 # Collision parameters
 COLLISION_PARAMS = {
     'n_coll': 20000,
-    'n_t': 100,
+    'n_t': 200,
     'omega': 1.0,
     'alpha': 1.0,
     'dt': 0.1
