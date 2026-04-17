@@ -130,9 +130,13 @@ class VelocityGroup:
         Samples are partitioned by vx midpoint.
         Shadow weights/lam used to initialize children.
         """
-        self.update_shadows()
-        
-        for i in range(2):
+        cx_lo, cx_hi = self.xbounds
+        cx_mid        = (cx_lo + cx_hi) / 2.0
+
+        left_idx  = self.x_s < cx_mid
+        right_idx = ~left_idx
+
+        for i, mask in enumerate([left_idx, right_idx]):
             bnd = np.array([self.shadow_bounds[i], [-7, 7], [-7, 7]])
             child = VelocityGroup(
                 bounds=bnd,
@@ -140,14 +144,24 @@ class VelocityGroup:
                 max_depth=self.max_depth,
                 created_at=current_t)
             child.parent = self
-            child.mu = self.shadow_mu[i].copy()
+
+            n  = np.sum(self.w[mask])
+            ux = np.sum(self.w[mask] * self.x_s[mask])
+            uy = np.sum(self.w[mask] * self.y_s[mask])
+            uz = np.sum(self.w[mask] * self.z_s[mask])
+            r2 = self.x_s[mask]**2 + self.y_s[mask]**2 + self.z_s[mask]**2
+            e  = np.sum(self.w[mask] * r2)
+            child.mu = np.array([n, ux, uy, uz, e])
 
             if child.mu[0] < child.n_threshold:
                 child.is_empty = True
             else:
                 result = fit_maxent_weights(child.mu, child.xbounds, child.ybounds, child.zbounds)
-                child.w, child.lam, child.x_s, child.y_s, child.z_s = result
-                child.update_shadows()
+                if result is None:
+                    child.is_empty = True
+                else:
+                    child.w, child.lam, child.x_s, child.y_s, child.z_s = result
+                    child.update_shadows()
 
             self.children.append(child)
 
@@ -498,7 +512,8 @@ def collide(x_sample, y_sample, z_sample, weights, num_valid_samples, bounds_lis
         g2r = clamp_and_find_group(vx2p, vy2p, vz2p)
 
         # Single collision weight — used for BOTH loss and gain
-        C = 0.5 * W**2 / n_actual * g**(2 - 2*omega) * sigma_coeff_hat
+        # C = 0.5 * W**2 / n_actual * g**(2 - 2*omega) * sigma_coeff_hat
+        C = 0.5 * W**2 / n_actual * g**(2 - 2*omega)
 
         # Loss from pre-collision groups
         group_n[g1]  -= C;       group_n[g2]  -= C
