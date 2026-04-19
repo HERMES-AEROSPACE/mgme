@@ -12,7 +12,7 @@ class VelocityGroup:
         bounds: (cx_lo, cx_hi) index bounds into the full grid
         """
         self.is_empty = False
-        self.n_threshold = 1e-5  # below this, treat as empty
+        self.n_threshold = 5e-5  # below this, treat as empty
 
         self.xbounds      = bounds[0]        # (lo, hi) value bounds
         self.ybounds      = bounds[1]        # (lo, hi) value bounds
@@ -171,6 +171,9 @@ class VelocityGroup:
 
         Evaluate the children shadow groups on the current group sample locations.
         """
+        if self.mu[0] < 0.01:
+            return
+            
         cx_lo, cx_hi = self.xbounds
         cx_mid = (cx_lo + cx_hi) / 2.0
 
@@ -306,6 +309,8 @@ def fit_maxent_weights(mu, xbounds, ybounds, zbounds, n_sigma=3.0):
 
     if success:
         return solution, lam, x_slice, y_slice, z_slice
+    else:
+        return
 
 def coarsening_h2_analytic(left, right, parent):
     """

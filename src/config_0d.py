@@ -26,15 +26,15 @@ GROUP_PARAMS = {
 
 # AMR parameters
 AMR = {
-    'h2_threshold': 0.1,
-    'h2_coarsen_threshold': 0.01,   # coarsen below this
+    'h2_threshold': 0.02,
+    'h2_coarsen_threshold': 0.009,   # coarsen below this
     'min_lifetime': 5,      # minimum steps before coarsening allowed
-    'max_depth': 4
+    'max_depth': 5
 }
 
 # Collision parameters
 COLLISION_PARAMS = {
-    'n_coll': 20000,
+    'n_coll': 40000,
     'n_t': 200,
     'omega': 1.0,
     'alpha': 1.0,
