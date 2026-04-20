@@ -6,13 +6,38 @@ from matplotlib import pyplot as plt
 from .config_0d import AMR
 
 
+def _split_samples(node):
+    """
+    Return (left_mask, right_mask, mid) for node.split_dim.
+    Shared by update_shadows, accumulate_h2, split.
+    """
+    dim = node.split_dim
+    samples   = [node.x_s, node.y_s, node.z_s]
+    all_bounds = [node.xbounds, node.ybounds, node.zbounds]
+    mid        = (all_bounds[dim][0] + all_bounds[dim][1]) / 2.0
+    left_mask  = samples[dim] < mid
+    return left_mask, ~left_mask, mid
+ 
+def _child_bounds(node, side, mid):
+    """
+    Return [xbounds, ybounds, zbounds] for child `side` (0=left, 1=right).
+    Only the split dimension is halved; the other two are copied from parent.
+    """
+    dim = node.split_dim
+    all_bounds = [list(node.xbounds), list(node.ybounds), list(node.zbounds)]
+    if side == 0:
+        all_bounds[dim][1] = mid      # [lo, mid]
+    else:
+        all_bounds[dim][0] = mid      # [mid, hi]
+    return all_bounds                  # [xb, yb, zb] — compatible with VelocityGroup(bounds=...)
+
 class VelocityGroup:
-    def __init__(self, bounds, depth=0, max_depth=1, created_at=0):
+    def __init__(self, bounds, depth=0, max_depth=1, created_at=0, split_axes=0):
         """
         bounds: (cx_lo, cx_hi) index bounds into the full grid
         """
         self.is_empty = False
-        self.n_threshold = 5e-5  # below this, treat as empty
+        self.n_threshold = 1e-3  # below this, treat as empty
 
         self.xbounds      = bounds[0]        # (lo, hi) value bounds
         self.ybounds      = bounds[1]        # (lo, hi) value bounds
@@ -24,6 +49,8 @@ class VelocityGroup:
 
         self.children    = []            # empty = leaf node
         self.parent      = None
+
+        self.split_axes  = list(split_axes) if split_axes is not None else [0]
 
         # State
         self.w           = None          # current fitted max entropy weights
@@ -43,6 +70,11 @@ class VelocityGroup:
 
         # Accumulation
         self.h2_accum = 0.0
+
+    @property
+    def split_dim(self):
+        """Dimension to split along: split_axes[depth % len(split_axes)]."""
+        return self.split_axes[self.depth % len(self.split_axes)]
 
     def is_leaf(self):
         return len(self.children) == 0
@@ -80,46 +112,35 @@ class VelocityGroup:
         """
         Updates shadow values based on current group weights and sample locations.
         """
-        cx_lo, cx_hi = self.xbounds
-        cx_mid        = (cx_lo + cx_hi) / 2.0
-
-        self.shadow_bounds[0] = [cx_lo, cx_mid]
-        self.shadow_bounds[1] = [cx_mid, cx_hi]
-
-        if cx_mid in self.x_s:
-            print('The group split velocity is contained in x_s.')
-            sys.exit()
-
-        left_idx = self.x_s < cx_mid
-        right_idx = ~left_idx
-        masks = np.array([left_idx, right_idx])
-
+        left_mask, right_mask, mid = _split_samples(self)
+        masks = [left_mask, right_mask]
+ 
         for i, mask in enumerate(masks):
-            # Moments of this half from current weights.
+            cb = _child_bounds(self, i, mid)
+            self.shadow_bounds[i] = cb         # full [xb, yb, zb]
+ 
             n = np.sum(self.w[mask])
-
             if n < self.n_threshold:
-                # Shadow is empty — leave as None so split() can detect it
                 self.shadow_mu[i]  = np.zeros(5)
                 self.shadow_w[i]   = None
                 self.shadow_lam[i] = np.zeros(5)
                 continue
-
+ 
             ux = np.sum(self.w[mask] * self.x_s[mask])
             uy = np.sum(self.w[mask] * self.y_s[mask])
             uz = np.sum(self.w[mask] * self.z_s[mask])
-            r2 = self.x_s[mask]**2 + self.y_s[mask]**2 + self.z_s[mask]**2
-            e = np.sum(self.w[mask] * r2)  
+            r2 = (self.x_s[mask]**2 + self.y_s[mask]**2
+                  + self.z_s[mask]**2)
+            e  = np.sum(self.w[mask] * r2)
             mu = np.array([n, ux, uy, uz, e])
-
-            # Fit weights to these shadows.
-            results = fit_maxent_weights(mu, self.xbounds, self.ybounds, self.zbounds)
+ 
+            results = fit_maxent_weights(mu, cb[0], cb[1], cb[2])
             if results is None:
                 self.shadow_mu[i]  = mu
                 self.shadow_w[i]   = None
                 self.shadow_lam[i] = np.zeros(5)
                 continue
-
+ 
             self.shadow_mu[i]  = mu
             self.shadow_w[i]   = results[0]
             self.shadow_lam[i] = results[1]
@@ -130,39 +151,40 @@ class VelocityGroup:
         Samples are partitioned by vx midpoint.
         Shadow weights/lam used to initialize children.
         """
-        cx_lo, cx_hi = self.xbounds
-        cx_mid        = (cx_lo + cx_hi) / 2.0
-
-        left_idx  = self.x_s < cx_mid
-        right_idx = ~left_idx
-
-        for i, mask in enumerate([left_idx, right_idx]):
-            bnd = np.array([self.shadow_bounds[i], [-7, 7], [-7, 7]])
+        left_mask, right_mask, mid = _split_samples(self)
+ 
+        for i, mask in enumerate([left_mask, right_mask]):
+            cb = self.shadow_bounds[i]         # [xb, yb, zb] set by update_shadows
+ 
             child = VelocityGroup(
-                bounds=bnd,
-                depth=self.depth + 1,
-                max_depth=self.max_depth,
-                created_at=current_t)
+                bounds      = cb,
+                depth       = self.depth + 1,
+                max_depth   = self.max_depth,
+                created_at  = current_t,
+                split_axes  = self.split_axes, # ← pass down
+            )
             child.parent = self
-
+ 
             n  = np.sum(self.w[mask])
             ux = np.sum(self.w[mask] * self.x_s[mask])
             uy = np.sum(self.w[mask] * self.y_s[mask])
             uz = np.sum(self.w[mask] * self.z_s[mask])
-            r2 = self.x_s[mask]**2 + self.y_s[mask]**2 + self.z_s[mask]**2
+            r2 = (self.x_s[mask]**2 + self.y_s[mask]**2
+                  + self.z_s[mask]**2)
             e  = np.sum(self.w[mask] * r2)
             child.mu = np.array([n, ux, uy, uz, e])
-
+ 
             if child.mu[0] < child.n_threshold:
                 child.is_empty = True
             else:
-                result = fit_maxent_weights(child.mu, child.xbounds, child.ybounds, child.zbounds)
+                result = fit_maxent_weights(
+                    child.mu, child.xbounds, child.ybounds, child.zbounds)
                 if result is None:
                     child.is_empty = True
                 else:
                     child.w, child.lam, child.x_s, child.y_s, child.z_s = result
                     child.update_shadows()
-
+ 
             self.children.append(child)
 
     def accumulate_h2(self):
@@ -173,37 +195,36 @@ class VelocityGroup:
         """
         if self.mu[0] < 0.01:
             return
-            
-        cx_lo, cx_hi = self.xbounds
-        cx_mid = (cx_lo + cx_hi) / 2.0
-
-        left_idx  = self.x_s < cx_mid
-        right_idx = ~left_idx
-
-        masks = np.array([left_idx, right_idx])
+ 
+        left_mask, right_mask, _ = _split_samples(self)
+        masks = [left_mask, right_mask]
         q = np.zeros_like(self.w)
-
+ 
         for i, mask in enumerate(masks):
+            if not np.any(mask):
+                continue
             phi = np.array([
-                np.ones(np.sum(mask)), 
-                self.x_s[mask], 
-                self.y_s[mask], 
-                self.z_s[mask], 
-                self.x_s[mask]**2 + self.y_s[mask]**2 + self.z_s[mask]**2
+                np.ones(np.sum(mask)),
+                self.x_s[mask],
+                self.y_s[mask],
+                self.z_s[mask],
+                self.x_s[mask]**2 + self.y_s[mask]**2 + self.z_s[mask]**2,
             ])
-
-            # Need to solve for the correct lambdas using the current group sample locations.
-            _, lam, success, _ = solve_group_newton(self.x_s[mask], self.y_s[mask], self.z_s[mask], self.shadow_mu[i], np.zeros(5))
-            if success: 
+            _, lam, success, _ = solve_group_newton(
+                self.x_s[mask], self.y_s[mask], self.z_s[mask],
+                self.shadow_mu[i], np.zeros(5))
+            if success:
                 q[mask] = np.exp(lam @ phi)
-
+ 
         p_norm = self.w / np.sum(self.w)
-        q_norm = q / np.sum(q)
-        mask = (p_norm > 0) & (q_norm > 0)
-        hellinger_sq = 1.0 - np.sum(np.sqrt(p_norm[mask] * q_norm[mask]))
-        hellinger_sq = np.clip(hellinger_sq, 0.0, 1.0)  # guard against float noise
-
-        self.h2_accum += hellinger_sq
+        q_sum  = np.sum(q)
+        if q_sum <= 0:
+            return
+        q_norm = q / q_sum
+        mask   = (p_norm > 0) & (q_norm > 0)
+        h2     = np.clip(1.0 - np.sum(np.sqrt(p_norm[mask] * q_norm[mask])),
+                         0.0, 1.0)
+        self.h2_accum += h2
 
     def merge_children(self, current_t=0):
         assert len(self.children) == 2
@@ -280,7 +301,9 @@ def solve_group_newton(x_s, y_s, z_s, U, lam, max_iter=50, tol=1e-10):
     return w, lam, converged, g
 
 def fit_maxent_weights(mu, xbounds, ybounds, zbounds, n_sigma=3.0):
-    n_fine = 30  # would probably like to change this so this scales based on bounds
+    n_min = 5  # would probably like to change this so this scales based on bounds
+    n_max = 30
+    points_per_unit = 5
 
     ux  = mu[1] / mu[0]
     uy  = mu[2] / mu[0]
@@ -296,9 +319,13 @@ def fit_maxent_weights(mu, xbounds, ybounds, zbounds, n_sigma=3.0):
     zlo = np.max([uz - n_sigma * v_th, zbounds[0]])
     zhi = np.min([uz + n_sigma * v_th, zbounds[1]])
 
-    gx_fine = np.linspace(xlo, xhi, n_fine)
-    gy_fine = np.linspace(ylo, yhi, n_fine)
-    gz_fine = np.linspace(zlo, zhi, n_fine)
+    nx = 30 #int(np.clip(points_per_unit * (xhi - xlo) / v_th, n_min, n_max))
+    ny = 30 #int(np.clip(points_per_unit * (yhi - ylo) / v_th, n_min, n_max))
+    nz = 30 #int(np.clip(points_per_unit * (zhi - zlo) / v_th, n_min, n_max))
+
+    gx_fine = np.linspace(xlo, xhi, nx)
+    gy_fine = np.linspace(ylo, yhi, ny)
+    gz_fine = np.linspace(zlo, zhi, nz)
     GX, GY, GZ = np.meshgrid(gx_fine, gy_fine, gz_fine, indexing='ij')
     x_slice = GX.ravel()
     y_slice = GY.ravel()
@@ -318,32 +345,29 @@ def coarsening_h2_analytic(left, right, parent):
     
     Evaluate the child left and right groups on the parent sample locations.
     """
-    children = np.array([left, right])
-    cx_lo, cx_hi = parent.xbounds
-    cx_mid = (cx_lo + cx_hi) / 2.0
-
-    left_idx  = parent.x_s < cx_mid
-    right_idx = ~left_idx
-
-    masks = np.array([left_idx, right_idx])
-    hellinger_sq = 0
-
+    left_mask, right_mask, _ = _split_samples(parent)
+    masks    = [left_mask, right_mask]
+    children = [left, right]
+    h2 = 0.0
+ 
     for mask, child in zip(masks, children):
-        n = np.sum(parent.w[mask])
+        n  = np.sum(parent.w[mask])
         ux = np.sum(parent.w[mask] * parent.x_s[mask])
         uy = np.sum(parent.w[mask] * parent.y_s[mask])
         uz = np.sum(parent.w[mask] * parent.z_s[mask])
-        r2 = parent.x_s[mask]**2 + parent.y_s[mask]**2 + parent.z_s[mask]**2
-        e = np.sum(parent.w[mask] * r2)  
+        r2 = (parent.x_s[mask]**2 + parent.y_s[mask]**2
+              + parent.z_s[mask]**2)
+        e  = np.sum(parent.w[mask] * r2)
         mu = np.array([n, ux, uy, uz, e])
-
-        sub_parent_w, _, _, _, _ = fit_maxent_weights(mu, child.xbounds, child.ybounds, child.zbounds)
-
-        p = child.w / np.sum(child.w)
+ 
+        sub_parent_w, _, _, _, _ = fit_maxent_weights(
+            mu, child.xbounds, child.ybounds, child.zbounds)
+ 
+        p = child.w   / np.sum(child.w)
         q = sub_parent_w / np.sum(sub_parent_w)
-        hellinger_sq += np.clip(1.0 - np.sum(np.sqrt(p * q)), 0.0, 1.0)
-
-    return hellinger_sq
+        h2 += np.clip(1.0 - np.sum(np.sqrt(p * q)), 0.0, 1.0)
+ 
+    return h2
     
 def calc_moment(f, cx, cy, cz, cx_vec, cy_vec, cz_vec):
     mu = np.zeros(5)
@@ -363,6 +387,7 @@ def initial_refine(root, f0, cx, cy, cz, cx_vec, cy_vec, cz_vec, h2_threshold=AM
     Refine the AMR tree based on goodness-of-fit H^2(f0 || f_maxent)
     on each leaf. Runs until no splits occur or max_passes is reached.
     """
+    n_fine = 30
     for pass_idx in range(max_passes):
         leaves = root.get_leaves()
         splits_this_pass = 0
@@ -373,9 +398,9 @@ def initial_refine(root, f0, cx, cy, cz, cx_vec, cy_vec, cz_vec, h2_threshold=AM
             cz_lo, cz_hi = leaf.zbounds
             
             # Evaluate f0 at unique grid to get a relatively accurate moment evaluation.
-            cx_vec = np.linspace(cx_lo, cx_hi, 30)
-            cy_vec = np.linspace(cy_lo, cy_hi, 30)
-            cz_vec = np.linspace(cz_lo, cz_hi, 30) 
+            cx_vec = np.linspace(cx_lo, cx_hi, n_fine)
+            cy_vec = np.linspace(cy_lo, cy_hi, n_fine)
+            cz_vec = np.linspace(cz_lo, cz_hi, n_fine) 
             cx, cy, cz = np.meshgrid(cx_vec, cy_vec, cz_vec, indexing='ij')
             f_slice = f0(cx, cy, cz)
 
@@ -386,9 +411,9 @@ def initial_refine(root, f0, cx, cy, cz, cx_vec, cy_vec, cz_vec, h2_threshold=AM
             leaf.update_shadows()
 
             # Calculate the squared Hellinger distance between the current group and true f0.
-            dcx = (cx_hi - cx_lo) / (30 - 1)
-            dcy = (cy_hi - cy_lo) / (30 - 1)
-            dcz = (cz_hi - cz_lo) / (30 - 1)
+            dcx = (cx_hi - cx_lo) / (n_fine)
+            dcy = (cy_hi - cy_lo) / (n_fine - 1)
+            dcz = (cz_hi - cz_lo) / (n_fine - 1)
             dv  = dcx * dcy * dcz
             f0_weights = f0(leaf.x_s, leaf.y_s, leaf.z_s) * dv
 

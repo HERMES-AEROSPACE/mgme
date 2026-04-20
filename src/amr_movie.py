@@ -1,7 +1,7 @@
 import glob
 from PIL import Image
 
-max_frames = 199
+max_frames = 100
 frames = []
 for path in sorted(glob.glob('plots/amr/f_*.png'))[:max_frames]:
     frames.append(Image.open(path).copy())  # .copy() to avoid lazy loading issues
