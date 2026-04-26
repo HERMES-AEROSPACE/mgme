@@ -26,16 +26,17 @@ GROUP_PARAMS = {
 
 # AMR parameters
 AMR = {
-    'h2_threshold': 0.01,
-    'h2_coarsen_threshold': 0.05,   # coarsen below this
-    'min_lifetime': 5,      # minimum steps before coarsening allowed
+    'dS_threshold': 0.1,
+    'dS_accum_threshold': 0.08,
+    'dS_coarsen_threshold': 0.04,   # coarsen below this
+    'min_lifetime': 2,      # minimum steps before coarsening allowed
     'max_depth': 7,
     'split_axes': [0],          # 1-D vx  (original behaviour)
 }
 
 # Collision parameters
 COLLISION_PARAMS = {
-    'n_coll': 20000,
+    'n_coll': 100000,
     'n_t': 100,
     'omega': 1.0,
     'alpha': 1.0,

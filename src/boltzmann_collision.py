@@ -124,8 +124,9 @@ def run_simulation():
     sigma_coeff_hat = 1/gamma_omega * (1 / m_r)**(0.5 - omega)
 
     MAX_DEPTH = AMR['max_depth']       # 0 = no splitting, 1 = one split etc.
-    H2_THRESHOLD = AMR['h2_threshold']
-    H2_COARSEN_THRESHOLD = AMR['h2_coarsen_threshold']  # coarsen below this
+    DS_THRESHOLD = AMR['dS_threshold']
+    DS_ACCUM_THRESHOLD = AMR['dS_accum_threshold']
+    DS_COARSEN_THRESHOLD = AMR['dS_coarsen_threshold']  # coarsen below this
     MIN_LIFETIME         = AMR['min_lifetime']    # minimum steps before coarsening allowed
 
     # Initial distribution function. Still have to uncomment the correct one.
@@ -137,7 +138,7 @@ def run_simulation():
     def f0(cx, cy, cz):
         return 0.5 * (3 / np.pi)**1.5 * (np.exp(-3.0 * (cx - 1)**2) + np.exp(-3.0 * (cx + 1)**2)) * np.exp(-3 * (cy**2 + cz**2))
         # return 1 / (2 * K * (np.pi * K)**1.5) * (5 * K - 3 + 2 * (1 - K) / K * (cx**2 + cy**2 + cz**2)) * np.exp(-(cx**2 + cy**2 + cz**2) / K)
-        # return 1 / (np.pi**1.5) * np.exp(-1 * ((cx - 3)**2 + cy**2 + cz**2))
+        # return 1 / (np.pi**1.5) * np.exp(-1 * ((cx - 0)**2 + cy**2 + cz**2))
 
     # Create the root node of the AMR tree.
     bounds_list = np.array([[-3, 3, -3, 3, -3, 3]])
@@ -147,7 +148,7 @@ def run_simulation():
     print('Running AMR to get initial groups...\n')
     # Choose between using custom groups or AMR to get initial groups.
     # custom_groups(f0, cx, cy, cz, cx_vec, cy_vec, cz_vec, root, GROUP_PARAMS)
-    initial_refine(root, f0, cx, cy, cz, cx_vec, cy_vec, cz_vec)
+    initial_refine(root, f0, cx, cy, cz, cx_vec, cy_vec, cz_vec, DS_THRESHOLD)
 
     entropy_list = np.zeros(COLLISION_PARAMS['n_t'])
     bkw_entropy  = np.zeros(COLLISION_PARAMS['n_t'])
@@ -255,7 +256,7 @@ def run_simulation():
                 continue  # skip fit/shadow/h2 until reactivated
 
             # Refit weights and update shadows.
-            result = fit_maxent_weights(leaf.mu, leaf.xbounds, leaf.ybounds, leaf.zbounds)
+            result = fit_maxent_weights(leaf.mu, leaf.xbounds, leaf.ybounds, leaf.zbounds, leaf.lam)
             if result is None:
                 leaf.is_empty = True
                 continue
@@ -274,7 +275,8 @@ def run_simulation():
         for leaf in list(root.get_leaves()):
             if leaf.is_empty:
                 continue
-            if leaf.h2_accum > H2_THRESHOLD:
+
+            if leaf.h2_accum > DS_ACCUM_THRESHOLD:
                 if leaf.can_split():
                     print(f't={t}: splitting depth={leaf.depth} '
                         f'bounds={leaf.xbounds}, h2={leaf.h2_accum:.4f}')
@@ -316,7 +318,7 @@ def run_simulation():
             # Analytic H^2 cost of merging
             h2 = coarsening_h2_analytic(left_child, right_child, parent)
 
-            if h2 < H2_COARSEN_THRESHOLD:
+            if h2 < DS_COARSEN_THRESHOLD:
                 print(f't={t}: coarsening '
                     f'{left_child.xbounds}+{right_child.xbounds}'
                     f'->{parent.xbounds}')
