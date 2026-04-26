@@ -311,7 +311,6 @@ def run_simulation():
             if not (left_child.is_leaf() and right_child.is_leaf()):
                 continue
             if left_child.is_empty and right_child.is_empty:
-                # print('hi')
                 parent.merge_children(current_t=t)  # parent will also likely be empty
                 continue
 

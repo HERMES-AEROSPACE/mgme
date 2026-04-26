@@ -353,22 +353,6 @@ def coarsening_h2_analytic(left, right, parent):
         p /= np.sum(p)
         q /= np.sum(q)
         kl = np.sum(p * np.log(p / q))
-    # for mask, child in zip(masks, children):
-    #     n  = np.sum(parent.w[mask])
-    #     ux = np.sum(parent.w[mask] * parent.x_s[mask])
-    #     uy = np.sum(parent.w[mask] * parent.y_s[mask])
-    #     uz = np.sum(parent.w[mask] * parent.z_s[mask])
-    #     r2 = (parent.x_s[mask]**2 + parent.y_s[mask]**2
-    #           + parent.z_s[mask]**2)
-    #     e  = np.sum(parent.w[mask] * r2)
-    #     mu = np.array([n, ux, uy, uz, e])
- 
-    #     sub_parent_w, _, _, _, _ = fit_maxent_weights(
-    #         mu, child.xbounds, child.ybounds, child.zbounds, child.lam)
- 
-    #     p = child.w   / np.sum(child.w)
-    #     q = sub_parent_w / np.sum(sub_parent_w)
-    #     h2 += np.clip(1.0 - np.sum(np.sqrt(p * q)), 0.0, 1.0)
  
     return kl
 
@@ -423,22 +407,6 @@ def initial_refine(root, f0, cx, cy, cz, cx_vec, cy_vec, cz_vec, dS_threshold, m
             p = f0_weights / np.sum(f0_weights)
             q = leaf.w / np.sum(leaf.w)
             kl = np.sum(p * np.log(p / q))
-
-            # safe_f = np.where(f_slice > 0, f_slice, 1.0)
-            # S_f0 = -np.sum(f_slice * np.log(safe_f)) * dv
-
-            # n  = mu[0]
-            # ux, uy, uz = mu[1]/n, mu[2]/n, mu[3]/n
-            # T  = max(2.0 * (mu[4]/n - ux**2 - uy**2 - uz**2) / 3.0, 1e-10)
-            # s_maxent = 1.5 * (1.0 + np.log(np.pi)) + 1.5 * np.log(T) - np.log(n)
-            # S_maxent = n * s_maxent
-
-            # dS = S_maxent - S_f0
-
-            # p = f0_weights / np.sum(f0_weights)
-            # q = leaf.w / np.sum(leaf.w)
-            # hellinger_sq = 1.0 - np.sum(np.sqrt(p * q))
-            # hellinger_sq = np.clip(hellinger_sq, 0.0, 1.0)  # guard against float noise
 
             # If divergence is larger than threshold, split the current group (update shadow children to real children).
             if kl > dS_threshold and leaf.can_split():
