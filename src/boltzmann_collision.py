@@ -8,7 +8,7 @@ from .config_0d import (
     AMR,
     COLLISION_PARAMS
 )
-from .collision_helper import calculate_velocity_grid, VelocityGroup, initial_refine, collide, fit_maxent_weights, coarsening_h2_analytic, calc_moment, leaf_entropy
+from .collision_helper import calculate_velocity_grid, VelocityGroup, initial_refine, collide, fit_maxent_weights, calc_moment, leaf_entropy
 from .banner import print_banner
 from .moment_utils import invert
 import copy
@@ -106,8 +106,8 @@ def run_simulation():
     sigma_coeff_hat = 1/gamma_omega * (1 / m_r)**(0.5 - omega)
 
     MAX_DEPTH = AMR['max_depth']       # 0 = no splitting, 1 = one split etc.
-    DS_THRESHOLD = AMR['dS_threshold']
-    DS_ACCUM_THRESHOLD = AMR['dS_accum_threshold']
+    KL_THRESHOLD = AMR['KL_threshold']
+    KL_ACCUM_THRESHOLD = AMR['KL_accum_threshold']
     MIN_LIFETIME         = AMR['min_lifetime']    # minimum steps before coarsening allowed
 
     # Initial distribution function. Still have to uncomment the correct one.
@@ -117,8 +117,8 @@ def run_simulation():
     # f0  = 1 / (np.pi**1.5) * np.exp(-1 * ((cx - 3)**2 + cy**2 + cz**2))
     
     def f0(cx, cy, cz):
-        return 0.5 * (3 / np.pi)**1.5 * (np.exp(-3.0 * (cx - 1)**2) + np.exp(-3.0 * (cx + 1)**2)) * np.exp(-3 * (cy**2 + cz**2))
-        # return 1 / (2 * K * (np.pi * K)**1.5) * (5 * K - 3 + 2 * (1 - K) / K * (cx**2 + cy**2 + cz**2)) * np.exp(-(cx**2 + cy**2 + cz**2) / K)
+        # return 0.5 * (3 / np.pi)**1.5 * (np.exp(-3.0 * (cx - 1)**2) + np.exp(-3.0 * (cx + 1)**2)) * np.exp(-3 * (cy**2 + cz**2))
+        return 1 / (2 * K * (np.pi * K)**1.5) * (5 * K - 3 + 2 * (1 - K) / K * (cx**2 + cy**2 + cz**2)) * np.exp(-(cx**2 + cy**2 + cz**2) / K)
         # return 1 / (np.pi**1.5) * np.exp(-1 * ((cx - 0)**2 + cy**2 + cz**2))
 
     # Initialize the shared master sample grid before any leaves are built.
@@ -132,7 +132,7 @@ def run_simulation():
     print('Running AMR to get initial groups...\n')
     # Choose between using custom groups or AMR to get initial groups.
     # custom_groups(f0, cx, cy, cz, cx_vec, cy_vec, cz_vec, root, GROUP_PARAMS)
-    initial_refine(root, f0, cx, cy, cz, cx_vec, cy_vec, cz_vec, DS_THRESHOLD)
+    initial_refine(root, f0, cx, cy, cz, cx_vec, cy_vec, cz_vec, KL_THRESHOLD)
 
     entropy_list = np.zeros(COLLISION_PARAMS['n_t'])
     bkw_entropy  = np.zeros(COLLISION_PARAMS['n_t'])
@@ -159,7 +159,6 @@ def run_simulation():
         n_groups = len(leaves)
 
         # Calculate arrays necessary to run collision step.
-        # Need to filter for active leaves since building the arrays will break if we try to use sample arrays that are empty.
         active_leaves = [leaf for leaf in leaves if not leaf.is_empty]
 
         bounds_list = np.array([
@@ -254,43 +253,37 @@ def run_simulation():
 
             leaf.w, leaf.lam, leaf.x_s, leaf.y_s, leaf.z_s = result
 
-            # Accumulate squared Hellinger distance
-            leaf.accumulate_h2()
+            # Drift signal for split decision
+            leaf.accumulate_kl()
         
         plt.title(f't = {t}')
         plt.xlabel('Cx', fontsize=18)
         plt.ylabel('f', fontsize=18)
         plt.savefig(f'plots/amr/f_{t:04d}.png', dpi=300)
         plt.close(fig)
+
         # --- Refinement check ---
+        # Single axis per leaf, cycled by depth via split_axes (set in
+        # __init__). Adaptive axis pick happens only at initial_refine.
         for leaf in list(root.get_leaves()):
             if leaf.is_empty:
                 continue
 
-            # Symmetric with the coarsen criterion: only split when the
-            # structural accumulator says "structure detected" AND the rate
-            # signal says the leaf is still meaningfully evolving. A leaf
-            # whose rate has dropped below the coarsen threshold won't
-            # split even with a stale h2_accum from an earlier transient.
-            if (leaf.h2_accum > DS_ACCUM_THRESHOLD and
+            if (leaf.kl_accum > KL_ACCUM_THRESHOLD and
                     leaf.rate_ema > AMR['rate_coarsen_threshold']):
-                if leaf.can_split():
-                    print(f't={t}: splitting depth={leaf.depth} '
-                        f'bounds={leaf.xbounds}, KL={leaf.h2_accum:.4f}, '
-                        f'rate={leaf.rate_ema:.4f}')
-
+                if leaf.can_split(leaf.split_dim):
+                    print(f't={t}: splitting depth={leaf.depth} axis={leaf.split_dim} '
+                          f'bounds=(x={leaf.xbounds},y={leaf.ybounds},z={leaf.zbounds}), '
+                          f'KL={leaf.kl_accum:.4f}, rate={leaf.rate_ema:.4f}')
                     leaf.split(t)
                 else:
-                    print(f't={t}: cannot split depth={leaf.depth} '
-                          f'bounds={leaf.xbounds}, KL={leaf.h2_accum:.4f}, '
-                          f'reason={leaf.split_block_reason()}')
+                    print(f't={t}: cannot split depth={leaf.depth} axis={leaf.split_dim} '
+                          f'KL={leaf.kl_accum:.4f}, '
+                          f'reason={leaf.split_block_reason(leaf.split_dim)}')
 
         # --- Coarsen check (rate-based) ---
         # Merge a sibling pair when both children's smoothed rate-of-change
-        # has dropped below the coarsen threshold — i.e., the dynamics has
-        # nothing left to do at this resolution. Replaces the static
-        # KL-of-merge criterion, which has a non-zero discrete-fixed-point
-        # floor that prevents merging at equilibrium.
+        # has dropped below the coarsen threshold.
         rate_threshold = AMR['rate_coarsen_threshold']
         checked_parents = set()
         for leaf in list(root.get_leaves()):
@@ -320,7 +313,9 @@ def run_simulation():
                       f'->{parent.xbounds} '
                       f'(rate_L={left_child.rate_ema:.4f}, '
                       f'rate_R={right_child.rate_ema:.4f})')
+                print(left_child.mu + right_child.mu)
                 parent.merge_children(current_t=t)
+                print(parent.mu)
         
     # --- Final plot of leaf distributions ---
     plt.figure(2)
