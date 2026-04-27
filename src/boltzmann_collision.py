@@ -3,11 +3,12 @@ from scipy import special
 from scipy.stats import qmc, norm
 from .config_0d import (
     VELOCITY_SPACE,
-    GROUP_PARAMS, 
+    GROUP_PARAMS,
+    MASTER_GRID,
     AMR,
     COLLISION_PARAMS
 )
-from .collision_helper import calculate_velocity_grid, VelocityGroup, initial_refine, collide, fit_maxent_weights, coarsening_h2_analytic, calc_moment
+from .collision_helper import calculate_velocity_grid, VelocityGroup, initial_refine, collide, fit_maxent_weights, coarsening_h2_analytic, calc_moment, leaf_entropy
 from .banner import print_banner
 from .moment_utils import invert
 import copy
@@ -22,7 +23,10 @@ def plot_and_entropy(root, invert, ax=None):
     if ax is None:
         fig, ax = plt.subplots()
 
-    all_leaves = [l for l in root.get_leaves() if l.mu[0] >= 1e-4]
+    # Skip is_empty leaves: their fits failed and leaf.mu can be unphysical
+    # (e.g. negative effective T from a forward-Euler step) — invert() on
+    # those moments produces the weird tail-region blobs in the marginal.
+    all_leaves = [l for l in root.get_leaves() if l.mu[0] >= 1e-4 and not l.is_empty]
     if not all_leaves:
         return ax, 0.0
 
@@ -71,32 +75,10 @@ def plot_and_entropy(root, invert, ax=None):
         vx_in = vx_global[mask]
         f_marg[mask] += A * np.exp(-b * (vx_in - wx)**2) * I0y * I0z
 
-        # ── Entropy: analytic vy/vz integrals, numerical vx ──────────────────
-        # Per-leaf vx grid for entropy — use leaf's own bounds
-        n_vx_leaf = 101
-        vx_leaf = np.linspace(cx_lo, cx_hi, n_vx_leaf)
-        f_vx    = A * np.exp(-b * (vx_leaf - wx)**2) * I0y * I0z
-
-        # Entropy of the marginal: -integral f_marg * log(f_3d) dvx
-        # For a separable Maxwellian: log(f_3d) = log(A) - b*|v-w|^2
-        # so we can keep entropy exact without needing the full 3D grid
-        # S_leaf = -integral_{vx} integral_{vy} integral_{vz} f log f dv
-        #        = -integral_{vx} f_vx * [log(A) - b*(vx-wx)^2
-        #                                  + log(I0y/I0y) ...] dvx
-        # Cleanest: just do full 3D numerically on a modest grid
-        n_s = 21
-        cvx = np.linspace(cx_lo, cx_hi, n_s)
-        cvy = np.linspace(cy_lo, cy_hi, n_s)
-        cvz = np.linspace(cz_lo, cz_hi, n_s)
-        gx, gy, gz = np.meshgrid(cvx, cvy, cvz, indexing='ij')
-        f3  = A * np.exp(-b * ((gx - wx)**2 + (gy - wy)**2 + (gz - wz)**2))
-        safe_f    = np.where(f3 > 0, f3, 1.0)
-        integrand = np.where(f3 > 0, -f3 * np.log(safe_f), 0.0)
-        entropy  += np.trapezoid(
-                        np.trapezoid(
-                            np.trapezoid(integrand, cvz, axis=2),
-                        cvy, axis=1),
-                    cvx, axis=0)
+    # Entropy from fitted weights and sample positions directly — no
+    # invert(), no separate 3-D resampling. See leaf_entropy() for the
+    # formula S_leaf = -sum w_i log(w_i / dv_i).
+    entropy = sum(leaf_entropy(l) for l in all_leaves_sorted)
 
     ax.plot(vx_global, f_marg, color='red')
     return ax, entropy
@@ -126,7 +108,6 @@ def run_simulation():
     MAX_DEPTH = AMR['max_depth']       # 0 = no splitting, 1 = one split etc.
     DS_THRESHOLD = AMR['dS_threshold']
     DS_ACCUM_THRESHOLD = AMR['dS_accum_threshold']
-    DS_COARSEN_THRESHOLD = AMR['dS_coarsen_threshold']  # coarsen below this
     MIN_LIFETIME         = AMR['min_lifetime']    # minimum steps before coarsening allowed
 
     # Initial distribution function. Still have to uncomment the correct one.
@@ -140,9 +121,12 @@ def run_simulation():
         # return 1 / (2 * K * (np.pi * K)**1.5) * (5 * K - 3 + 2 * (1 - K) / K * (cx**2 + cy**2 + cz**2)) * np.exp(-(cx**2 + cy**2 + cz**2) / K)
         # return 1 / (np.pi**1.5) * np.exp(-1 * ((cx - 0)**2 + cy**2 + cz**2))
 
+    # Initialize the shared master sample grid before any leaves are built.
+    VelocityGroup.set_master_grid(MASTER_GRID)
+
     # Create the root node of the AMR tree.
     bounds_list = np.array([[-3, 3, -3, 3, -3, 3]])
-    root = VelocityGroup(bounds=np.array([[-3.0, 3.0], [-3.0, 3.0], [-3.0, 3.0]]), depth=0, 
+    root = VelocityGroup(bounds=np.array([[-3.0, 3.0], [-3.0, 3.0], [-3.0, 3.0]]), depth=0,
                          max_depth=MAX_DEPTH, split_axes=AMR['split_axes'])
     
     print('Running AMR to get initial groups...\n')
@@ -232,9 +216,16 @@ def run_simulation():
         #     return ft
 
         # ── update moments, refit weights, update shadows ───────────────────
+        coll_arr = np.array(coll)
+        dt_step  = COLLISION_PARAMS['dt']
+        # Global mu-norm is the denominator for every leaf's rate signal,
+        # so the noise floor is uniform across leaves of any size. Computed
+        # against pre-update moments since coll is the dt=0 RHS estimate.
+        mu_total_norm = np.linalg.norm(sum(leaf.mu for leaf in active_leaves))
         for i, leaf in enumerate(active_leaves):
-            # Update moments.
-            leaf.mu += COLLISION_PARAMS['dt'] * np.array(coll)[:, i]
+            coll_vec = coll_arr[:, i]
+            leaf.mu += dt_step * coll_vec
+            leaf.update_rate(coll_vec, dt_step, mu_total_norm)
 
         for i, leaf in enumerate(leaves):
             # Arbitrary test distribution.
@@ -276,22 +267,33 @@ def run_simulation():
             if leaf.is_empty:
                 continue
 
-            if leaf.h2_accum > DS_ACCUM_THRESHOLD:
+            # Symmetric with the coarsen criterion: only split when the
+            # structural accumulator says "structure detected" AND the rate
+            # signal says the leaf is still meaningfully evolving. A leaf
+            # whose rate has dropped below the coarsen threshold won't
+            # split even with a stale h2_accum from an earlier transient.
+            if (leaf.h2_accum > DS_ACCUM_THRESHOLD and
+                    leaf.rate_ema > AMR['rate_coarsen_threshold']):
                 if leaf.can_split():
                     print(f't={t}: splitting depth={leaf.depth} '
-                        f'bounds={leaf.xbounds}, h2={leaf.h2_accum:.4f}')
+                        f'bounds={leaf.xbounds}, KL={leaf.h2_accum:.4f}, '
+                        f'rate={leaf.rate_ema:.4f}')
 
                     leaf.split(t)
                 else:
-                    pass
-                    # At max depth — log the signal but can't split
-                    # print(f't={t}: max depth reached at bounds={leaf.xbounds}, '
-                    #     f'h2={leaf.h2_accum:.4f} — consider increasing MAX_DEPTH')
+                    print(f't={t}: cannot split depth={leaf.depth} '
+                          f'bounds={leaf.xbounds}, KL={leaf.h2_accum:.4f}, '
+                          f'reason={leaf.split_block_reason()}')
 
-        # --- Coarsen check ---
+        # --- Coarsen check (rate-based) ---
+        # Merge a sibling pair when both children's smoothed rate-of-change
+        # has dropped below the coarsen threshold — i.e., the dynamics has
+        # nothing left to do at this resolution. Replaces the static
+        # KL-of-merge criterion, which has a non-zero discrete-fixed-point
+        # floor that prevents merging at equilibrium.
+        rate_threshold = AMR['rate_coarsen_threshold']
         checked_parents = set()
         for leaf in list(root.get_leaves()):
-            # Checks to find valid parent and children triangles.
             if leaf.parent is None:
                 continue
 
@@ -306,27 +308,24 @@ def run_simulation():
             left_child, right_child = parent.children
             if not (left_child.can_coarsen(t) and right_child.can_coarsen(t)):
                 continue
-            if left_child.is_empty or right_child.is_empty:
-                continue  # asymmetric — wait until both have decided
             if not (left_child.is_leaf() and right_child.is_leaf()):
                 continue
-            if left_child.is_empty and right_child.is_empty:
-                parent.merge_children(current_t=t)  # parent will also likely be empty
-                continue
+            if left_child.is_empty or right_child.is_empty:
+                continue  # asymmetric — wait until both have decided
 
-            # Analytic H^2 cost of merging
-            h2 = coarsening_h2_analytic(left_child, right_child, parent)
-
-            if h2 < DS_COARSEN_THRESHOLD:
+            if (left_child.rate_ema < rate_threshold and
+                    right_child.rate_ema < rate_threshold):
                 print(f't={t}: coarsening '
-                    f'{left_child.xbounds}+{right_child.xbounds}'
-                    f'->{parent.xbounds}')
-
+                      f'{left_child.xbounds}+{right_child.xbounds}'
+                      f'->{parent.xbounds} '
+                      f'(rate_L={left_child.rate_ema:.4f}, '
+                      f'rate_R={right_child.rate_ema:.4f})')
                 parent.merge_children(current_t=t)
         
     # --- Final plot of leaf distributions ---
     plt.figure(2)
     plt.plot(range(0, COLLISION_PARAMS['n_t']), entropy_list, color='black')
+    plt.hlines(3.2162536221141895, 0, COLLISION_PARAMS['n_t'], color='red', linestyles='dashed')
     # plt.plot(range(0, COLLISION_PARAMS['n_t']), bkw_entropy, '--', color='purple')
     plt.savefig('plots/0d_entropy.pdf')
 

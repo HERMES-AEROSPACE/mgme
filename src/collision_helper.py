@@ -7,6 +7,8 @@ from .config_0d import AMR
 import math
 
 
+_BOUND_EPS = 1e-10  # matches the old fit_maxent_weights barely-interior offset
+
 def _split_samples(node):
     """
     Return (left_mask, right_mask, mid) for node.split_dim.
@@ -32,14 +34,42 @@ def _child_bounds(node, side, mid):
         all_bounds[dim][0] = mid      # [mid, hi]
     return all_bounds                  # [xb, yb, zb] — compatible with VelocityGroup(bounds=...)
 
-def _maxwellian_params(mu):
-    """Extract (beta, wx, wy, wz) from moment vector."""
-    n  = mu[0]
-    ux = mu[1]/n; uy = mu[2]/n; uz = mu[3]/n
-    T  = max(2*(mu[4]/n - ux**2 - uy**2 - uz**2)/3.0, 1e-10)
-    return 1.0/T, ux, uy, uz
+def _axis_grid_for_leaf(G_master, lo, hi):
+    """
+    Per-leaf 1-D sample grid: master-grid points strictly inside (lo, hi),
+    plus a leaf-specific boundary point at each end (lo+eps, hi-eps).
+
+    The boundary points restore full compact support of the leaf so the
+    Newton solve sees samples reaching the leaf walls. Adjacent siblings
+    pick up boundary points at mid+eps and mid-eps respectively, so they
+    are disjoint by 2*eps — collide() never sees coincident samples.
+    """
+    interior = G_master[(G_master > lo + _BOUND_EPS) & (G_master < hi - _BOUND_EPS)]
+    return np.concatenate(([lo + _BOUND_EPS], interior, [hi - _BOUND_EPS]))
+
 
 class VelocityGroup:
+    # Master sample grid — shared across all leaves. Set once via
+    # set_master_grid(MASTER_GRID) before any VelocityGroup is created.
+    # Built strictly interior to the global bounds; per-leaf slices add
+    # leaf-local boundary points (see _axis_grid_for_leaf).
+    _gx_master = None
+    _gy_master = None
+    _gz_master = None
+    min_points_per_axis = None
+
+    @classmethod
+    def set_master_grid(cls, master_grid_cfg):
+        def _build_axis(lo, hi, dx):
+            n = max(int(np.floor((hi - lo) / dx)) - 1, 0)
+            return lo + dx * (np.arange(n) + 1)
+        (xb, yb, zb) = master_grid_cfg['bounds']
+        (dx, dy, dz) = master_grid_cfg['spacing']
+        cls._gx_master = _build_axis(xb[0], xb[1], dx)
+        cls._gy_master = _build_axis(yb[0], yb[1], dy)
+        cls._gz_master = _build_axis(zb[0], zb[1], dz)
+        cls.min_points_per_axis = master_grid_cfg['min_points_per_axis']
+
     def __init__(self, bounds, depth=0, max_depth=1, created_at=0, split_axes=0):
         """
         bounds: (cx_lo, cx_hi) index bounds into the full grid
@@ -79,6 +109,12 @@ class VelocityGroup:
         # Accumulation
         self.h2_accum = 0.0
 
+        # EMA of relative ||coll * dt|| / ||mu||. Initialized to inf so a
+        # newly-created leaf never trips the coarsen criterion or the split
+        # veto until it has actually been measured by collide() at least
+        # once (the EMA replaces inf on first update_rate call).
+        self.rate_ema = np.inf
+
     @property
     def split_dim(self):
         """Dimension to split along: split_axes[depth % len(split_axes)]."""
@@ -87,14 +123,61 @@ class VelocityGroup:
     def is_leaf(self):
         return len(self.children) == 0
 
+    def has_split_density(self):
+        """
+        True iff both halves of a split along split_dim would have at
+        least min_points_per_axis points along that axis (counting the
+        boundary aug from _axis_grid_for_leaf).
+        """
+        if VelocityGroup.min_points_per_axis is None:
+            return True  # gate disabled when master grid not configured
+        G_master = (VelocityGroup._gx_master,
+                    VelocityGroup._gy_master,
+                    VelocityGroup._gz_master)[self.split_dim]
+        lo, hi = (self.xbounds, self.ybounds, self.zbounds)[self.split_dim]
+        mid = (lo + hi) / 2.0
+        n_left  = len(_axis_grid_for_leaf(G_master, lo, mid))
+        n_right = len(_axis_grid_for_leaf(G_master, mid, hi))
+        return (n_left  >= VelocityGroup.min_points_per_axis and
+                n_right >= VelocityGroup.min_points_per_axis)
+
+    def split_block_reason(self):
+        """None if can_split; else 'max_depth' or 'insufficient_density'."""
+        if self.depth >= self.max_depth:
+            return 'max_depth'
+        if not self.has_split_density():
+            return 'insufficient_density'
+        return None
+
     def can_split(self):
-        return self.depth < self.max_depth
+        return self.split_block_reason() is None
 
     def can_coarsen(self, current_t, min_lifetime=AMR['min_lifetime']):
         """
         Node must have existed for min_lifetime steps before coarsening.
         """
         return (current_t - self.created_at) > min_lifetime
+
+    def update_rate(self, coll_vec, dt, mu_total_norm):
+        """
+        Update the EMA of the leaf's rate of change, expressed as the
+        fraction of total system mass moving in this leaf per step:
+        r = ||coll * dt|| / ||mu_total||.
+
+        Normalizing by the GLOBAL total instead of the per-leaf ||mu||
+        keeps the noise floor uniform across leaves of any size — small
+        tail leaves don't get their rate signal blown up by a tiny
+        denominator, so the coarsen criterion and split veto behave the
+        same way for them as for big leaves.
+        """
+        if mu_total_norm < 1e-12:
+            return
+        r = np.linalg.norm(coll_vec * dt) / mu_total_norm
+        if not np.isfinite(self.rate_ema):
+            self.rate_ema = r          # first measurement: seed the EMA
+        else:
+            g = AMR['rate_ema_gamma']
+            self.rate_ema = g * self.rate_ema + (1.0 - g) * r
 
     def get_sibling(self):
         """
@@ -193,31 +276,42 @@ class VelocityGroup:
         There are no samples on the shadow children currently. Just the moments. To get the KL divergence I can
         use the same samples from my current leaf, fit the weights according to shadow moments and then compare.
         """
-        
+        # If we couldn't act on the signal anyway (max depth or insufficient
+        # density), skip the work and stop letting h2_accum drift upward
+        # forever on a leaf that can never split.
+        if not self.can_split():
+            return
+
+        # Rate-based split veto: at equilibrium, h2 noise would otherwise
+        # eventually cross the accum threshold and force a needless split.
+        # If the leaf's smoothed rate of change is already below the
+        # coarsen threshold, the dynamics says nothing's happening here.
+        if self.rate_ema < AMR['rate_coarsen_threshold']:
+            return
+
         left_mask, right_mask, _ = _split_samples(self)
         masks = [left_mask, right_mask]
         p = np.zeros_like(self.w)
  
         for i, mask in enumerate(masks):
-        #     if not np.any(mask):
-        #         continue
-            phi = np.array([
-                np.ones(np.sum(mask)),
-                self.x_s[mask],
-                self.y_s[mask],
-                self.z_s[mask],
-                self.x_s[mask]**2 + self.y_s[mask]**2 + self.z_s[mask]**2,
-            ])
+            # Pass a copy of self.lam: solve_group_newton mutates lam in
+            # place, and the two shadow fits are independent — letting the
+            # second inherit the first's lam corrupts both this fit and
+            # self.lam for the parent's next refit.
             w, _, success, _ = solve_group_newton(
                 self.x_s[mask], self.y_s[mask], self.z_s[mask],
-                self.shadow_mu[i], self.lam)
+                self.shadow_mu[i], self.lam.copy())
             if success:
                 p[mask] = w
-    
-        p /= np.sum(p)
-        q = self.w / np.sum(self.w)
-        kl = np.sum(p * np.log(p / q))
-         
+
+        # Skip empty halves so 0 * log(0/q) doesn't poison h2_accum with NaN.
+        nz = p > 0
+        if not np.any(nz):
+            return
+        p_nz = p[nz] / p[nz].sum()
+        q_nz = self.w[nz] / self.w[nz].sum()
+        kl = np.sum(p_nz * np.log(p_nz / q_nz))
+
         self.h2_accum += kl
 
     def merge_children(self, current_t=0):
@@ -232,6 +326,7 @@ class VelocityGroup:
         self.children         = []
         self.h2_accum         = 0.0
         self.created_at       = current_t
+        self.rate_ema         = np.inf  # reseed; new state, new measurement
 
     def reactivate(self, current_t=0):
         """
@@ -287,56 +382,92 @@ def solve_group_newton(x_s, y_s, z_s, U, lam, max_iter=50, tol=1e-10):
 
         # Hessian: H_ij = sum(phi_i * phi_j * w)
         H = phi @ (w[:, None] * phi.T)
-        # Newton step
-        lam -= np.linalg.solve(H, g)
-    
-    w = np.exp(lam @ phi) 
-        
+        # Newton step. Bail with success=False on a singular Hessian
+        # rather than crashing the whole run.
+        try:
+            lam -= np.linalg.solve(H, g)
+        except np.linalg.LinAlgError:
+            return w, lam, False, g
+
+    w = np.exp(lam @ phi)
+
     return w, lam, converged, g
 
-def fit_maxent_weights(mu, xbounds, ybounds, zbounds, lam0, n_sigma=3.0):
-    n_min = 5  # would probably like to change this so this scales based on bounds
-    n_max = 30
-    points_per_unit = 5
+def fit_maxent_weights(mu, xbounds, ybounds, zbounds, lam0):
+    """
+    Fit max-entropy weights on the per-leaf sample grid.
 
-    ux  = mu[1] / mu[0]
-    uy  = mu[2] / mu[0]
-    uz  = mu[3] / mu[0]
-    T   = max(2 * (mu[4] / mu[0] - ux**2 - uy**2 - uz**2) / 3.0, 1e-10)
-    v_th = np.sqrt(T)
+    Sample grid = master grid points strictly inside leaf bounds,
+    plus (lo+eps, hi-eps) boundary points on each axis. See
+    _axis_grid_for_leaf for the rationale.
+    """
+    if VelocityGroup._gx_master is None:
+        raise RuntimeError(
+            "Master grid not initialized. Call VelocityGroup.set_master_grid"
+            " before constructing or fitting any VelocityGroup.")
 
-    # Since there is only one group in y and z, no slight factor. This is to make collision routine work.
-    xlo = np.max([ux - n_sigma * v_th, xbounds[0]]) + 1e-10
-    xhi = np.min([ux + n_sigma * v_th, xbounds[1]]) - 1e-10
-    ylo = np.max([uy - n_sigma * v_th, ybounds[0]]) + 1e-10
-    yhi = np.min([uy + n_sigma * v_th, ybounds[1]]) - 1e-10
-    zlo = np.max([uz - n_sigma * v_th, zbounds[0]]) + 1e-10
-    zhi = np.min([uz + n_sigma * v_th, zbounds[1]]) - 1e-10
+    gx = _axis_grid_for_leaf(VelocityGroup._gx_master, xbounds[0], xbounds[1])
+    gy = _axis_grid_for_leaf(VelocityGroup._gy_master, ybounds[0], ybounds[1])
+    gz = _axis_grid_for_leaf(VelocityGroup._gz_master, zbounds[0], zbounds[1])
 
-    nx = 20#int(np.clip(points_per_unit * (xhi - xlo) / v_th, n_min, n_max))
-    ny = 20#int(np.clip(points_per_unit * (yhi - ylo) / v_th, n_min, n_max))
-    nz = 20#int(np.clip(points_per_unit * (zhi - zlo) / v_th, n_min, n_max))
-    # print(nx, ny, nz)
-
-    gx_fine = np.linspace(xlo, xhi, nx)
-    gy_fine = np.linspace(ylo, yhi, ny)
-    gz_fine = np.linspace(zlo, zhi, nz)
-    GX, GY, GZ = np.meshgrid(gx_fine, gy_fine, gz_fine, indexing='ij')
+    GX, GY, GZ = np.meshgrid(gx, gy, gz, indexing='ij')
     x_slice = GX.ravel()
     y_slice = GY.ravel()
     z_slice = GZ.ravel()
 
-    solution, lam, success, rel_err = solve_group_newton(x_slice, y_slice, z_slice, mu, lam0)
+    solution, lam, success, _ = solve_group_newton(x_slice, y_slice, z_slice, mu, lam0)
 
     if success:
         return solution, lam, x_slice, y_slice, z_slice
-    else:
-        return
+    return None
+
+def leaf_entropy(leaf):
+    """
+    Entropy of the leaf's max-entropy distribution computed directly from
+    fitted weights and sample positions:
+
+        S_leaf = -sum_i w_i * log(w_i / dv_i)
+
+    The continuous density at sample i is f(v_i) = w_i / dv_i, where
+    dv_i is the per-sample volume element. Using the 3-D trapezoidal
+    rule on the leaf's per-axis grids (master-grid interior + boundary
+    aug, see _axis_grid_for_leaf) gives non-uniform dv_i that handles
+    the ε-from-wall boundary samples correctly.
+
+    Total entropy across the tree is sum(leaf_entropy(l) for l in leaves)
+    since leaves partition velocity space with no overlap.
+    """
+    if leaf.w is None or leaf.is_empty:
+        return 0.0
+
+    gx = _axis_grid_for_leaf(VelocityGroup._gx_master, leaf.xbounds[0], leaf.xbounds[1])
+    gy = _axis_grid_for_leaf(VelocityGroup._gy_master, leaf.ybounds[0], leaf.ybounds[1])
+    gz = _axis_grid_for_leaf(VelocityGroup._gz_master, leaf.zbounds[0], leaf.zbounds[1])
+
+    def _trap(x):
+        n = len(x)
+        if n < 2:
+            return np.zeros(n)
+        dv = np.empty(n)
+        dv[0]  = (x[1]  - x[0])  / 2.0
+        dv[-1] = (x[-1] - x[-2]) / 2.0
+        if n > 2:
+            dv[1:-1] = (x[2:] - x[:-2]) / 2.0
+        return dv
+
+    dvx, dvy, dvz = _trap(gx), _trap(gy), _trap(gz)
+    # 3-D volume tensor product, raveled to match leaf.w (indexing='ij')
+    DV = (dvx[:, None, None] * dvy[None, :, None] * dvz[None, None, :]).ravel()
+
+    w = leaf.w
+    nz = w > 0
+    return -np.sum(w[nz] * np.log(w[nz] / DV[nz]))
+
 
 def coarsening_h2_analytic(left, right, parent):
     """
     KL divergence of child groups vs. their parent.
-    
+
     Dealing with all real nodes, therefore they all have their own samples. The number of samples of left + right = 2 * parent.
     They do NOT have the same sample set so need to reconcile this fact.
 
@@ -346,15 +477,24 @@ def coarsening_h2_analytic(left, right, parent):
     total_ys = np.concatenate((left.y_s, right.y_s), axis=0)
     total_zs = np.concatenate((left.z_s, right.z_s), axis=0)
 
-    q, _, success, _ = solve_group_newton(total_xs, total_ys, total_zs, parent.mu, parent.lam)
+    # Pass a copy of parent.lam — solve_group_newton mutates lam in place,
+    # and a coarsening check that fails (or even one that succeeds on a
+    # slightly extended sample set with extra boundary points from each
+    # child) shouldn't drift the parent's stored lam away from what
+    # describes its own distribution.
+    q, _, success, _ = solve_group_newton(
+        total_xs, total_ys, total_zs, parent.mu, parent.lam.copy())
+
+    if not success:
+        return np.inf  # can't evaluate — be conservative, don't merge
 
     p = np.concatenate((left.w, right.w))
-    if success:
-        p /= np.sum(p)
-        q /= np.sum(q)
-        kl = np.sum(p * np.log(p / q))
- 
-    return kl
+    nz = (p > 0) & (q > 0)
+    if not np.any(nz):
+        return np.inf
+    p_nz = p[nz] / p[nz].sum()
+    q_nz = q[nz] / q[nz].sum()
+    return np.sum(p_nz * np.log(p_nz / q_nz))
 
 def calc_moment(f, cx, cy, cz, cx_vec, cy_vec, cz_vec):
     mu = np.zeros(5)
@@ -415,8 +555,9 @@ def initial_refine(root, f0, cx, cy, cz, cx_vec, cy_vec, cz_vec, dS_threshold, m
                 
                 leaf.split(current_t=0)
                 splits_this_pass += 1
-            if not leaf.can_split():
-                print(f'Warning: tried to split at max_depth={leaf.max_depth}')
+            if kl > dS_threshold and not leaf.can_split():
+                print(f'Warning: cannot split depth={leaf.depth} '
+                      f'bounds={leaf.xbounds}, reason={leaf.split_block_reason()}')
 
         print(f'Pass {pass_idx}: {splits_this_pass} split(s), '
               f'{len(root.get_leaves())} leaves total')

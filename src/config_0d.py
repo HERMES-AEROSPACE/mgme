@@ -24,11 +24,25 @@ GROUP_PARAMS = {
     'group_bounds_cz': np.array([[0, 51], [50, 106]])
 }
 
+# Master sample grid — shared by every leaf. Each leaf's samples are the
+# subset of master-grid points falling inside its bounds, so per-leaf point
+# count tracks leaf size automatically.
+MASTER_GRID = {
+    'bounds':  ((-3.0, 3.0), (-3.0, 3.0), (-3.0, 3.0)),
+    'spacing': (0.025, 0.5, 0.5),     # per-axis (dx, dy, dz)
+    'min_points_per_axis': 3,       # split-denial gate (per axis, per child)
+}
+
 # AMR parameters
 AMR = {
-    'dS_threshold': 0.1,
-    'dS_accum_threshold': 0.08,
-    'dS_coarsen_threshold': 0.04,   # coarsen below this
+    'dS_threshold': 0.5,
+    'dS_accum_threshold': 0.1,
+    # Rate-based coarsen criterion: relative dmu/dt smoothed by EMA across
+    # steps. At equilibrium the rate signal collapses below this floor (set
+    # to live above the n_coll-driven noise floor ~ 1/sqrt(n_coll)) and the
+    # tree coarsens cleanly. Doubles as a split veto inside accumulate_h2.
+    'rate_coarsen_threshold': 0.0005,
+    'rate_ema_gamma': 0.9,
     'min_lifetime': 2,      # minimum steps before coarsening allowed
     'max_depth': 7,
     'split_axes': [0],          # 1-D vx  (original behaviour)
@@ -36,7 +50,7 @@ AMR = {
 
 # Collision parameters
 COLLISION_PARAMS = {
-    'n_coll': 100000,
+    'n_coll': 200000,
     'n_t': 100,
     'omega': 1.0,
     'alpha': 1.0,
