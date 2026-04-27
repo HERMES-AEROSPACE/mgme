@@ -122,8 +122,13 @@ class VelocityGroup:
     def has_split_density(self, dim):
         """
         True iff both halves of a split along `dim` would have at least
-        min_points_per_axis points along that axis (counting boundary aug
-        from _axis_grid_for_leaf).
+        min_points_per_axis INTERIOR master-grid points along that axis
+        (boundary-aug points at lo+eps/hi-eps don't count).
+
+        Interior-only is the right gate: when a child has only boundary-
+        aug points on an axis, the Maxent fit is degenerate (2 points
+        carrying 2 axis-related moments) and leaf_entropy underestimates
+        the true Maxent entropy by a lot.
         """
         if VelocityGroup.min_points_per_axis is None:
             return True  # gate disabled when master grid not configured
@@ -132,8 +137,8 @@ class VelocityGroup:
                     VelocityGroup._gz_master)[dim]
         lo, hi = (self.xbounds, self.ybounds, self.zbounds)[dim]
         mid = (lo + hi) / 2.0
-        n_left  = len(_axis_grid_for_leaf(G_master, lo, mid))
-        n_right = len(_axis_grid_for_leaf(G_master, mid, hi))
+        n_left  = int(np.sum((G_master > lo + _BOUND_EPS) & (G_master < mid - _BOUND_EPS)))
+        n_right = int(np.sum((G_master > mid + _BOUND_EPS) & (G_master < hi - _BOUND_EPS)))
         return (n_left  >= VelocityGroup.min_points_per_axis and
                 n_right >= VelocityGroup.min_points_per_axis)
 
@@ -416,48 +421,6 @@ def fit_maxent_weights(mu, xbounds, ybounds, zbounds, lam0):
         return solution, lam, x_slice, y_slice, z_slice
     return None
 
-def leaf_entropy(leaf):
-    """
-    Entropy of the leaf's max-entropy distribution computed directly from
-    fitted weights and sample positions:
-
-        S_leaf = -sum_i w_i * log(w_i / dv_i)
-
-    The continuous density at sample i is f(v_i) = w_i / dv_i, where
-    dv_i is the per-sample volume element. Using the 3-D trapezoidal
-    rule on the leaf's per-axis grids (master-grid interior + boundary
-    aug, see _axis_grid_for_leaf) gives non-uniform dv_i that handles
-    the ε-from-wall boundary samples correctly.
-
-    Total entropy across the tree is sum(leaf_entropy(l) for l in leaves)
-    since leaves partition velocity space with no overlap.
-    """
-    if leaf.w is None or leaf.is_empty:
-        return 0.0
-
-    gx = _axis_grid_for_leaf(VelocityGroup._gx_master, leaf.xbounds[0], leaf.xbounds[1])
-    gy = _axis_grid_for_leaf(VelocityGroup._gy_master, leaf.ybounds[0], leaf.ybounds[1])
-    gz = _axis_grid_for_leaf(VelocityGroup._gz_master, leaf.zbounds[0], leaf.zbounds[1])
-
-    def _trap(x):
-        n = len(x)
-        if n < 2:
-            return np.zeros(n)
-        dv = np.empty(n)
-        dv[0]  = (x[1]  - x[0])  / 2.0
-        dv[-1] = (x[-1] - x[-2]) / 2.0
-        if n > 2:
-            dv[1:-1] = (x[2:] - x[:-2]) / 2.0
-        return dv
-
-    dvx, dvy, dvz = _trap(gx), _trap(gy), _trap(gz)
-    # 3-D volume tensor product, raveled to match leaf.w (indexing='ij')
-    DV = (dvx[:, None, None] * dvy[None, :, None] * dvz[None, None, :]).ravel()
-
-    w = leaf.w
-    nz = w > 0
-    return -np.sum(w[nz] * np.log(w[nz] / DV[nz]))
-
 def calc_moment(f, cx, cy, cz, cx_vec, cy_vec, cz_vec):
     mu = np.zeros(5)
 
@@ -502,7 +465,7 @@ def _f0_half_kl(f0, xb, yb, zb, n_fine):
     return float(np.sum(p[nz] * np.log(p[nz] / q[nz])))
 
 
-def initial_refine(root, f0, cx, cy, cz, cx_vec, cy_vec, cz_vec, dS_threshold, max_passes=10):
+def initial_refine(root, f0, cx, cy, cz, cx_vec, cy_vec, cz_vec, KL_threshold, max_passes=5):
     """
     Refine the AMR tree based on entropy difference on each leaf.
     f0-vs-Maxent KL on the parent leaf is the trigger; the split axis is
@@ -539,7 +502,7 @@ def initial_refine(root, f0, cx, cy, cz, cx_vec, cy_vec, cz_vec, dS_threshold, m
             nz = (p > 0) & (q > 0)   # 0 * log(0/q) → NaN; drop those samples
             kl = float(np.sum(p[nz] * np.log(p[nz] / q[nz])))
 
-            if kl <= dS_threshold:
+            if kl <= KL_threshold:
                 # No split needed; still refresh shadows for runtime.
                 leaf.update_shadows()
                 continue
@@ -686,8 +649,7 @@ def collide(x_sample, y_sample, z_sample, weights, num_valid_samples, bounds_lis
         g2r = clamp_and_find_group(vx2p, vy2p, vz2p)
 
         # Single collision weight — used for BOTH loss and gain
-        # C = 0.5 * W**2 / n_actual * g**(2 - 2*omega) * sigma_coeff_hat
-        C = 0.5 * W**2 / n_actual * g**(2 - 2*omega)
+        C = 0.5 * W**2 / n_actual * g**(2 - 2*omega) * sigma_coeff_hat
 
         # Loss from pre-collision groups
         group_n[g1]  -= C;       group_n[g2]  -= C

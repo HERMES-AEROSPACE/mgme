@@ -8,7 +8,7 @@ from .config_0d import (
     AMR,
     COLLISION_PARAMS
 )
-from .collision_helper import calculate_velocity_grid, VelocityGroup, initial_refine, collide, fit_maxent_weights, calc_moment, leaf_entropy
+from .collision_helper import calculate_velocity_grid, VelocityGroup, initial_refine, collide, fit_maxent_weights, calc_moment
 from .banner import print_banner
 from .moment_utils import invert
 import copy
@@ -57,6 +57,9 @@ def plot_and_entropy(root, invert, ax=None):
         )
 
         sqrt_b = np.sqrt(b)
+        I0x = (np.sqrt(np.pi / (4 * b))
+               * (scipy_erf(sqrt_b * (cx_hi - wx))
+                  - scipy_erf(sqrt_b * (cx_lo - wx))))
         I0y = (np.sqrt(np.pi / (4 * b))
                * (scipy_erf(sqrt_b * (cy_hi - wy))
                   - scipy_erf(sqrt_b * (cy_lo - wy))))
@@ -75,10 +78,23 @@ def plot_and_entropy(root, invert, ax=None):
         vx_in = vx_global[mask]
         f_marg[mask] += A * np.exp(-b * (vx_in - wx)**2) * I0y * I0z
 
-    # Entropy from fitted weights and sample positions directly — no
-    # invert(), no separate 3-D resampling. See leaf_entropy() for the
-    # formula S_leaf = -sum w_i log(w_i / dv_i).
-    entropy = sum(leaf_entropy(l) for l in all_leaves_sorted)
+        # Entropy from analytic integration of -f log f over the leaf box
+        # using the inverted truncated Maxwellian f = A exp(-b * |c-w|^2):
+        #   S_leaf = -log(A) * mu[0] + b * mu[0] * (J2x/I0x + J2y/I0y + J2z/I0z)
+        # where J2u = integral of (c-wu)^2 exp(-b(c-wu)^2) dc over [ci,cf]
+        #            = [(ci-wu) e^{-b(ci-wu)^2} - (cf-wu) e^{-b(cf-wu)^2}] / (2b)
+        #              + I0u / (2b)
+        def _J2(c_lo, c_hi, w):
+            d_lo = c_lo - w
+            d_hi = c_hi - w
+            return (d_lo * np.exp(-b * d_lo**2)
+                    - d_hi * np.exp(-b * d_hi**2)) / (2 * b)
+        J2x = _J2(cx_lo, cx_hi, wx) + I0x / (2 * b)
+        J2y = _J2(cy_lo, cy_hi, wy) + I0y / (2 * b)
+        J2z = _J2(cz_lo, cz_hi, wz) + I0z / (2 * b)
+        n_leaf = leaf.mu[0]
+        entropy += (-np.log(A) * n_leaf
+                    + b * n_leaf * (J2x / I0x + J2y / I0y + J2z / I0z))
 
     ax.plot(vx_global, f_marg, color='red')
     return ax, entropy
@@ -132,7 +148,7 @@ def run_simulation():
     print('Running AMR to get initial groups...\n')
     # Choose between using custom groups or AMR to get initial groups.
     # custom_groups(f0, cx, cy, cz, cx_vec, cy_vec, cz_vec, root, GROUP_PARAMS)
-    initial_refine(root, f0, cx, cy, cz, cx_vec, cy_vec, cz_vec, KL_THRESHOLD)
+    initial_refine(root, f0, cx, cy, cz, cx_vec, cy_vec, cz_vec, KL_THRESHOLD, MAX_DEPTH+1)
 
     entropy_list = np.zeros(COLLISION_PARAMS['n_t'])
     bkw_entropy  = np.zeros(COLLISION_PARAMS['n_t'])
@@ -146,11 +162,11 @@ def run_simulation():
         ax, entropy_list[t] = plot_and_entropy(root, invert, ax=ax)
         
         # plt.plot(cx_vec, np.trapezoid(np.trapezoid(f0, cz_vec, axis=2), cy_vec, axis=1), '--', color='black')
-        # K = 1 - 0.4 * np.exp(-t*COLLISION_PARAMS['dt']/6)
-        # f = 1 / (2 * K * (np.pi * K)**1.5) * (5 * K - 3 + 2 * (1 - K) / K * (cx**2 + cy**2 + cz**2)) * np.exp(-(cx**2 + cy**2 + cz**2) / K)
-        # bkw_entropy[t] = np.trapezoid(np.trapezoid(np.trapezoid(-f * np.log(f, where=f>0), cz_vec, axis=2), cy_vec, axis=1), cx_vec)
+        K = 1 - 0.4 * np.exp(-t*COLLISION_PARAMS['dt']/6)
+        f = 1 / (2 * K * (np.pi * K)**1.5) * (5 * K - 3 + 2 * (1 - K) / K * (cx**2 + cy**2 + cz**2)) * np.exp(-(cx**2 + cy**2 + cz**2) / K)
+        bkw_entropy[t] = np.trapezoid(np.trapezoid(np.trapezoid(-f * np.log(f, where=f>0), cz_vec, axis=2), cy_vec, axis=1), cx_vec)
         # f = 0.5 * (3 / np.pi)**1.5 * (np.exp(-3.0 * (cx - 1)**2) + np.exp(-3.0 * (cx + 1)**2)) * np.exp(-3 * (cy**2 + cz**2))
-        f = 1 / (np.pi**1.5) * np.exp(-1 * (cx**2 + cy**2 + cz**2))
+        # f = 1 / (np.pi**1.5) * np.exp(-1 * (cx**2 + cy**2 + cz**2))
         plt.plot(cx_vec, np.trapezoid(np.trapezoid(f, cz_vec, axis=2), cy_vec, axis=1), '--', color='black')
         # plt.plot(cx_vec, np.trapezoid(np.trapezoid(f2, cz_vec, axis=2), cy_vec, axis=1), '-.', color='black')
 
@@ -309,8 +325,8 @@ def run_simulation():
             if (left_child.rate_ema < rate_threshold and
                     right_child.rate_ema < rate_threshold):
                 print(f't={t}: coarsening '
-                      f'{left_child.xbounds}+{right_child.xbounds}'
-                      f'->{parent.xbounds} '
+                      f'bounds=(x={left_child.xbounds},y={left_child.ybounds},z={left_child.zbounds}), '
+                      f'bounds=(x={right_child.xbounds},y={right_child.ybounds},z={right_child.zbounds}), '
                       f'(rate_L={left_child.rate_ema:.4f}, '
                       f'rate_R={right_child.rate_ema:.4f})')
                 print(left_child.mu + right_child.mu)
@@ -321,7 +337,7 @@ def run_simulation():
     plt.figure(2)
     plt.plot(range(0, COLLISION_PARAMS['n_t']), entropy_list, color='black')
     plt.hlines(3.2162536221141895, 0, COLLISION_PARAMS['n_t'], color='red', linestyles='dashed')
-    # plt.plot(range(0, COLLISION_PARAMS['n_t']), bkw_entropy, '--', color='purple')
+    plt.plot(range(0, COLLISION_PARAMS['n_t']), bkw_entropy, '--', color='purple')
     plt.savefig('plots/0d_entropy.pdf')
 
 if __name__ == '__main__':

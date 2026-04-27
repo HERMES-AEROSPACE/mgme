@@ -29,7 +29,7 @@ GROUP_PARAMS = {
 # count tracks leaf size automatically.
 MASTER_GRID = {
     'bounds':  ((-3.0, 3.0), (-3.0, 3.0), (-3.0, 3.0)),
-    'spacing': (0.2, 0.2, 0.2),     # per-axis (dx, dy, dz)
+    'spacing': (0.05, 0.05, 0.05),     # per-axis (dx, dy, dz)
     'min_points_per_axis': 3,       # split-denial gate (per axis, per child)
 }
 
@@ -41,10 +41,10 @@ AMR = {
     # steps. At equilibrium the rate signal collapses below this floor (set
     # to live above the n_coll-driven noise floor ~ 1/sqrt(n_coll)) and the
     # tree coarsens cleanly. Doubles as a split veto inside accumulate_kl.
-    'rate_coarsen_threshold': 0.0005,
+    'rate_coarsen_threshold': 0.0001,
     'rate_ema_gamma': 0.9,
     'min_lifetime': 3,      # minimum steps before coarsening allowed
-    'max_depth': 7,
+    'max_depth': 11,
     'split_axes': [0, 1, 2],  # axes cycled by depth: [0]=vx only, [0,1,2]=cycle x,y,z
 }
 
