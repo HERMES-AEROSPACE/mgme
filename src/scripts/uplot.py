@@ -1,8 +1,8 @@
 import numpy as np
 from matplotlib import pyplot as plt
-from .config_1d import CONSTANTS, FREESTREAM_PARAMS, PHYS_SPACE, GROUP_PARAMS, VELOCITY_SPACE
-from .shock_helper import calculate_velocity_grid
-from .physics.moments import invert
+from ..config_1d import CONSTANTS, FREESTREAM_PARAMS, PHYS_SPACE, GROUP_PARAMS, VELOCITY_SPACE
+from ..shock_helper import calculate_velocity_grid
+from ..physics.moments import invert
 from scipy.interpolate import interp1d
 from scipy import special
 

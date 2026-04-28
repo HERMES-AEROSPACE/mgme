@@ -8,7 +8,7 @@ from ..config_0d import (
     AMR,
     COLLISION_PARAMS
 )
-from ..collision_helper import VelocityGroup, initial_refine, fit_maxent_weights
+from ..amr import VelocityGroup, initial_refine, fit_maxent_weights
 from ..physics.grid import calculate_velocity_grid
 from ..physics.collide import collide
 from ..physics.moments import calc_moment, invert

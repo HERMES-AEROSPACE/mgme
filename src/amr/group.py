@@ -3,10 +3,10 @@ from numba import njit
 from scipy.stats import qmc
 from scipy import special
 from matplotlib import pyplot as plt
-from .config_0d import AMR
-from .physics.grid import calculate_velocity_grid
-from .physics.maxent import solve_group_newton
-from .physics.collide import collide
+from ..config_0d import AMR
+from ..physics.grid import calculate_velocity_grid
+from ..physics.maxent import solve_group_newton
+from ..physics.collide import collide
 import math
 
 
