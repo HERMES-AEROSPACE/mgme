@@ -8,9 +8,11 @@ from ..config_0d import (
     AMR,
     COLLISION_PARAMS
 )
-from ..collision_helper import calculate_velocity_grid, VelocityGroup, initial_refine, collide, fit_maxent_weights, calc_moment
+from ..collision_helper import VelocityGroup, initial_refine, fit_maxent_weights
+from ..physics.grid import calculate_velocity_grid
+from ..physics.collide import collide
+from ..physics.moments import calc_moment, invert
 from ..banner import print_banner
-from ..moment_utils import invert
 import copy
 import sys
 from numba import types
