@@ -124,11 +124,9 @@ def run_simulation():
     CZ_LB = cz_vec[0];  CZ_UB = cz_vec[-1]
 
     n_coll = COLLISION_PARAMS['n_coll']
-    omega = COLLISION_PARAMS['omega']
-    alpha = COLLISION_PARAMS['alpha']
-    m_r = 0.5
-    gamma_omega = special.gamma(5/2 - omega)
-    sigma_coeff_hat = 1/gamma_omega * (1 / m_r)**(0.5 - omega)
+    # 0-D uses the σ_T * g = 1 simplification for BKW comparison.
+    # The physical value would be: 1/gamma_omega * (1 / m_r)**(0.5 - omega).
+    sigma_coeff_hat = 1.0
 
     MAX_DEPTH = AMR['max_depth']       # 0 = no splitting, 1 = one split etc.
     KL_THRESHOLD = AMR['KL_threshold']
