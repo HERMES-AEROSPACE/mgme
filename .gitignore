@@ -48,7 +48,6 @@ src/amr_movie.py
 src/amr_showcase.py
 src/amr_test2.py
 src/animate.py
-src/banner.py
 src/create_amr_video.py
 src/cvx_demo.py
 src/error_temp.py
