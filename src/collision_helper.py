@@ -394,6 +394,53 @@ class VelocityGroup:
 
         self.kl_accum += kl
 
+    def coarsen_entropy_increase(self):
+        """
+        Speculatively compute the Maxent entropy increase that would
+        result from merging children into self.
+
+        Continuous-Maxent entropy on a leaf:
+            S = -lam . mu + mu[0] * log(V_leaf / N_samples)
+        The first term is the Maxent identity for f = exp(lam . phi);
+        the second corrects for the fact that our stored lam is the
+        DISCRETE dual (where w_i approx f(v_i)*dv), so log(dv) =
+        log(V/N) is the missing offset to recover continuous entropy.
+
+        Returns S_parent - sum(S_child) (>= 0 by Maxent's partition-
+        monotonicity), or +inf if the parent fit fails. Used as a
+        structure-based veto on coarsening: if children captured
+        non-Maxwellian structure the parent's bigger box can't, this
+        will be large.
+        """
+        if not self.children:
+            return 0.0
+
+        merged_mu = sum(c.mu for c in self.children)
+        result = fit_maxent_weights(
+            merged_mu, self.xbounds, self.ybounds, self.zbounds, np.zeros(5))
+        if result is None:
+            return np.inf
+        _, parent_lam, parent_xs, _, _ = result
+        V_parent = ((self.xbounds[1] - self.xbounds[0])
+                    * (self.ybounds[1] - self.ybounds[0])
+                    * (self.zbounds[1] - self.zbounds[0]))
+        N_parent = len(parent_xs)
+        S_parent = (-float(parent_lam @ merged_mu)
+                    + float(merged_mu[0]) * np.log(V_parent / N_parent))
+
+        S_children = 0.0
+        for c in self.children:
+            if c.is_empty or c.lam is None or c.mu is None or c.x_s is None:
+                continue
+            V_c = ((c.xbounds[1] - c.xbounds[0])
+                   * (c.ybounds[1] - c.ybounds[0])
+                   * (c.zbounds[1] - c.zbounds[0]))
+            N_c = len(c.x_s)
+            S_children += (-float(c.lam @ c.mu)
+                           + float(c.mu[0]) * np.log(V_c / N_c))
+
+        return S_parent - S_children
+
     def merge_children(self, current_t=0):
         expected_n = 8 if self.split_mode == 'octree' else 2
         assert len(self.children) == expected_n
@@ -469,6 +516,15 @@ def solve_group_newton(x_s, y_s, z_s, U, lam, max_iter=50, tol=1e-10):
     phi[2] = y_s
     phi[3] = z_s
     phi[4] = x_s**2 + y_s**2 + z_s**2
+
+    # Copy lam so we never mutate the caller's array. Critical: the
+    # `lam -= ...` step inside the loop modifies in place, and on a
+    # diverged fit (success=False) the caller would otherwise see its
+    # original leaf.lam corrupted to garbage even though we returned
+    # nothing. That corruption silently breaks the next step's
+    # warm-start and any code that reads leaf.lam (e.g. entropy via
+    # the Maxent identity S = -lam . mu).
+    lam = lam.copy()
 
     converged = False
     with np.errstate(over='ignore', invalid='ignore'):

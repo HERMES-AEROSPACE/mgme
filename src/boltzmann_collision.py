@@ -338,11 +338,16 @@ def run_simulation():
                               f'KL={leaf.kl_accum:.4f}, '
                               f'reason={leaf.split_block_reason(leaf.split_dim)}')
 
-        # --- Coarsen check (rate-based) ---
+        # --- Coarsen check (rate-based + structure-based) ---
         # Merge a sibling group when ALL children's smoothed rate-of-change
-        # has dropped below the coarsen threshold (2 siblings in binary,
-        # 8 octants in octree).
+        # has dropped below the coarsen threshold AND the resulting Maxent
+        # entropy increase is below the structure threshold (i.e. the
+        # children weren't capturing structure the parent box can't
+        # represent — important during smooth but non-Maxwellian phases
+        # like BKW relaxation, where the rate criterion alone would
+        # prematurely coarsen and inflate the entropy display).
         rate_threshold = AMR['rate_coarsen_threshold']
+        entropy_threshold = AMR.get('entropy_coarsen_threshold', np.inf)
         expected_children = 8 if AMR.get('split_mode', 'binary') == 'octree' else 2
         checked_parents = set()
         for leaf in list(root.get_leaves()):
@@ -370,13 +375,17 @@ def run_simulation():
             # mu still gets summed into the merged parent (mass conserved),
             # and the parent's larger box almost always fits cleanly.
             if all(c.rate_ema < rate_threshold for c in children):
+                dS = parent.coarsen_entropy_increase()
+                if dS > entropy_threshold:
+                    # Structure veto: children captured non-Maxwellian
+                    # detail that the parent box would lose. Wait.
+                    continue
                 rates_str = ', '.join(f'{c.rate_ema:.4f}' for c in children)
                 print(f't={t}: coarsening {len(children)} children -> '
                       f'(x={parent.xbounds},y={parent.ybounds},z={parent.zbounds}), '
-                      f'rates=[{rates_str}]')
-                print(sum(c.mu for c in children))
+                      f'rates=[{rates_str}], dS={dS:.5f}')
+                      
                 parent.merge_children(current_t=t)
-                print(parent.mu)
         
     # --- Final plot of leaf distributions ---
     plt.figure(2)
