@@ -1,8 +1,8 @@
 import numpy as np
-from .banner import print_banner
-from .shock_helper import ic, KT_central2, generate_regular_samples, collide, calculate_velocity_grid
-from .shock_helper import calc_flux_analytical, calc_flux_int
-from .config_1d import CONSTANTS, FREESTREAM_PARAMS, PHYS_SPACE, GROUP_PARAMS, VELOCITY_SPACE, SIMULATION_PARAMS
+from ..banner import print_banner
+from ..shock_helper import ic, KT_central2, generate_regular_samples, collide, calculate_velocity_grid
+from ..shock_helper import calc_flux_analytical, calc_flux_int
+from ..config_1d import CONSTANTS, FREESTREAM_PARAMS, PHYS_SPACE, GROUP_PARAMS, VELOCITY_SPACE, SIMULATION_PARAMS
 import itertools
 from scipy import special
 from joblib import Parallel, delayed, parallel_backend

@@ -1,16 +1,16 @@
 import numpy as np
 from scipy import special
 from scipy.stats import qmc, norm
-from .config_0d import (
+from ..config_0d import (
     VELOCITY_SPACE,
     GROUP_PARAMS,
     MASTER_GRID,
     AMR,
     COLLISION_PARAMS
 )
-from .collision_helper import calculate_velocity_grid, VelocityGroup, initial_refine, collide, fit_maxent_weights, calc_moment
-from .banner import print_banner
-from .moment_utils import invert
+from ..collision_helper import calculate_velocity_grid, VelocityGroup, initial_refine, collide, fit_maxent_weights, calc_moment
+from ..banner import print_banner
+from ..moment_utils import invert
 import copy
 import sys
 from numba import types
