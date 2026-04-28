@@ -227,26 +227,6 @@ def run_simulation():
             key_type, sigma_coeff_hat, omega, alpha
         )
 
-        # Define test distribution if using to simulate forcing/flux terms.
-        # def ft(cx, cy, cz):
-        #     f01 = 1/(np.pi**1.5) * np.exp(-1*((cx - 3 + 0.05*t)**2 + cy**2 + cz**2))
-        #     f02 = 0.04 / (np.pi**1.5) * np.exp(-0.2 * ((cx + 1)**2 + cy**2 + cz**2))
-        #     f_eq  = 1/(np.pi**1.5) * np.exp(-1*(cx**2 + cy**2 + cz**2))
-
-        #     if t <= 100:
-        #         # Phase 1: drift and mix toward non-Maxwellian
-        #         alpha   = t / 100
-        #         weight2 = 0.5 * alpha
-        #         weight1 = 1 - weight2
-        #         ft  = weight1 * f01 + weight2 * f02
-        #     else:
-        #         tau   = 30   # relaxation timescale in steps
-        #         decay = np.exp(-(t - 100) / tau)
-        #         ft_end_phase1 = 0.5 * f01 + 0.5 * f02
-        #         ft    = decay * ft_end_phase1 + (1 - decay) * f_eq
-
-        #     return ft
-
         # ── update moments, refit weights, update shadows ───────────────────
         coll_arr = np.array(coll)
         dt_step  = COLLISION_PARAMS['dt']
@@ -263,19 +243,6 @@ def run_simulation():
             leaf.update_rate(coll_vec, dt_step, mu_total_norm)
 
         for i, leaf in enumerate(leaves):
-            # Arbitrary test distribution.
-            # cx_lo, cx_hi = leaf.xbounds
-            # cy_lo, cy_hi = leaf.ybounds
-            # cz_lo, cz_hi = leaf.zbounds
-            # cx_vec = np.linspace(cx_lo, cx_hi, 30)
-            # cy_vec = np.linspace(cy_lo, cy_hi, 30)
-            # cz_vec = np.linspace(cz_lo, cz_hi, 30) 
-            # cx, cy, cz = np.meshgrid(cx_vec, cy_vec, cz_vec, indexing='ij')
-            # f_slice = ft(cx, cy, cz)
-            # plt.plot(cx_vec, np.trapezoid(np.trapezoid(f_slice, cz_vec, axis=2), cy_vec, axis=1), '--', color='black')
-            # mu = calc_moment(f_slice, cx, cy, cz, cx_vec, cy_vec, cz_vec)
-            # leaf.mu = mu
-
             if leaf.is_empty:
                 if leaf.mu[0] >= leaf.n_threshold:
                     leaf.reactivate(current_t=t)
