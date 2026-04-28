@@ -35,17 +35,20 @@ MASTER_GRID = {
 
 # AMR parameters
 AMR = {
-    'KL_threshold': 0.01,
+    'KL_threshold': 0.03,
     'KL_accum_threshold': 0.5,
     # Rate-based coarsen criterion: relative dmu/dt smoothed by EMA across
     # steps. At equilibrium the rate signal collapses below this floor (set
     # to live above the n_coll-driven noise floor ~ 1/sqrt(n_coll)) and the
     # tree coarsens cleanly. Doubles as a split veto inside accumulate_kl.
-    'rate_coarsen_threshold': 0.0001,
+    'rate_coarsen_threshold': 0.00005,
     'rate_ema_gamma': 0.9,
     'min_lifetime': 3,      # minimum steps before coarsening allowed
-    'max_depth': 11,
-    'split_axes': [0, 1, 2],  # axes cycled by depth: [0]=vx only, [0,1,2]=cycle x,y,z
+    'max_depth': 3,
+    # 'octree' (default): each split halves all 3 axes simultaneously, 1->8 children.
+    # 'binary': halve one axis per split, cycled by depth via split_axes (legacy mode).
+    'split_mode': 'octree',
+    'split_axes': [0, 1, 2],  # binary mode only — axes cycled by depth
 }
 
 # Collision parameters

@@ -23,10 +23,12 @@ def plot_and_entropy(root, invert, ax=None):
     if ax is None:
         fig, ax = plt.subplots()
 
-    # Skip is_empty leaves: their fits failed and leaf.mu can be unphysical
-    # (e.g. negative effective T from a forward-Euler step) — invert() on
-    # those moments produces the weird tail-region blobs in the marginal.
-    all_leaves = [l for l in root.get_leaves() if l.mu[0] >= 1e-4 and not l.is_empty]
+    # Skip is_empty leaves: those have no fit at all.
+    # Keep tiny-mass leaves: their mass still belongs in the entropy sum,
+    # otherwise mass slowly leaking into them creates an unphysical
+    # plateau-then-dip in the entropy trace. The invert() guard below
+    # handles the case where moments are box-infeasible.
+    all_leaves = [l for l in root.get_leaves() if l.mu[0] > 0 and not l.is_empty]
     if not all_leaves:
         return ax, 0.0
 
@@ -55,6 +57,13 @@ def plot_and_entropy(root, invert, ax=None):
              'ci_cy': cy_lo, 'cf_cy': cy_hi,
              'ci_cz': cz_lo, 'cf_cz': cz_hi}
         )
+
+        # invert() can return b=0 (least_squares hit the lower bound) or
+        # NaN/inf when the moments are infeasible in the leaf box (e.g.
+        # mu[1]/mu[0] outside [cx_lo, cx_hi]). Skip those leaves — their
+        # contribution would otherwise diverge through log(A) or 1/I0u.
+        if not (np.isfinite(A) and np.isfinite(b) and A > 0 and b > 0):
+            continue
 
         sqrt_b = np.sqrt(b)
         I0x = (np.sqrt(np.pi / (4 * b))
@@ -143,7 +152,8 @@ def run_simulation():
     # Create the root node of the AMR tree.
     bounds_list = np.array([[-3, 3, -3, 3, -3, 3]])
     root = VelocityGroup(bounds=np.array([[-3.0, 3.0], [-3.0, 3.0], [-3.0, 3.0]]), depth=0,
-                         max_depth=MAX_DEPTH, split_axes=AMR['split_axes'])
+                         max_depth=MAX_DEPTH, split_axes=AMR['split_axes'],
+                         split_mode=AMR.get('split_mode', 'binary'))
     
     print('Running AMR to get initial groups...\n')
     # Choose between using custom groups or AMR to get initial groups.
@@ -170,19 +180,28 @@ def run_simulation():
         plt.plot(cx_vec, np.trapezoid(np.trapezoid(f, cz_vec, axis=2), cy_vec, axis=1), '--', color='black')
         # plt.plot(cx_vec, np.trapezoid(np.trapezoid(f2, cz_vec, axis=2), cy_vec, axis=1), '-.', color='black')
 
-        # ------------------------- BEGIN COLLISION ROUTINE ----------------------------        
+        # ------------------------- BEGIN COLLISION ROUTINE ----------------------------
         leaves   = root.get_leaves()
         n_groups = len(leaves)
 
-        # Calculate arrays necessary to run collision step.
-        active_leaves = [leaf for leaf in leaves if not leaf.is_empty]
-
+        # bounds_list covers ALL leaves (including is_empty) so that
+        # find_group() inside collide() can route post-collision velocities
+        # into empty octants. If an empty leaf is omitted, its octant
+        # becomes an absorption hole: find_group falls back to leaf 0 and
+        # corrupts its moments within a few steps. Sample arrays are still
+        # built only from non-empty leaves — empty leaves contribute zero
+        # weight and never get picked as collision partners. After collide,
+        # any post-collision gain landing in an empty leaf accumulates into
+        # its mu and the existing reactivate() branch handles it once
+        # mu[0] >= n_threshold.
         bounds_list = np.array([
             [leaf.xbounds[0], leaf.xbounds[1],
              leaf.ybounds[0], leaf.ybounds[1],
              leaf.zbounds[0], leaf.zbounds[1]]
-            for leaf in active_leaves
+            for leaf in leaves
         ])
+
+        active_leaves = [leaf for leaf in leaves if not leaf.is_empty]
         n_total  = sum(len(leaf.x_s) for leaf in active_leaves)
         x_flat   = np.zeros(n_total)
         y_flat   = np.zeros(n_total)
@@ -236,8 +255,11 @@ def run_simulation():
         # Global mu-norm is the denominator for every leaf's rate signal,
         # so the noise floor is uniform across leaves of any size. Computed
         # against pre-update moments since coll is the dt=0 RHS estimate.
-        mu_total_norm = np.linalg.norm(sum(leaf.mu for leaf in active_leaves))
-        for i, leaf in enumerate(active_leaves):
+        # Iterate over ALL leaves: bounds_list now covers the full domain,
+        # so coll_arr[:, i] aligns with leaves[i] (not active_leaves[i]).
+        # Empty leaves accumulate gain too — reactivation is handled below.
+        mu_total_norm = np.linalg.norm(sum(leaf.mu for leaf in leaves))
+        for i, leaf in enumerate(leaves):
             coll_vec = coll_arr[:, i]
             leaf.mu += dt_step * coll_vec
             leaf.update_rate(coll_vec, dt_step, mu_total_norm)
@@ -264,7 +286,14 @@ def run_simulation():
             # Refit weights and update shadows.
             result = fit_maxent_weights(leaf.mu, leaf.xbounds, leaf.ybounds, leaf.zbounds, leaf.lam)
             if result is None:
-                leaf.is_empty = True
+                # Fit failed — moments are geometrically inconsistent with
+                # the leaf box (e.g. mu[1]/mu[0] outside cx-bounds because
+                # asymmetric collisional gain/loss drifted the mean past
+                # the wall). Keep the previous w/lam/samples instead of
+                # marking is_empty, so the leaf's mass stays visible to
+                # the entropy/marginal sums. The stale fit is a bounded
+                # approximation; next step's mu update may restore
+                # feasibility.
                 continue
 
             leaf.w, leaf.lam, leaf.x_s, leaf.y_s, leaf.z_s = result
@@ -279,28 +308,42 @@ def run_simulation():
         plt.close(fig)
 
         # --- Refinement check ---
-        # Single axis per leaf, cycled by depth via split_axes (set in
-        # __init__). Adaptive axis pick happens only at initial_refine.
+        # Octree: each split halves all 3 axes (1->8 children).
+        # Binary: single axis per leaf, cycled by depth via split_axes —
+        # adaptive axis pick only happens at initial_refine.
         for leaf in list(root.get_leaves()):
             if leaf.is_empty:
                 continue
 
             if (leaf.kl_accum > KL_ACCUM_THRESHOLD and
                     leaf.rate_ema > AMR['rate_coarsen_threshold']):
-                if leaf.can_split(leaf.split_dim):
-                    print(f't={t}: splitting depth={leaf.depth} axis={leaf.split_dim} '
-                          f'bounds=(x={leaf.xbounds},y={leaf.ybounds},z={leaf.zbounds}), '
-                          f'KL={leaf.kl_accum:.4f}, rate={leaf.rate_ema:.4f}')
-                    leaf.split(t)
+                if leaf.split_mode == 'octree':
+                    if leaf.can_split():
+                        print(f't={t}: octree-splitting depth={leaf.depth} '
+                              f'bounds=(x={leaf.xbounds},y={leaf.ybounds},z={leaf.zbounds}), '
+                              f'KL={leaf.kl_accum:.4f}, rate={leaf.rate_ema:.4f}')
+                        leaf.split(t)
+                    else:
+                        print(f't={t}: cannot split depth={leaf.depth} '
+                              f'KL={leaf.kl_accum:.4f}, '
+                              f'reason={leaf.split_block_reason()}')
                 else:
-                    print(f't={t}: cannot split depth={leaf.depth} axis={leaf.split_dim} '
-                          f'KL={leaf.kl_accum:.4f}, '
-                          f'reason={leaf.split_block_reason(leaf.split_dim)}')
+                    if leaf.can_split(leaf.split_dim):
+                        print(f't={t}: splitting depth={leaf.depth} axis={leaf.split_dim} '
+                              f'bounds=(x={leaf.xbounds},y={leaf.ybounds},z={leaf.zbounds}), '
+                              f'KL={leaf.kl_accum:.4f}, rate={leaf.rate_ema:.4f}')
+                        leaf.split(t)
+                    else:
+                        print(f't={t}: cannot split depth={leaf.depth} axis={leaf.split_dim} '
+                              f'KL={leaf.kl_accum:.4f}, '
+                              f'reason={leaf.split_block_reason(leaf.split_dim)}')
 
         # --- Coarsen check (rate-based) ---
-        # Merge a sibling pair when both children's smoothed rate-of-change
-        # has dropped below the coarsen threshold.
+        # Merge a sibling group when ALL children's smoothed rate-of-change
+        # has dropped below the coarsen threshold (2 siblings in binary,
+        # 8 octants in octree).
         rate_threshold = AMR['rate_coarsen_threshold']
+        expected_children = 8 if AMR.get('split_mode', 'binary') == 'octree' else 2
         checked_parents = set()
         for leaf in list(root.get_leaves()):
             if leaf.parent is None:
@@ -311,25 +354,27 @@ def run_simulation():
                 continue
             checked_parents.add(id(parent))
 
-            if not (not parent.is_leaf() and len(parent.children) == 2):
+            if parent.is_leaf() or len(parent.children) != expected_children:
                 continue
 
-            left_child, right_child = parent.children
-            if not (left_child.can_coarsen(t) and right_child.can_coarsen(t)):
+            children = parent.children
+            if not all(c.is_leaf() for c in children):
                 continue
-            if not (left_child.is_leaf() and right_child.is_leaf()):
+            if not all(c.can_coarsen(t) for c in children):
                 continue
-            if left_child.is_empty or right_child.is_empty:
-                continue  # asymmetric — wait until both have decided
 
-            if (left_child.rate_ema < rate_threshold and
-                    right_child.rate_ema < rate_threshold):
-                print(f't={t}: coarsening '
-                      f'bounds=(x={left_child.xbounds},y={left_child.ybounds},z={left_child.zbounds}), '
-                      f'bounds=(x={right_child.xbounds},y={right_child.ybounds},z={right_child.zbounds}), '
-                      f'(rate_L={left_child.rate_ema:.4f}, '
-                      f'rate_R={right_child.rate_ema:.4f})')
-                print(left_child.mu + right_child.mu)
+            # Merge once all siblings are quiet, including is_empty ones —
+            # they get update_rate every step (so rate_ema is meaningful)
+            # and a stuck-empty corner (Maxent fit fails on its tiny box)
+            # would otherwise block this group from ever coarsening. Their
+            # mu still gets summed into the merged parent (mass conserved),
+            # and the parent's larger box almost always fits cleanly.
+            if all(c.rate_ema < rate_threshold for c in children):
+                rates_str = ', '.join(f'{c.rate_ema:.4f}' for c in children)
+                print(f't={t}: coarsening {len(children)} children -> '
+                      f'(x={parent.xbounds},y={parent.ybounds},z={parent.zbounds}), '
+                      f'rates=[{rates_str}]')
+                print(sum(c.mu for c in children))
                 parent.merge_children(current_t=t)
                 print(parent.mu)
         

@@ -32,6 +32,32 @@ def _child_bounds(node, side, mid, dim):
         all_bounds[dim][0] = mid      # [mid, hi]
     return all_bounds                  # [xb, yb, zb] — compatible with VelocityGroup(bounds=...)
 
+
+def _split_octants(node):
+    """
+    Octree split helper: return 8 (sample_mask, child_bounds) tuples.
+
+    Canonical octant index k = ix*4 + iy*2 + iz with ix,iy,iz in {0,1};
+    0 = lower half on that axis, 1 = upper half. Sample boundary
+    convention matches binary _split_samples: a sample exactly at a
+    midpoint goes to the upper octant on that axis.
+    """
+    mx = 0.5 * (node.xbounds[0] + node.xbounds[1])
+    my = 0.5 * (node.ybounds[0] + node.ybounds[1])
+    mz = 0.5 * (node.zbounds[0] + node.zbounds[1])
+    out = []
+    for ix in (0, 1):
+        mask_x = (node.x_s < mx) if ix == 0 else (node.x_s >= mx)
+        xb = [node.xbounds[0], mx] if ix == 0 else [mx, node.xbounds[1]]
+        for iy in (0, 1):
+            mask_y = (node.y_s < my) if iy == 0 else (node.y_s >= my)
+            yb = [node.ybounds[0], my] if iy == 0 else [my, node.ybounds[1]]
+            for iz in (0, 1):
+                mask_z = (node.z_s < mz) if iz == 0 else (node.z_s >= mz)
+                zb = [node.zbounds[0], mz] if iz == 0 else [mz, node.zbounds[1]]
+                out.append((mask_x & mask_y & mask_z, [xb, yb, zb]))
+    return out
+
 def _axis_grid_for_leaf(G_master, lo, hi):
     """
     Per-leaf 1-D sample grid: master-grid points strictly inside (lo, hi),
@@ -68,15 +94,19 @@ class VelocityGroup:
         cls._gz_master = _build_axis(zb[0], zb[1], dz)
         cls.min_points_per_axis = master_grid_cfg['min_points_per_axis']
 
-    def __init__(self, bounds, depth=0, max_depth=1, created_at=0, split_axes=None):
+    def __init__(self, bounds, depth=0, max_depth=1, created_at=0,
+                 split_axes=None, split_mode=None):
         """
         bounds: (cx_lo, cx_hi) index bounds into the full grid
-        split_axes: cycled by depth (split_axes[depth % len(split_axes)]).
+        split_axes: binary mode only — axes cycled by depth
+                    (split_axes[depth % len(split_axes)]).
                     initial_refine may override self.split_dim per leaf
                     after a per-axis f0 evaluation.
+        split_mode: 'octree' (1->8 children, isotropic) or 'binary'
+                    (1->2 along self.split_dim). Defaults to AMR config.
         """
         self.is_empty = False
-        self.n_threshold = 1e-4  # below this, treat as empty
+        self.n_threshold = 1e-6  # below this, treat as empty
 
         self.xbounds      = bounds[0]        # (lo, hi) value bounds
         self.ybounds      = bounds[1]        # (lo, hi) value bounds
@@ -89,11 +119,19 @@ class VelocityGroup:
         self.children    = []            # empty = leaf node
         self.parent      = None
 
+        self.split_mode = (split_mode if split_mode is not None
+                           else AMR.get('split_mode', 'binary'))
+
         # Cycled split-axis list (inherited by children); split_dim is the
-        # default axis for this leaf, settable so initial_refine can pick
-        # adaptively per leaf at startup.
+        # default axis for this leaf in BINARY mode. In octree mode both
+        # are unused — the split halves all three axes at once.
         self.split_axes = list(split_axes) if split_axes is not None else [0]
-        self.split_dim  = self.split_axes[self.depth % len(self.split_axes)]
+        if self.split_mode == 'octree':
+            self.split_dim = None
+            n_shadows = 8
+        else:
+            self.split_dim = self.split_axes[self.depth % len(self.split_axes)]
+            n_shadows = 2
 
         # State
         self.w           = None          # current fitted max entropy weights
@@ -103,9 +141,10 @@ class VelocityGroup:
         self.y_s = None
         self.z_s = None
 
-        # Shadow children — trial split along self.split_dim.
-        self.shadow_mu      = [None, None]
-        self.shadow_bounds  = [None, None]
+        # Shadow children — trial split. Binary: 2 halves along split_dim.
+        # Octree: 8 octants in canonical _split_octants order.
+        self.shadow_mu      = [None] * n_shadows
+        self.shadow_bounds  = [None] * n_shadows
 
         # KL accumulator (drift signal — see accumulate_kl).
         self.kl_accum = 0.0
@@ -142,15 +181,23 @@ class VelocityGroup:
         return (n_left  >= VelocityGroup.min_points_per_axis and
                 n_right >= VelocityGroup.min_points_per_axis)
 
-    def split_block_reason(self, dim):
-        """None if can_split along dim; else 'max_depth' or 'insufficient_density'."""
+    def split_block_reason(self, dim=None):
+        """
+        None if the leaf can split, else a short reason.
+        Binary: pass `dim`. Octree: omit `dim` — gates on all three axes.
+        """
         if self.depth >= self.max_depth:
             return 'max_depth'
+        if self.split_mode == 'octree':
+            for d in (0, 1, 2):
+                if not self.has_split_density(d):
+                    return f'insufficient_density_axis{d}'
+            return None
         if not self.has_split_density(dim):
             return 'insufficient_density'
         return None
 
-    def can_split(self, dim):
+    def can_split(self, dim=None):
         return self.split_block_reason(dim) is None
 
     def can_coarsen(self, current_t, min_lifetime=AMR['min_lifetime']):
@@ -202,24 +249,32 @@ class VelocityGroup:
 
     def update_shadows(self):
         """
-        Update shadow_mu / shadow_bounds for a hypothetical split along
-        self.split_dim. Called at split time, after merge, after reactivate,
-        and from initial_refine after picking an axis.
+        Update shadow_mu / shadow_bounds for a hypothetical split.
+        Binary: 2 halves along self.split_dim.
+        Octree: 8 octants in canonical _split_octants order.
+        Called at split time, after merge, after reactivate, and from
+        initial_refine after the trigger fires.
         """
-        d = self.split_dim
-        left_mask, right_mask, mid = _split_samples(self, d)
+        if self.split_mode == 'octree':
+            partition = _split_octants(self)
+        else:
+            d = self.split_dim
+            left_mask, right_mask, mid = _split_samples(self, d)
+            partition = [
+                (left_mask,  _child_bounds(self, 0, mid, d)),
+                (right_mask, _child_bounds(self, 1, mid, d)),
+            ]
 
-        for i, mask in enumerate([left_mask, right_mask]):
-            cb = _child_bounds(self, i, mid, d)
-            self.shadow_bounds[i] = cb
+        for k, (mask, cb) in enumerate(partition):
+            self.shadow_bounds[k] = cb
 
             if not np.any(mask):
-                self.shadow_mu[i] = np.zeros(5)
+                self.shadow_mu[k] = np.zeros(5)
                 continue
 
             n = np.sum(self.w[mask])
             if n < self.n_threshold:
-                self.shadow_mu[i] = np.zeros(5)
+                self.shadow_mu[k] = np.zeros(5)
                 continue
 
             ux = np.sum(self.w[mask] * self.x_s[mask])
@@ -228,30 +283,42 @@ class VelocityGroup:
             r2 = (self.x_s[mask]**2 + self.y_s[mask]**2
                 + self.z_s[mask]**2)
             e  = np.sum(self.w[mask] * r2)
-            self.shadow_mu[i] = np.array([n, ux, uy, uz, e])
+            self.shadow_mu[k] = np.array([n, ux, uy, uz, e])
 
     def split(self, current_t=0):
         """
-        Promote shadow children to real children along self.split_dim.
-        update_shadows() must have been called for self.split_dim first
-        (it is, as part of the normal lifecycle: split / merge / reactivate
-        all call update_shadows, and initial_refine calls it after picking
-        an axis).
+        Promote shadow children to real children. Binary: 2 children along
+        self.split_dim. Octree: 8 children, one per octant. update_shadows()
+        must have been called first (it is, as part of the normal lifecycle:
+        split / merge / reactivate all call update_shadows, and
+        initial_refine calls it after the trigger fires).
         """
-        d = self.split_dim
-        left_mask, right_mask, mid = _split_samples(self, d)
+        if self.split_mode == 'octree':
+            partition = _split_octants(self)
+        else:
+            d = self.split_dim
+            left_mask, right_mask, mid = _split_samples(self, d)
+            partition = [
+                (left_mask,  self.shadow_bounds[0]),
+                (right_mask, self.shadow_bounds[1]),
+            ]
 
-        for i, mask in enumerate([left_mask, right_mask]):
-            cb = self.shadow_bounds[i]         # set by update_shadows
-
+        for mask, cb in partition:
             child = VelocityGroup(
                 bounds      = cb,
                 depth       = self.depth + 1,
                 max_depth   = self.max_depth,
                 created_at  = current_t,
                 split_axes  = self.split_axes,
+                split_mode  = self.split_mode,
             )
             child.parent = self
+
+            if not np.any(mask):
+                child.mu = np.zeros(5)
+                child.is_empty = True
+                self.children.append(child)
+                continue
 
             n  = np.sum(self.w[mask])
             ux = np.sum(self.w[mask] * self.x_s[mask])
@@ -281,28 +348,40 @@ class VelocityGroup:
         shadow_mu set at split/merge time) and (current Maxent fit).
         Grows as leaf moments evolve away from the configuration captured
         at the last update_shadows() call. When kl_accum > threshold the
-        driver triggers a split along self.split_dim.
+        driver triggers a split.
 
-        Note: shadow_mu is structurally tied to self.split_dim, so this
-        signal is axis-agnostic — it measures total drift, not per-axis
-        structural mismatch. The cycled split_axes list (or initial_refine's
-        per-leaf override) chooses the axis externally.
+        Binary: 2 sub-fits to shadow_mu[0..1] (halves along split_dim).
+        Octree: 8 sub-fits to shadow_mu[0..7] (octants). Both signals are
+        structural-drift-agnostic — they measure total mismatch with the
+        shadow configuration, not which axis is most mismatched.
         """
-        if not self.can_split(self.split_dim):
-            return
+        if self.split_mode == 'octree':
+            if not self.can_split():
+                return
+        else:
+            if not self.can_split(self.split_dim):
+                return
 
         # Rate-based split veto: at equilibrium, KL noise would otherwise
         # eventually cross the accum threshold and force a needless split.
         if self.rate_ema < AMR['rate_coarsen_threshold']:
             return
 
-        left_mask, right_mask, _ = _split_samples(self, self.split_dim)
-        p = np.zeros_like(self.w)
+        if self.split_mode == 'octree':
+            partition = [(mask, None) for (mask, _) in _split_octants(self)]
+        else:
+            left_mask, right_mask, _ = _split_samples(self, self.split_dim)
+            partition = [(left_mask, None), (right_mask, None)]
 
-        for i, mask in enumerate([left_mask, right_mask]):
+        p = np.zeros_like(self.w)
+        for k, (mask, _) in enumerate(partition):
+            if not np.any(mask):
+                continue
+            if self.shadow_mu[k] is None or self.shadow_mu[k][0] < self.n_threshold:
+                continue
             w, _, success, _ = solve_group_newton(
                 self.x_s[mask], self.y_s[mask], self.z_s[mask],
-                self.shadow_mu[i], self.lam.copy())
+                self.shadow_mu[k], self.lam.copy())
             if success:
                 p[mask] = w
 
@@ -316,18 +395,35 @@ class VelocityGroup:
         self.kl_accum += kl
 
     def merge_children(self, current_t=0):
-        assert len(self.children) == 2
-        left, right = self.children
+        expected_n = 8 if self.split_mode == 'octree' else 2
+        assert len(self.children) == expected_n
 
         # Conserve moments exactly; refit on parent box.
-        self.mu  = left.mu + right.mu
-        self.w, self.lam, self.x_s, self.y_s, self.z_s = fit_maxent_weights(self.mu, self.xbounds, self.ybounds, self.zbounds, self.lam)
+        merged_mu = sum(c.mu for c in self.children)
+
+        # Warm-start from zeros, NOT self.lam. The parent's old lam was
+        # fit to its pre-split moments — possibly hundreds of steps ago,
+        # before any of the children's moment evolution. Reusing it here
+        # can land Newton far from the new optimum and cause exp() to
+        # overflow on the first step. Fresh zeros lets Newton converge
+        # cleanly from a neutral point.
+        result = fit_maxent_weights(
+            merged_mu, self.xbounds, self.ybounds, self.zbounds, np.zeros(5))
+        if result is None:
+            # Refit failed — abort the merge, leave children in place.
+            # They'll attempt to merge again next step. If they're stuck,
+            # at least no NaN gets injected into the parent's state.
+            return False
+
+        self.mu = merged_mu
+        self.w, self.lam, self.x_s, self.y_s, self.z_s = result
         self.update_shadows()
 
         self.children         = []
         self.kl_accum         = 0.0
         self.created_at       = current_t
         self.rate_ema         = np.inf       # reseed; new state, new measurement
+        return True
 
     def reactivate(self, current_t=0):
         """
@@ -355,8 +451,15 @@ def calculate_velocity_grid(velocity_space):
 def solve_group_newton(x_s, y_s, z_s, U, lam, max_iter=50, tol=1e-10):
     """
     Solve max-entropy weights directly via Newton iterations on dual.
-    
-    Dual problem: find lambda s.t. sum_i phi_i * exp(lam . phi_i) = U
+
+    Dual problem: find lambda s.t. sum_i phi_i * exp(lam . phi_i) = U.
+
+    np.errstate suppresses overflow warnings that fire when a Newton
+    step lands at an extreme lam (exp argument > 709). The convergence
+    check on the gradient norm naturally rejects those iterations: if
+    w becomes inf/nan, g and H propagate it, np.linalg.solve raises,
+    and we return success=False — the caller's stale-fit fallback keeps
+    the leaf alive without poisoning subsequent steps.
     """
     n = x_s.shape[0]
 
@@ -368,28 +471,32 @@ def solve_group_newton(x_s, y_s, z_s, U, lam, max_iter=50, tol=1e-10):
     phi[4] = x_s**2 + y_s**2 + z_s**2
 
     converged = False
-    for iteration in range(max_iter):
-        # Compute weights from current lambda
+    with np.errstate(over='ignore', invalid='ignore'):
+        for iteration in range(max_iter):
+            # Compute weights from current lambda
+            w = np.exp(lam @ phi)
+
+            phi_w = phi @ w  # broadcast: each row of phi scaled by w
+            # Gradient: g = phi @ w - U  (moment residuals)
+            g = phi_w - U
+
+            # Convergence check. Also bail if w went non-finite — Newton
+            # has wandered into the overflow region and won't recover.
+            if not np.all(np.isfinite(w)):
+                return w, lam, False, g
+            if np.linalg.norm(g) < tol:
+                converged = True
+                break
+
+            # Hessian: H_ij = sum(phi_i * phi_j * w)
+            H = phi @ (w[:, None] * phi.T)
+
+            try:
+                lam -= np.linalg.solve(H, g)
+            except np.linalg.LinAlgError:
+                return w, lam, False, g
+
         w = np.exp(lam @ phi)
-
-        phi_w = phi @ w  # broadcast: each row of phi scaled by w
-        # Gradient: g = phi @ w - U  (moment residuals)
-        g = phi_w - U
-
-        # Convergence check.
-        if np.linalg.norm(g) < tol:
-            converged = True
-            break
-
-        # Hessian: H_ij = sum(phi_i * phi_j * w)
-        H = phi @ (w[:, None] * phi.T)
-
-        try:
-            lam -= np.linalg.solve(H, g)
-        except np.linalg.LinAlgError:
-            return w, lam, False, g
-
-    w = np.exp(lam @ phi)
 
     return w, lam, converged, g
 
@@ -507,10 +614,25 @@ def initial_refine(root, f0, cx, cy, cz, cx_vec, cy_vec, cz_vec, KL_threshold, m
                 leaf.update_shadows()
                 continue
 
-            # Adaptive axis pick: for each splittable axis, evaluate the
-            # sum of KL(f0 || half-Maxent) over the two halves. Smallest
-            # = the structural mismatch is most reduced by splitting along
-            # this axis.
+            if leaf.split_mode == 'octree':
+                # No axis to pick — splitting halves all three axes.
+                if not leaf.can_split():
+                    print(f'Warning: cannot split depth={leaf.depth} '
+                          f'bounds={leaf.xbounds}, '
+                          f'reason={leaf.split_block_reason()}')
+                    leaf.update_shadows()
+                    continue
+                leaf.update_shadows()
+                print(f'pass {pass_idx}: octree-splitting depth={leaf.depth} '
+                      f'bounds=(x={xb},y={yb},z={zb}), KL={kl:.4f}')
+                leaf.split(current_t=0)
+                splits_this_pass += 1
+                continue
+
+            # Binary mode: adaptive axis pick. For each splittable axis,
+            # evaluate the sum of KL(f0 || half-Maxent) over the two halves.
+            # Smallest = the structural mismatch is most reduced by splitting
+            # along this axis.
             axis_kls = np.full(3, np.inf)
             for d in range(3):
                 if not leaf.can_split(d):
@@ -649,7 +771,7 @@ def collide(x_sample, y_sample, z_sample, weights, num_valid_samples, bounds_lis
         g2r = clamp_and_find_group(vx2p, vy2p, vz2p)
 
         # Single collision weight — used for BOTH loss and gain
-        C = 0.5 * W**2 / n_actual * g**(2 - 2*omega) * sigma_coeff_hat
+        C = 0.5 * W**2 / n_actual * g**(2 - 2*omega) * 1.0
 
         # Loss from pre-collision groups
         group_n[g1]  -= C;       group_n[g2]  -= C
