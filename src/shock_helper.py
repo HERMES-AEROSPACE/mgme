@@ -45,74 +45,6 @@ def ic(cx, cy, cz, cx_vec, cy_vec, cz_vec, n_val, u_val, T_val, numCx, numCy, nu
 
     return (U0, f)
 
-@jit(nopython=True)
-def lookup_table(b_range, wx_range, wy_range, wz_range, ci_cx, cf_cx, ci_cy, cf_cy, ci_cz, cf_cz):
-    list1 = []
-    list2 = []
-
-    for b in b_range:
-        for wx in wx_range:
-            for wy in wy_range:
-                for wz in wz_range:
-                    ux, uy, uz, e = moments(b, wx, wy, wz, ci_cx, cf_cx, ci_cy, cf_cy, ci_cz, cf_cz)
-
-                    if np.all(np.isfinite(np.array([ux, uy, uz, e]))):
-                        list1.append([b, wx, wy, wz])
-                        list2.append([ux, uy, uz, e])
-
-    return np.array(list1), np.array(list2)
-
-def invert(U_list, numXj, numGroups, bounds_list, interpolater_list):
-    Ak = np.zeros((numXj, numGroups))
-    bk = np.zeros((numXj, numGroups))
-    wxk = np.zeros((numXj, numGroups))
-    wyk = np.zeros((numXj, numGroups))
-    wzk = np.zeros((numXj, numGroups))
-
-    for point in range(0, numXj):
-        for i in range(0, numGroups):
-            if U_list[point, i, 0] > 1e-3:
-                n = U_list[point, i, 0]
-                ux = U_list[point, i, 1]
-                uy = U_list[point, i, 2]
-                uz = U_list[point, i, 3]
-                e = U_list[point, i, 4]
-
-                ci_cx = bounds_list[i, 0]
-                cf_cx = bounds_list[i, 1]
-                ci_cy = bounds_list[i, 2]
-                cf_cy = bounds_list[i, 3]
-                ci_cz = bounds_list[i, 4]
-                cf_cz = bounds_list[i, 5]
-
-                target_point = np.array([ux / n, uy / n, uz / n, e / n])
-                initial_guess = interpolater_list[i](target_point)[0]
-                sol = optimize.least_squares(moment_eq, initial_guess, args=(ux / n, uy / n, \
-                                            uz / n, e / n, ci_cx, cf_cx, ci_cy, cf_cy, ci_cz, cf_cz), \
-                                                bounds=([0.0, -20, -20, -20], [100.0, 20, 20, 20]), method='trf', loss='soft_l1')
-                if np.linalg.norm(sol.fun) > 1e-6:
-                    print('residual:', np.linalg.norm(sol.fun), point, i, sol.x)
-                    print(n, ux / n, uy / n, uz / n, e / n, ci_cx, cf_cx, ci_cy, cf_cy, ci_cz, cf_cz, initial_guess)
-
-                if sol.success:
-                    b = sol.x[0]
-                    wx = sol.x[1]
-                    wy = sol.x[2]
-                    wz = sol.x[3]
-
-                I0x = np.sqrt(np.pi / (4 * b)) * (special.erf(np.sqrt(b) * (bounds_list[i, 1] - wx)) - special.erf(np.sqrt(b) * (bounds_list[i, 0] - wx)))
-                I0y = np.sqrt(np.pi / (4 * b)) * (special.erf(np.sqrt(b) * (bounds_list[i, 3] - wy)) - special.erf(np.sqrt(b) * (bounds_list[i, 2] - wy)))
-                I0z = np.sqrt(np.pi / (4 * b)) * (special.erf(np.sqrt(b) * (bounds_list[i, 5] - wz)) - special.erf(np.sqrt(b) * (bounds_list[i, 4] - wz)))
-                A = n / (I0x * I0y * I0z)
-
-                Ak[point, i] = A
-                bk[point, i] = b
-                wxk[point, i] = wx
-                wyk[point, i] = wy
-                wzk[point, i] = wz
-
-    return Ak, bk, wxk, wyk, wzk
-
 def calc_integral(bk, wxk, wyk, wzk, bounds_list, numXj, numGroups):
     I0x, I0y, I0z = np.zeros((numXj, numGroups)), np.zeros((numXj, numGroups)), np.zeros((numXj, numGroups))
     I1x, I1y, I1z = np.zeros((numXj, numGroups)), np.zeros((numXj, numGroups)), np.zeros((numXj, numGroups))
@@ -155,15 +87,6 @@ def calc_integral(bk, wxk, wyk, wzk, bounds_list, numXj, numGroups):
                 I3x[point, i] = 1/b * I1x[point, i] + 1 / (2 * b) * ((ci_cx - wx)**2 * np.exp(-b * (ci_cx - wx)**2) - (cf_cx - wx)**2 * np.exp(-b * (cf_cx - wx)**2))
                 I3y[point, i] = 1/b * I1y[point, i] + 1 / (2 * b) * ((ci_cy - wy)**2 * np.exp(-b * (ci_cy - wy)**2) - (cf_cy - wy)**2 * np.exp(-b * (cf_cy - wy)**2))
                 I3z[point, i] = 1/b * I1z[point, i] + 1 / (2 * b) * ((ci_cz - wz)**2 * np.exp(-b * (ci_cz - wz)**2) - (cf_cz - wz)**2 * np.exp(-b * (cf_cz - wz)**2))
-
-                print(I1x * I1x)
-                # I0x[point, i] = np.sqrt(np.pi/(4 * b)) * (math.erf(np.sqrt(b) * (cf - w)) - math.erf(np.sqrt(b) * (ci - w)))
-                # I1x[point, i] = (np.exp(-b * (ci - w)**2) - np.exp(-b * (cf - w)**2))/(2 * b)
-                # I2x[point, i] = -np.sqrt(np.pi)/(2 * np.sqrt(b)) * \
-                #     ((np.exp(-b * (cf - w)**2) * (cf - w))/np.sqrt(np.pi * b) - (np.exp(-b * (ci - w)**2) * (ci - w))/np.sqrt(np.pi * b)) + \
-                #         np.sqrt(np.pi)/(4 * np.sqrt(b**3)) * (math.erf(np.sqrt(b) * (cf - w)) - math.erf(np.sqrt(b) * (ci - w)))
-                # I3x[point, i] = -((np.exp(-b * (cf - w)**2) * (cf - w)**2 - np.exp(-b * (ci  - w)**2) * (ci - w)**2)/(2*b)) - \
-                #     ((np.exp(-b * (cf - w)**2) - np.exp(-b * (ci - w)**2))/(2 * b**2))
             else:
                 I0x[point, i] = 0.0
                 I0y[point, i] = 0.0
@@ -180,7 +103,7 @@ def calc_integral(bk, wxk, wyk, wzk, bounds_list, numXj, numGroups):
         
     return [I0x, I0y, I0z, I1x, I1y, I1z, I2x, I2y, I2z, I3x, I3y, I3z]
 
-def calc_flux(Ak, bk, wxk, wyk, wzk, I0x, I0y, I0z, I1x, I1y, I1z, I2x, I2y, I2z, I3x, I3y, I3z, numXj, numGroups):
+def calc_flux_param(Ak, bk, wxk, wyk, wzk, I0x, I0y, I0z, I1x, I1y, I1z, I2x, I2y, I2z, I3x, I3y, I3z, numXj, numGroups):
     F = np.zeros((numXj, numGroups, 5))
 
     for point in range(0, numXj):
