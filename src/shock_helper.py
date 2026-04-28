@@ -11,16 +11,9 @@ from scipy.stats import norm, qmc
 import time
 
 from .physics.moments import moments, moment_eq, calc_moment
+from .physics.grid import calculate_velocity_grid
+from .physics.maxent import solve_group_newton
 
-
-def calculate_velocity_grid(velocity_space):
-    # Helper function to get velocity space grid
-    cx_vec = np.linspace(*velocity_space['cx_range'], velocity_space['num_cx'])
-    cy_vec = np.linspace(*velocity_space['cy_range'], velocity_space['num_cy'])
-    cz_vec = np.linspace(*velocity_space['cz_range'], velocity_space['num_cz'])
-    cx, cy, cz = np.meshgrid(cx_vec, cy_vec, cz_vec, indexing='ij')
-
-    return cx_vec, cy_vec, cz_vec, cx, cy, cz 
 
 def initialize_maxwellian(m_hat, n_hat, T_hat, v_hat, cx, cy, cz):
     A = n_hat * (m_hat / (np.pi * T_hat))**1.5
@@ -383,44 +376,6 @@ def KT_central2(U_list, F_list, numXj, n_groups, dt, dx, CX_LB, CX_UB):
         k[-2, i] = -(F_list[-1, i] - F_list[-3, i])/(2 * dx) + 1/(2 * dx) * (a_plus * (U_list[-1, i] - U_list[-2, i]) - a_minus * (U_list[-2, i] - U_list[-3, i]))
 
     return k
-
-def solve_group_newton(x_s, y_s, z_s, U, lam, max_iter=50, tol=1e-10):
-    """
-    Solve max-entropy weights directly via Newton iterations on dual.
-    
-    Dual problem: find lambda s.t. sum_i phi_i * exp(lam . phi_i) = U
-    """
-    n = x_s.shape[0]
-
-    phi = np.empty((5, n))
-    phi[0] = np.ones(n)
-    phi[1] = x_s
-    phi[2] = y_s
-    phi[3] = z_s
-    phi[4] = x_s**2 + y_s**2 + z_s**2
-
-    converged = False
-    for iteration in range(max_iter):
-        # Compute weights from current lambda
-        w = np.exp(lam @ phi)
-
-        phi_w = phi @ w  # broadcast: each row of phi scaled by w
-        # Gradient: g = phi @ w - U  (moment residuals)
-        g = phi_w - U
-
-        # Convergence check.
-        if np.linalg.norm(g) < tol:
-            converged = True
-            break
-
-        # Hessian: H_ij = sum(phi_i * phi_j * w)
-        H = phi @ (w[:, None] * phi.T)
-        # Newton step
-        lam -= np.linalg.solve(H, g)
-    
-    w = np.exp(lam @ phi) 
-        
-    return w, lam, converged, g
 
 def solve_group_cvxpy(x_sample, y_sample, z_sample, U_i, flux_limit=10.0):
     # Fallback to CVXPY for ill-conditioned cases
