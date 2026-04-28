@@ -57,15 +57,3 @@ src/table_optimize.py
 src/uplot_gridstudy.py
 src/virtual_collisions.py
 src/working_virtual_coll.py
-
-# Reference data kept locally
-src/alsmeyer_205.txt
-src/clarkemach9n.npy
-src/clarkemach9T.npy
-src/clarkemach9Tx.npy
-src/dsmc.txt
-src/dsmcT.txt
-src/dsmc_hard.txt
-src/dsmcT_hard.txt
-src/dsmc_vhs.txt
-src/dsmcT_vhs.txt 
