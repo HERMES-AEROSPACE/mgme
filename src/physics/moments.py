@@ -89,16 +89,38 @@ def invert(mu, initial_guess, group_bounds):
     # least_squares explores infeasible points (I0u → 0 when wu wanders
     # far outside the box). The solver handles inf/NaN residuals
     # internally — we just don't want the warning spam.
+
+    # w is the *underlying* Gaussian's peak, not constrained to the box —
+    # tail-like leaves have w outside [ci, cf]. Pinning w to [ci, cf] gave
+    # wall-anchored fits and wrong shapes; pure ±inf let the solver wander
+    # to where erf saturates at both ends → I0u → 0 → NaN residuals →
+    # occasional bad fits. A 5×box-width margin lets w sit comfortably
+    # outside for tails while cutting off the flat numerical-death region.
+    mx = 5.0 * (cf_cx - ci_cx)
+    my = 5.0 * (cf_cy - ci_cy)
+    mz = 5.0 * (cf_cz - ci_cz)
+
     with np.errstate(divide='ignore', invalid='ignore'):
-        sol = optimize.least_squares(
-            moment_eq, initial_guess,
-            args=(mu[1] / mu[0], mu[2] / mu[0], mu[3] / mu[0], mu[4] / mu[0],
-                  ci_cx, cf_cx, ci_cy, cf_cy, ci_cz, cf_cz),
-            # Lower bound on b kept slightly positive so moment_eq doesn't
-            # divide by zero during the solve (it has 1/(2*x[0]) terms).
-            bounds=([1e-12, -10, -10, -10], [np.inf, 10, 10, 10]),
-            method='trf', loss='soft_l1',
-        )
+        try:
+            sol = optimize.least_squares(
+                moment_eq, initial_guess,
+                args=(mu[1] / mu[0], mu[2] / mu[0], mu[3] / mu[0], mu[4] / mu[0],
+                      ci_cx, cf_cx, ci_cy, cf_cy, ci_cz, cf_cz),
+                # Lower bound on b kept slightly positive so moment_eq doesn't
+                # divide by zero during the solve (it has 1/(2*x[0]) terms).
+                bounds=(
+                    [1e-12, ci_cx - mx, ci_cy - my, ci_cz - mz],
+                    [np.inf, cf_cx + mx, cf_cy + my, cf_cz + mz],
+                ),
+                method='trf', loss='soft_l1',
+            )
+        except ValueError:
+            # least_squares raises ValueError("Residuals are not finite in
+            # the initial point") when the warm start lands far enough
+            # outside the box that erf saturates at both ends → I0u = 0 →
+            # NaN residuals before the solver iterates. Treat as failure;
+            # the caller's guard handles it.
+            return 0.0, 0.0, 0.0, 0.0, 0.0
 
     if not sol.success:
         return 0.0, 0.0, 0.0, 0.0, 0.0

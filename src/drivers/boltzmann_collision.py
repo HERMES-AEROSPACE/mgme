@@ -1,3 +1,4 @@
+import os
 import numpy as np
 from scipy import special
 from scipy.stats import qmc, norm
@@ -11,104 +12,30 @@ from ..config_0d import (
 from ..amr import VelocityGroup, initial_refine, fit_maxent_weights
 from ..physics.grid import calculate_velocity_grid
 from ..physics.collide import collide
-from ..physics.moments import calc_moment, invert
+from ..physics.moments import calc_moment
 from ..banner import print_banner
 import copy
 import sys
 from numba import types
-from matplotlib import pyplot as plt
-from scipy.special import erf as scipy_erf
 
 
-def plot_and_entropy(root, invert, ax=None):
-    import matplotlib.pyplot as plt
-    if ax is None:
-        fig, ax = plt.subplots()
+DATA_DIR = 'simulation_data_0d'
 
-    # Skip is_empty leaves: those have no fit at all.
-    # Keep tiny-mass leaves: their mass still belongs in the entropy sum,
-    # otherwise mass slowly leaking into them creates an unphysical
-    # plateau-then-dip in the entropy trace. The invert() guard below
-    # handles the case where moments are box-infeasible.
-    all_leaves = [l for l in root.get_leaves() if l.mu[0] > 0 and not l.is_empty]
-    if not all_leaves:
-        return ax, 0.0
 
-    vx_lo = min(l.xbounds[0] for l in all_leaves)
-    vx_hi = max(l.xbounds[1] for l in all_leaves)
-
-    # Odd number so 0 is always included for symmetric distributions;
-    # np.linspace with endpoint guarantees vx_lo and vx_hi are hit exactly.
-    n_vx = 201
-    vx_global = np.linspace(vx_lo, vx_hi, n_vx)
-    f_marg = np.zeros_like(vx_global)
-    entropy = 0.0
-
-    # Sort leaves by cx_lo so boundary ownership is well-defined
-    all_leaves_sorted = sorted(all_leaves, key=lambda l: l.xbounds[0])
-
-    for k, leaf in enumerate(all_leaves_sorted):
-        cx_lo, cx_hi = leaf.xbounds
-        cy_lo, cy_hi = leaf.ybounds
-        cz_lo, cz_hi = leaf.zbounds
-
-        A, b, wx, wy, wz = invert(
-            [leaf.mu[0], leaf.mu[1], leaf.mu[2], leaf.mu[3], leaf.mu[4]],
-            [0.1, 0.0, 0.0, 0.0],
-            {'ci_cx': cx_lo, 'cf_cx': cx_hi,
-             'ci_cy': cy_lo, 'cf_cy': cy_hi,
-             'ci_cz': cz_lo, 'cf_cz': cz_hi}
-        )
-
-        # invert() can return b=0 (least_squares hit the lower bound) or
-        # NaN/inf when the moments are infeasible in the leaf box (e.g.
-        # mu[1]/mu[0] outside [cx_lo, cx_hi]). Skip those leaves — their
-        # contribution would otherwise diverge through log(A) or 1/I0u.
-        if not (np.isfinite(A) and np.isfinite(b) and A > 0 and b > 0):
+def dump_leaves(root, t):
+    """Per-step record for the cplot post-processor: each non-empty leaf
+    contributes [xlo, xhi, ylo, yhi, zlo, zhi, mu0..mu4]. is_empty leaves
+    are skipped — they're not used in the marginal/entropy reconstruction."""
+    rows = []
+    for leaf in root.get_leaves():
+        if leaf.is_empty or leaf.mu[0] <= 0:
             continue
-
-        sqrt_b = np.sqrt(b)
-        I0x = (np.sqrt(np.pi / (4 * b))
-               * (scipy_erf(sqrt_b * (cx_hi - wx))
-                  - scipy_erf(sqrt_b * (cx_lo - wx))))
-        I0y = (np.sqrt(np.pi / (4 * b))
-               * (scipy_erf(sqrt_b * (cy_hi - wy))
-                  - scipy_erf(sqrt_b * (cy_lo - wy))))
-        I0z = (np.sqrt(np.pi / (4 * b))
-               * (scipy_erf(sqrt_b * (cz_hi - wz))
-                  - scipy_erf(sqrt_b * (cz_lo - wz))))
-
-        # Half-open [lo, hi) for all but the last leaf to avoid double-counting
-        # boundary points shared between adjacent leaves
-        is_last = (k == len(all_leaves_sorted) - 1)
-        if is_last:
-            mask = (vx_global >= cx_lo) & (vx_global <= cx_hi)
-        else:
-            mask = (vx_global >= cx_lo) & (vx_global < cx_hi)
-
-        vx_in = vx_global[mask]
-        f_marg[mask] += A * np.exp(-b * (vx_in - wx)**2) * I0y * I0z
-
-        # Entropy from analytic integration of -f log f over the leaf box
-        # using the inverted truncated Maxwellian f = A exp(-b * |c-w|^2):
-        #   S_leaf = -log(A) * mu[0] + b * mu[0] * (J2x/I0x + J2y/I0y + J2z/I0z)
-        # where J2u = integral of (c-wu)^2 exp(-b(c-wu)^2) dc over [ci,cf]
-        #            = [(ci-wu) e^{-b(ci-wu)^2} - (cf-wu) e^{-b(cf-wu)^2}] / (2b)
-        #              + I0u / (2b)
-        def _J2(c_lo, c_hi, w):
-            d_lo = c_lo - w
-            d_hi = c_hi - w
-            return (d_lo * np.exp(-b * d_lo**2)
-                    - d_hi * np.exp(-b * d_hi**2)) / (2 * b)
-        J2x = _J2(cx_lo, cx_hi, wx) + I0x / (2 * b)
-        J2y = _J2(cy_lo, cy_hi, wy) + I0y / (2 * b)
-        J2z = _J2(cz_lo, cz_hi, wz) + I0z / (2 * b)
-        n_leaf = leaf.mu[0]
-        entropy += (-np.log(A) * n_leaf
-                    + b * n_leaf * (J2x / I0x + J2y / I0y + J2z / I0z))
-
-    ax.plot(vx_global, f_marg, color='red')
-    return ax, entropy
+        rows.append([leaf.xbounds[0], leaf.xbounds[1],
+                     leaf.ybounds[0], leaf.ybounds[1],
+                     leaf.zbounds[0], leaf.zbounds[1],
+                     leaf.mu[0], leaf.mu[1], leaf.mu[2], leaf.mu[3], leaf.mu[4]])
+    np.save(os.path.join(DATA_DIR, f'leaves_{t:04d}.npy'),
+            np.array(rows, dtype=np.float64))
 
 
 def run_simulation():
@@ -126,6 +53,8 @@ def run_simulation():
     CZ_LB = cz_vec[0];  CZ_UB = cz_vec[-1]
 
     n_coll = COLLISION_PARAMS['n_coll']
+    omega = COLLISION_PARAMS['omega']
+    alpha = COLLISION_PARAMS['alpha']
     # 0-D uses the σ_T * g = 1 simplification for BKW comparison.
     # The physical value would be: 1/gamma_omega * (1 / m_r)**(0.5 - omega).
     sigma_coeff_hat = 1.0
@@ -160,25 +89,14 @@ def run_simulation():
     # custom_groups(f0, cx, cy, cz, cx_vec, cy_vec, cz_vec, root, GROUP_PARAMS)
     initial_refine(root, f0, cx, cy, cz, cx_vec, cy_vec, cz_vec, KL_THRESHOLD, MAX_DEPTH+1)
 
-    entropy_list = np.zeros(COLLISION_PARAMS['n_t'])
-    bkw_entropy  = np.zeros(COLLISION_PARAMS['n_t'])
+    os.makedirs(DATA_DIR, exist_ok=True)
+
     # MAIN SIMULATION LOOP.
     for t in range(0, COLLISION_PARAMS['n_t']):
-        # ------------------ PLOTTING STUFF ----------------------
-        fig, ax = plt.subplots()
-        ax.set_ylim(0, 0.6)
-        ax.set_xlim(-4, 4)
-
-        ax, entropy_list[t] = plot_and_entropy(root, invert, ax=ax)
-        
-        # plt.plot(cx_vec, np.trapezoid(np.trapezoid(f0, cz_vec, axis=2), cy_vec, axis=1), '--', color='black')
-        K = 1 - 0.4 * np.exp(-t*COLLISION_PARAMS['dt']/6)
-        f = 1 / (2 * K * (np.pi * K)**1.5) * (5 * K - 3 + 2 * (1 - K) / K * (cx**2 + cy**2 + cz**2)) * np.exp(-(cx**2 + cy**2 + cz**2) / K)
-        bkw_entropy[t] = np.trapezoid(np.trapezoid(np.trapezoid(-f * np.log(f, where=f>0), cz_vec, axis=2), cy_vec, axis=1), cx_vec)
-        # f = 0.5 * (3 / np.pi)**1.5 * (np.exp(-3.0 * (cx - 1)**2) + np.exp(-3.0 * (cx + 1)**2)) * np.exp(-3 * (cy**2 + cz**2))
-        # f = 1 / (np.pi**1.5) * np.exp(-1 * (cx**2 + cy**2 + cz**2))
-        plt.plot(cx_vec, np.trapezoid(np.trapezoid(f, cz_vec, axis=2), cy_vec, axis=1), '--', color='black')
-        # plt.plot(cx_vec, np.trapezoid(np.trapezoid(f2, cz_vec, axis=2), cy_vec, axis=1), '-.', color='black')
+        # Snapshot the current tree for cplot post-processing. Done at the
+        # *start* of step t so that step 0 captures the initial condition
+        # and step n_t-1 captures the state going into the final collision.
+        dump_leaves(root, t)
 
         # ------------------------- BEGIN COLLISION ROUTINE ----------------------------
         leaves   = root.get_leaves()
@@ -267,12 +185,6 @@ def run_simulation():
 
             # Drift signal for split decision
             leaf.accumulate_kl()
-        
-        plt.title(f't = {t}')
-        plt.xlabel('Cx', fontsize=18)
-        plt.ylabel('f', fontsize=18)
-        plt.savefig(f'plots/amr/f_{t:04d}.png', dpi=300)
-        plt.close(fig)
 
         # --- Refinement check ---
         # Octree: each split halves all 3 axes (1->8 children).
@@ -353,13 +265,7 @@ def run_simulation():
                       f'rates=[{rates_str}], dS={dS:.5f}')
                       
                 parent.merge_children(current_t=t)
-        
-    # --- Final plot of leaf distributions ---
-    plt.figure(2)
-    plt.plot(range(0, COLLISION_PARAMS['n_t']), entropy_list, color='black')
-    plt.hlines(3.2162536221141895, 0, COLLISION_PARAMS['n_t'], color='red', linestyles='dashed')
-    plt.plot(range(0, COLLISION_PARAMS['n_t']), bkw_entropy, '--', color='purple')
-    plt.savefig('plots/0d_entropy.pdf')
+
 
 if __name__ == '__main__':
     run_simulation()
