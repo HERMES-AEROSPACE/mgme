@@ -84,6 +84,15 @@ class VelocityGroup:
     _gz_master = None
     min_points_per_axis = None
 
+    # AMR config knobs read at runtime by update_rate / accumulate_kl /
+    # can_coarsen. Defaults to config_0d.AMR; the shock driver overrides
+    # via set_amr_config(config_1d.AMR) at startup.
+    _amr_cfg = AMR
+
+    @classmethod
+    def set_amr_config(cls, amr_dict):
+        cls._amr_cfg = amr_dict
+
     @classmethod
     def set_master_grid(cls, master_grid_cfg):
         def _build_axis(lo, hi, dx):
@@ -202,10 +211,12 @@ class VelocityGroup:
     def can_split(self, dim=None):
         return self.split_block_reason(dim) is None
 
-    def can_coarsen(self, current_t, min_lifetime=AMR['min_lifetime']):
+    def can_coarsen(self, current_t, min_lifetime=None):
         """
         Node must have existed for min_lifetime steps before coarsening.
         """
+        if min_lifetime is None:
+            min_lifetime = VelocityGroup._amr_cfg['min_lifetime']
         return (current_t - self.created_at) > min_lifetime
 
     def update_rate(self, coll_vec, dt, mu_total_norm):
@@ -226,7 +237,7 @@ class VelocityGroup:
         if not np.isfinite(self.rate_ema):
             self.rate_ema = r          # first measurement: seed the EMA
         else:
-            g = AMR['rate_ema_gamma']
+            g = VelocityGroup._amr_cfg['rate_ema_gamma']
             self.rate_ema = g * self.rate_ema + (1.0 - g) * r
 
     def get_sibling(self):
@@ -366,7 +377,7 @@ class VelocityGroup:
 
         # Rate-based split veto: at equilibrium, KL noise would otherwise
         # eventually cross the accum threshold and force a needless split.
-        if self.rate_ema < AMR['rate_coarsen_threshold']:
+        if self.rate_ema < VelocityGroup._amr_cfg['rate_coarsen_threshold']:
             return
 
         if self.split_mode == 'octree':
