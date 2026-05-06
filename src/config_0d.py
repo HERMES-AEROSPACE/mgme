@@ -42,6 +42,14 @@ AMR = {
     # to live above the n_coll-driven noise floor ~ 1/sqrt(n_coll)) and the
     # tree coarsens cleanly. Doubles as a split veto inside accumulate_kl.
     'rate_coarsen_threshold': 0.0001,
+    # Splits also need rate_ema above this floor — set well above
+    # rate_coarsen_threshold to create a hysteresis band that suppresses
+    # post-equilibrium splits driven solely by kl_accum's monotonic creep.
+    # Without this, leaves keep splitting even after f is essentially
+    # Maxwellian, which produces a visible dip in the rendered Maxent
+    # entropy because every new leaf tightens the surrogate's max-entropy
+    # ceiling.
+    'rate_split_threshold': 0.005,
     'rate_ema_gamma': 0.9,
     # Structure-based veto on coarsening: if merging 8 children into the
     # parent would raise the Maxent entropy ceiling by more than this
@@ -55,7 +63,7 @@ AMR = {
     # 'octree' (default): each split halves all 3 axes simultaneously, 1->8 children.
     # 'binary': halve one axis per split, cycled by depth via split_axes (legacy mode).
     'split_mode': 'octree',
-    'split_axes': [0, 1, 2],  # binary mode only — axes cycled by depth
+    'split_axes': [0],  # binary mode only — axes cycled by depth
 }
 
 # Collision parameters

@@ -2,7 +2,8 @@
 import numpy as np
 
 
-def solve_group_newton(x_s, y_s, z_s, U, lam, max_iter=50, tol=1e-10):
+def solve_group_newton(x_s, y_s, z_s, U, lam, max_iter=50, tol=1e-10,
+                       accept_floor=1e-4):
     """
     Solve max-entropy weights directly via Newton iterations on dual.
 
@@ -35,19 +36,15 @@ def solve_group_newton(x_s, y_s, z_s, U, lam, max_iter=50, tol=1e-10):
 
     converged = False
     with np.errstate(over='ignore', invalid='ignore'):
+        # Initial state.
+        w = np.exp(lam @ phi)
+        if not np.all(np.isfinite(w)):
+            return w, lam, False, np.full(5, np.inf)
+        g = phi @ w - U
+        g_norm = np.linalg.norm(g)
+
         for iteration in range(max_iter):
-            # Compute weights from current lambda
-            w = np.exp(lam @ phi)
-
-            phi_w = phi @ w  # broadcast: each row of phi scaled by w
-            # Gradient: g = phi @ w - U  (moment residuals)
-            g = phi_w - U
-
-            # Convergence check. Also bail if w went non-finite — Newton
-            # has wandered into the overflow region and won't recover.
-            if not np.all(np.isfinite(w)):
-                return w, lam, False, g
-            if np.linalg.norm(g) < tol:
+            if g_norm < tol:
                 converged = True
                 break
 
@@ -55,10 +52,49 @@ def solve_group_newton(x_s, y_s, z_s, U, lam, max_iter=50, tol=1e-10):
             H = phi @ (w[:, None] * phi.T)
 
             try:
-                lam -= np.linalg.solve(H, g)
+                delta = np.linalg.solve(H, g)
             except np.linalg.LinAlgError:
                 return w, lam, False, g
 
-        w = np.exp(lam @ phi)
+            # Backtracking line search on ||g||. Pure Newton (step=1) often
+            # overshoots into the overflow region (lam @ phi > 709) when
+            # warm-started from a stale cache; halving accepts the Newton
+            # direction but tames the magnitude. Sufficient-decrease on the
+            # gradient norm is appropriate here because the dual is convex.
+            step = 1.0
+            accepted = False
+            for _ in range(20):
+                lam_trial = lam - step * delta
+                w_trial = np.exp(lam_trial @ phi)
+                if np.all(np.isfinite(w_trial)):
+                    g_trial = phi @ w_trial - U
+                    if np.all(np.isfinite(g_trial)):
+                        gt_norm = np.linalg.norm(g_trial)
+                        if gt_norm < g_norm:
+                            lam = lam_trial
+                            w = w_trial
+                            g = g_trial
+                            g_norm = gt_norm
+                            accepted = True
+                            break
+                step *= 0.5
+
+            if not accepted:
+                # Newton direction can't make progress even at step 2^-20.
+                # Either the local Hessian is misleading (saddle / near-
+                # singular) or we're at a discrete-sample-induced floor of
+                # the gradient norm. Accept the fit if the residual is
+                # already small enough for moment closure; bail otherwise.
+                if g_norm < accept_floor:
+                    return w, lam, True, g
+                return w, lam, False, g
+
+    # Loop exited via tol (converged) or via max_iter without convergence.
+    # When max_iter is hit, the absolute gradient is sometimes stuck at
+    # 1e-7..1e-4 on noisy small-mass cells — well below moment scale and
+    # adequate for closure. Accept those instead of forcing the caller to
+    # discard a usable fit.
+    if not converged and g_norm < accept_floor:
+        converged = True
 
     return w, lam, converged, g

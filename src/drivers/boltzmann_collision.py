@@ -195,7 +195,7 @@ def run_simulation():
                 continue
 
             if (leaf.kl_accum > KL_ACCUM_THRESHOLD and
-                    leaf.rate_ema > AMR['rate_coarsen_threshold']):
+                    leaf.rate_ema > AMR['rate_split_threshold']):
                 if leaf.split_mode == 'octree':
                     if leaf.can_split():
                         print(f't={t}: octree-splitting depth={leaf.depth} '

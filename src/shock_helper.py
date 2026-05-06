@@ -14,6 +14,7 @@ from .physics.moments import moments, moment_eq, calc_moment
 from .physics.grid import calculate_velocity_grid
 from .physics.maxent import solve_group_newton
 from .physics.collide import collide
+from .config_1d import THRESHOLDS
 
 
 def initialize_maxwellian(m_hat, n_hat, T_hat, v_hat, cx, cy, cz):
@@ -151,12 +152,12 @@ def calc_flux_int(num_groups, weights, offsets, x_sample, y_sample, z_sample):
     return F
 
 @jit(nopython=True)
-def calc_flux_analytical(lam_cache, bounds_list, num_groups, U_i):
+def calc_flux_analytical(lam_cache, bounds_list, num_groups, U_i, rho_floor):
     flux = np.zeros((num_groups, 5))
 
     for g in range(num_groups):
         lam = lam_cache[g]
-        if lam[4] >= 0.0 or U_i[g, 0] < 1e-5:
+        if lam[4] >= 0.0 or U_i[g, 0] < rho_floor:
             continue
 
         beta = -lam[4]
@@ -349,22 +350,49 @@ def generate_regular_samples(p, U_i, num_groups, bounds_list, lam_cache_i, n_sig
     y_sample = np.zeros(n_fine**3 * num_groups)
     z_sample = np.zeros(n_fine**3 * num_groups)
 
+    rho_floor = THRESHOLDS['cell_rho_floor']
+
     for i in range(num_groups):
         start_idx = int(offsets[i])
         end_idx = int(offsets[i+1])
 
         # Skip if density too small
-        if U_i[i, 0] <= 1e-5:
+        if U_i[i, 0] <= rho_floor:
+            num_valid_samples[i] = 0
+            weights[start_idx:end_idx] = 0.0
+            continue
+
+        # Realizability gate. The truncated-Maxent dual exists only when the
+        # discriminant mu[4]*mu[0] - sum(mu[1..3]^2) > 0 (equivalently T > 0
+        # before the 1e-10 clamp). Collision-sampling noise on small-mass
+        # groups can drive these moments onto or past the boundary; no
+        # solver — Newton, damped Newton, CVXPY — converges there. Skip
+        # silently and let the next collision/transport step refresh mu.
+        n_i = U_i[i, 0]
+        disc = U_i[i, 4] * n_i - (U_i[i, 1]**2 + U_i[i, 2]**2 + U_i[i, 3]**2)
+        if disc <= 0.0:
+            num_valid_samples[i] = 0
+            weights[start_idx:end_idx] = 0.0
+            continue
+
+        ux  = U_i[i, 1] / n_i
+        uy  = U_i[i, 2] / n_i
+        uz  = U_i[i, 3] / n_i
+
+        # Geometric infeasibility: a truncated Maxwellian over the box
+        # cannot have its mean outside the box. Diagnostics show edge groups
+        # occasionally land here from collision noise (e.g., ux=-6.95 on
+        # box [-15,-7]). Skip; reactivation will pick the group back up.
+        if not (bounds_list[i, 0] <= ux <= bounds_list[i, 1] and
+                bounds_list[i, 2] <= uy <= bounds_list[i, 3] and
+                bounds_list[i, 4] <= uz <= bounds_list[i, 5]):
             num_valid_samples[i] = 0
             weights[start_idx:end_idx] = 0.0
             continue
 
         success = False
 
-        ux  = U_i[i, 1] / U_i[i, 0]
-        uy  = U_i[i, 2] / U_i[i, 0]
-        uz  = U_i[i, 3] / U_i[i, 0]
-        T   = max(2 * (U_i[i, 4] / U_i[i, 0] - ux**2 - uy**2 - uz**2) / 3.0, 1e-10)
+        T   = max(2 * (U_i[i, 4] / n_i - ux**2 - uy**2 - uz**2) / 3.0, 1e-10)
         v_th = np.sqrt(T)
 
         xlo = np.max([ux - n_sigma * v_th, bounds_list[i, 0]]) + (1e-10 if i > 0 else 0)
@@ -385,12 +413,16 @@ def generate_regular_samples(p, U_i, num_groups, bounds_list, lam_cache_i, n_sig
             y_sub = GY.ravel()
             z_sub = GZ.ravel()
 
-            
+
             success, solution, dual_vals = solve_group_cvxpy(x_sub, y_sub, z_sub, U_i[i])
             dual_vals = -dual_vals
             lam = dual_vals.copy()
+            lam_source = 'cvxpy_seed'
         else:
             lam = lam_cache_i[i]
+            lam_source = 'warm_start'
+
+        lam_at_newton_in = lam.copy()
 
         # ──────────── Newton (project onto grid) ──────────────
         gx_fine = np.linspace(xlo, xhi, n_fine)
@@ -417,9 +449,40 @@ def generate_regular_samples(p, U_i, num_groups, bounds_list, lam_cache_i, n_sig
             z_sample[start_idx:end_idx] = z_slice
 
         if not success:
-            print(f'Cell {p}, Group {i}: Failed')
-            print(f'  moments: {U_i[i]}')
-            print(f'  rel error: {rel_err}')
+            # Current errors:
+            # - Solver ends fails groups with low density O(1e-4), O(1e-5) groups at the simulation boundary
+            # - With backtracking, residual error norms are on the order of 1e-4 to 1e-3 when failing.
+            # There is a user tuned gate when the iterations run through and we end with a residual of 1e-5 to 1e-6,
+            # to allow them through and return a 'good enough' result, especially at low densities.
+            
+            # box = (bounds_list[i, 0], bounds_list[i, 1],
+            #        bounds_list[i, 2], bounds_list[i, 3],
+            #        bounds_list[i, 4], bounds_list[i, 5])
+            # ux_in = (box[0] <= ux <= box[1])
+            # uy_in = (box[2] <= uy <= box[3])
+            # uz_in = (box[4] <= uz <= box[5])
+            # sol_finite = bool(np.all(np.isfinite(solution)))
+            # rel_finite = bool(np.all(np.isfinite(rel_err)))
+            # grad_norm = float(np.linalg.norm(rel_err)) if rel_finite else float('inf')
+            # if not sol_finite:
+            #     mode = 'overflow'           # weights went inf/nan in maxent.py:48
+            # elif not rel_finite:
+            #     mode = 'overflow_grad'      # gradient nonfinite but w briefly finite
+            # else:
+            #     mode = 'stuck'              # max_iter exhausted or LinAlgError
+            # print(f'Cell {p}, Group {i}: Failed [{mode}, lam_src={lam_source}]')
+            # print(f'  bounds:    x=[{box[0]:.3f},{box[1]:.3f}] '
+            #       f'y=[{box[2]:.3f},{box[3]:.3f}] '
+            #       f'z=[{box[4]:.3f},{box[5]:.3f}]')
+            # print(f'  moments:   {U_i[i]}')
+            # print(f'  u_eff:     ux={ux:.4f} (in={ux_in})  '
+            #       f'uy={uy:.4f} (in={uy_in})  uz={uz:.4f} (in={uz_in})')
+            # print(f'  T={T:.4f}  v_th={v_th:.4f}  '
+            #       f'sample_window=x[{xlo:.3f},{xhi:.3f}] '
+            #       f'y[{ylo:.3f},{yhi:.3f}] z[{zlo:.3f},{zhi:.3f}]')
+            # print(f'  lam_in:    {lam_at_newton_in}')
+            # print(f'  lam_out:   {lam}')
+            # print(f'  grad_norm: {grad_norm:.3e}   rel_err: {rel_err}')
             num_valid_samples[i] = 0
             weights[start_idx:end_idx] = 0.0
             lam_out[i] = np.zeros(5)
